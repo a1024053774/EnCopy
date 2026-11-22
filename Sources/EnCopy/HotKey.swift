@@ -29,7 +29,7 @@ final class HotKey {
         }
         id = HotKey.nextID
         HotKey.nextID += 1
-        let hotKeyID = EventHotKeyID(signature: OSType(0x5445_4E44), id: id) // "TEND"
+        let hotKeyID = EventHotKeyID(signature: OSType(0x454E_4350), id: id) // "ENCP"
         let status = RegisterEventHotKey(UInt32(shortcut.keyCode), UInt32(shortcut.carbonModifiers), hotKeyID,
                                          GetApplicationEventTarget(), 0, &ref)
         guard status == noErr, ref != nil else { return nil }
@@ -42,23 +42,14 @@ final class HotKey {
     }
 }
 
-/// A global shortcut: ⌃⌥T shows and hides the line, ⌃⌥F searches it. Either
-/// can be changed or removed.
+/// A global shortcut: ⌥C summons the line. It can be changed or removed.
 struct Shortcut: Equatable {
     var keyCode: Int
     var modifiers: NSEvent.ModifierFlags
-    /// The key as typed, for the menu: "t", " ", "1".
+    /// The key as typed, for the menu: "c", " ", "1".
     var key: String
 
-    static let standard = Shortcut(keyCode: kVK_ANSI_T, modifiers: [.control, .option], key: "t")
-    static let standardSearch = Shortcut(keyCode: kVK_ANSI_F, modifiers: [.control, .option], key: "f")
-
-    /// ⌘Z, for Put back while the pointer is on the line. A hot key is a key
-    /// on the keyboard, not a letter, so it is the key that types Z with
-    /// Command held in the layout in use: on AZERTY, where QWERTY has W.
-    static var putBack: Shortcut {
-        Shortcut(keyCode: keyCode(typing: "z") ?? kVK_ANSI_Z, modifiers: .command, key: "z")
-    }
+    static let standard = Shortcut(keyCode: kVK_ANSI_C, modifiers: [.option], key: "c")
 
     /// The key that types this letter with Command held, in a keyboard
     /// layout, by default the one in use.
@@ -82,16 +73,10 @@ struct Shortcut: Equatable {
         }
     }
 
-    /// The user's choice for showing the line. Nil means no shortcut at all.
+    /// The user's choice for summoning the line. Nil means no shortcut at all.
     static var current: Shortcut? {
         get { saved("shortcut") ?? standard }
         set { save(newValue, "shortcut") }
-    }
-
-    /// The user's choice for searching the line. Nil means no shortcut at all.
-    static var search: Shortcut? {
-        get { saved("searchShortcut") ?? standardSearch }
-        set { save(newValue, "searchShortcut") }
     }
 
     /// Nil when never changed, so the standard one applies; `.some(nil)`

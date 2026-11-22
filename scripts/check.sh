@@ -1,6 +1,6 @@
 #!/bin/bash
-# EnCopy's local checks, run after every change; three steps: the name
-# guard, the strings check, and the native checks.
+# EnCopy's local checks, run after every change; four steps: the name
+# guard, the one-key guard, the strings check, and the native checks.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/swift-sdk.sh
@@ -12,16 +12,27 @@ if grep -rIil 'tendedero' Package.swift Sources scripts .github --exclude=check.
     exit 1
 fi
 
-# 2. Every L("...") has a translation in both languages, and no language
+# 2. ⌥C is the only global key: one HotKey( call outside HotKey.swift, the
+#    Carbon registration only there, and no global monitor on key events.
+hotkey_calls="$(grep -rn '[[:<:]]HotKey(' Sources/ | grep -v 'Sources/EnCopy/HotKey.swift' | wc -l | tr -d ' ')"
+if [ "$hotkey_calls" != "1" ] \
+    || [ -n "$(grep -rln 'RegisterEventHotKey' Sources/ | grep -v 'Sources/EnCopy/HotKey.swift')" ] \
+    || grep -rn 'addGlobalMonitorForEvents' Sources/ | grep -qE 'keyDown|keyUp|flagsChanged'; then
+    echo "FAIL: EnCopy must register exactly one global hot key" >&2
+    exit 1
+fi
+
+# 3. Every L("...") has a translation in both languages, and no language
 #    keeps an entry the code no longer uses.
 swift scripts/check-strings.swift
 
-# 3. The native checks, without XCTest or the system clipboard. Watchers use
-#    only generated files in private test folders.
+# 4. The native checks, without XCTest or the system clipboard. Watchers use
+#    only generated files in private test folders, inside a home folder of
+#    their own so the user's Application Support stays untouched.
 CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/encopy-checks.XXXXXX")"
 trap 'rm -rf "$CHECK_DIR"' EXIT
 CHECK_APP="$CHECK_DIR/Checks.app"
-mkdir -p "$CHECK_APP/Contents/MacOS" "$CHECK_APP/Contents/Resources" "$CHECK_DIR/files"
+mkdir -p "$CHECK_APP/Contents/MacOS" "$CHECK_APP/Contents/Resources" "$CHECK_DIR/files" "$CHECK_DIR/home"
 cp -R Sources/EnCopy/Resources/en.lproj "$CHECK_APP/Contents/Resources/"
 cat > "$CHECK_APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,9 +45,9 @@ cat > "$CHECK_APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 SOURCES=()
-for name in Line LineView LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown; do
+for name in Line LineView LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown HotKey SearchBar Paste; do
     SOURCES+=("Sources/EnCopy/$name.swift")
 done
 swiftc -module-name EnCopy -target "$(uname -m)-apple-macosx14.0" -parse-as-library "${SOURCES[@]}" scripts/checks.swift \
     -o "$CHECK_APP/Contents/MacOS/Checks"
-"$CHECK_APP/Contents/MacOS/Checks" "$CHECK_DIR/files"
+CFFIXED_USER_HOME="$CHECK_DIR/home" "$CHECK_APP/Contents/MacOS/Checks" "$CHECK_DIR/files"

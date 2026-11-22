@@ -21,9 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var noteWatcher: NoteWatcher!
     private var signalSources: [DispatchSourceSignal] = []
     private var hotKey: HotKey?
-    /// ⌃⌥F searches the line. Fixed, apart from the shortcut that shows it.
-    private var searchHotKey: HotKey?
     private var searchBar: SearchBar!
+    private var paster: Paster!
+    private var pasteHint: PasteHint!
     private let zoom = Zoom()
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
@@ -85,15 +85,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         noteWatcher = NoteWatcher { [weak self] in self?.line.refreshNotes() }
         noteWatcher.start()
 
-        registerShortcut()
         searchBar = SearchBar(line: line)
-        searchBar.onReturn = { [weak self] in self?.copyFirstMatch() }
+        searchBar.onMove = { [weak self] in self?.line.movePick($0) }
+        searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
         searchBar.onEnd = { [weak self] in self?.endSearch(tuckAway: true) }
-        registerSearchShortcut()
+        paster = Paster(line: line)
+        paster.tuckAway = { [weak self] in self?.endSearch(tuckAway: true) }
+        paster.showHint = { [weak self] in
+            guard let self else { return }
+            self.pasteHint.show(on: self.panel.screen)
+        }
+        pasteHint = PasteHint()
+        registerShortcut()
 
         setUpStatusItem()
         watchMenuBarClicks()
-        watchPutBackKey()
 
         // Hang on EnCopy, in the menu of images in Finder and other apps.
         NSApp.servicesProvider = self
@@ -111,7 +117,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         line.onFall = { [weak self] item in self?.fall(item) }
         line.onHold = { [weak self] id in self?.hold(id) }
         line.onHangBack = { id in Held.hangBack(id) }
-        line.onUndoableAction = { [weak self] in self?.keepUndoAtPointer() }
 
         line.$items
             .receive(on: RunLoop.main)
@@ -378,9 +383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func itemsChanged() {
         updateStatusIcon()
         Held.forget(except: Set(line.items.filter { !$0.falling && $0.held }.map(\.id)))
-        guard line.liveCount == 0, !keepOpen, undoAnchor == nil else { return }
+        guard line.liveCount == 0, !keepOpen else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-            guard let self, self.line.liveCount == 0, !self.keepOpen, self.undoAnchor == nil else { return }
+            guard let self, self.line.liveCount == 0, !self.keepOpen else { return }
             self.wanted = false
             self.refresh()
         }
@@ -568,10 +573,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Tucked away by any means, a search under way ends with it.
             if searchBar?.isShown == true { endSearch(tuckAway: false) }
             zoom.hide()
-            undoAnchor = nil
-            holdPutBackKey(false)
             line.clearSelection()
-            holdSelectionKeys(false)
+            line.clearPick()
             pinned = false
             peekUntil = .distantPast
             panel.ignoresMouseEvents = true
@@ -587,36 +590,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: Searching the line
+    // MARK: Summoning the line
 
-
-    /// Brings the line down and opens the search field under it.
-    private func startSearch() {
-        if !isRevealed { toggle() }
-        keepOpen = true
-        pinned = true
-        searchBar.show(below: panel.frame)
-    }
-
-    /// Return copies the newest photo, note or link that matches, and the
-    /// line goes back up, as after picking a result in Spotlight.
-    private func copyFirstMatch() {
-        guard line.isSearching, let item = line.shown.last(where: { !$0.falling }) else { return }
-        line.copy(item.id)
-        endSearch(tuckAway: true)
-    }
-
-    /// The whole line comes back. With Escape it also tucks away; after a
-    /// click elsewhere it stays as it is.
-    private func endSearch(tuckAway: Bool) {
-        line.query = ""
-        searchBar.hide()
-        if tuckAway, isRevealed { setRevealed(false) }
-    }
-
-    @objc private func toggle() {
+    /// ⌥C, or the menu's first item: the line comes down on the screen under
+    /// the pointer, takes the keyboard without activating EnCopy, and the
+    /// newest item is picked. ⌥C again, Escape or a click elsewhere tucks
+    /// the line away.
+    private func summon() {
+        if searchBar?.isShown == true {
+            endSearch(tuckAway: true)
+            return
+        }
         if isRevealed {
-            setRevealed(false)
+            keepOpen = true
+            pinned = true
         } else {
             keepOpen = true
             wanted = true
@@ -626,6 +613,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refresh()
             reveal(pinned: true)
         }
+        line.pickNewest()
+        searchBar.show(below: panel.frame)
+    }
+
+    /// The whole line comes back. With Escape it also tucks away; after a
+    /// click elsewhere it stays as it is.
+    private func endSearch(tuckAway: Bool) {
+        line.query = ""
+        line.clearPick()
+        searchBar.hide()
+        if tuckAway, isRevealed { setRevealed(false) }
     }
 
     private func startMouseTracking() {
@@ -641,9 +639,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mouseTimer?.invalidate()
         mouseTimer = nil
         panel.ignoresMouseEvents = true
-        holdPutBackKey(false)
-        holdPhotoKeys(over: nil)
-        holdSelectionKeys(false)
     }
 
     /// How long the cursor rests against the top edge before the line comes
@@ -672,9 +667,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let handler: (NSEvent?) -> Void = { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                // A new click ends the previous menu interaction. If this
-                // click performs another undoable action it gets a new anchor.
-                self.releaseUndoAnchor()
                 let p = NSEvent.mouseLocation
                 guard NSScreen.screens.contains(where: { NSMouseInRect(p, Self.menuBarBand(of: $0), false) }) else { return }
                 self.menuBarSuppressed = true
@@ -705,9 +697,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let inRevealBand = screenUnderPointer.map { NSMouseInRect(mouse, Self.revealBand(of: $0), false) } ?? false
 
         guard isRevealed else {
-            holdPutBackKey(false)
-            holdPhotoKeys(over: nil)
-            holdSelectionKeys(false)
             line.closeGaps()
             // Resting in the middle of the menu bar brings the line down on
             // that screen. Pushing against the top edge is part of it, and it
@@ -742,19 +731,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var zone = panel.frame
         if let screen = panel.screen { zone.size.height = screen.frame.maxY - zone.minY }
         let inside = NSMouseInRect(mouse, zone, false)
-        // While searching, the keys belong to the search field: Space and
-        // Delete type, and ⌘Z undoes typing.
+        // While summoned, the keyboard belongs to the search field: the
+        // line stays pinned until the field is dismissed.
         let searching = searchBar?.isShown == true
-        let atUndoAnchor = isAtUndoAnchor(mouse)
         if inside && pinned && !searching { pinned = false }
-        holdPutBackKey((inside || atUndoAnchor) && !searching && !GrabView.isShowingMenu && !Share.shared.isOpen)
-        holdPhotoKeys(over: inside && !searching ? photo(under: mouse) : nil)
-        holdSelectionKeys(inside && !searching && !GrabView.isShowingMenu && !Share.shared.isOpen)
         // Gaps left by discarded photos close once the pointer moves away.
         if !inside { line.closeGaps() }
 
         // A search keeps the line down until Escape or a click elsewhere.
-        let busy = pinned || searching || atUndoAnchor || GrabView.isDragging || GrabView.isShowingMenu || Share.shared.isOpen
+        let busy = pinned || searching || GrabView.isDragging || GrabView.isShowingMenu || Share.shared.isOpen
             || line.pressedID != nil || now < peekUntil
         if inside || busy {
             awaySince = nil
@@ -845,136 +830,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !any { NSSound.beep() }
     }
 
-    // MARK: Keys over a photo
-
-    /// Delete and Space while the pointer rests on a photo: Delete does what
-    /// its corner button does, Space takes a quick look, as in Finder. Like
-    /// ⌘Z, they are borrowed as hot keys only then, so every other app keeps
-    /// them.
-    private var photoKeys: [HotKey] = []
-    private var photoKeysFor: UUID?
-
-    private func holdPhotoKeys(over id: UUID?) {
-        let id = id.flatMap { id in line.items.first { $0.id == id && !$0.falling && !$0.held }?.id }
-        guard id != photoKeysFor else { return }
-        photoKeysFor = id
-        photoKeys = []
-        guard let id else { return }
-        photoKeys = [
-            HotKey(Shortcut(keyCode: kVK_Delete, modifiers: [], key: "\u{8}")) { [weak self] in
-                guard let line = self?.line else { return }
-                let ids = line.selectedItems.map(\.id)
-                if ids.isEmpty { line.pressCorner(id) } else { line.discard(ids) }
-            },
-            HotKey(Shortcut(keyCode: kVK_Space, modifiers: [], key: " ")) { [weak self] in
-                self?.quickLookToggle(id)
-            },
-        ].compactMap { $0 }
-    }
-
-    /// Like Delete and undo, these belong to the line only while the
-    /// pointer is over it. Selection never takes focus from another app.
-    private var selectionKeys: [HotKey] = []
-    private var selectionKeysHeld = false
-
-    private func holdSelectionKeys(_ hold: Bool) {
-        let hold = hold && !line.selectedIDs.isEmpty
-        guard hold != selectionKeysHeld else { return }
-        selectionKeysHeld = hold
-        selectionKeys = []
-        guard hold else { return }
-        selectionKeys = [
-            HotKey(Shortcut(keyCode: kVK_Escape, modifiers: [], key: "\u{1b}")) { [weak self] in
-                self?.line.clearSelection()
-            },
-            HotKey(Shortcut(keyCode: kVK_ANSI_C, modifiers: [.command], key: "c")) { [weak self] in
-                guard let line = self?.line else { return }
-                line.copy(line.selectedItems.map(\.id))
-            },
-        ].compactMap { $0 }
-    }
-
-    /// The photo whose card is under the pointer, if any.
-    private func photo(under mouse: NSPoint) -> UUID? {
-        let local = panel.convertPoint(fromScreen: mouse)
-        let flipped = CGPoint(x: local.x, y: panel.frame.height - local.y)
-        return line.hitRects.first { $0.value.contains(flipped) }?.key
-    }
-
-    /// Space opens Quick Look, and closes it again if it is already open.
-    private func quickLookToggle(_ id: UUID) {
-        if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
-            panel.orderOut(nil)
-        } else {
-            line.quickLook(id)
-        }
-    }
-
     // MARK: Putting back
-
-    /// ⌘Z while the pointer is on the line or where its menu just closed.
-    /// The line never takes the keyboard, so it only borrows ⌘Z then as a
-    /// hot key. Everywhere else
-    /// ⌘Z stays the undo of the app you are in.
-    private var putBackKey: HotKey?
-    private var putBackMonitor: Any?
-    private var undoAnchor: (point: NSPoint, application: pid_t?)?
-
-    /// Key events delivered to EnCopy itself also need a route to undo,
-    /// such as after a menu activates it. The global hot key covers other
-    /// apps; this consumes only a local key in the same narrow undo scope.
-    private func watchPutBackKey() {
-        putBackMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.putBackKey != nil,
-                  !GrabView.isShowingMenu, !Share.shared.isOpen,
-                  Int(event.keyCode) == Shortcut.putBack.keyCode,
-                  event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command else { return event }
-            self.putBack()
-            return nil
-        }
-    }
-
-    private func keepUndoAtPointer() {
-        guard isRevealed else { return }
-        undoAnchor = (NSEvent.mouseLocation, NSWorkspace.shared.frontmostApplication?.processIdentifier)
-        holdPutBackKey(true)
-    }
-
-    /// A context menu can end below the photo band. Keep that spot part of
-    /// the undo interaction until the pointer moves, another app is chosen,
-    /// or a new click starts something else. Other apps keep their own undo.
-    private func isAtUndoAnchor(_ point: NSPoint) -> Bool {
-        guard let anchor = undoAnchor else { return false }
-        guard line.canPutBack,
-              abs(point.x - anchor.point.x) <= 12, abs(point.y - anchor.point.y) <= 12,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == anchor.application else {
-            releaseUndoAnchor()
-            return false
-        }
-        return true
-    }
-
-    private func releaseUndoAnchor() {
-        guard undoAnchor != nil else { return }
-        undoAnchor = nil
-        holdPutBackKey(false)
-        itemsChanged()
-    }
-
-    /// Set when another app holds ⌘Z, so it is not asked for again on every
-    /// tick, only the next time the pointer comes to the line.
-    private var putBackKeyRefused = false
-
-    private func holdPutBackKey(_ hold: Bool) {
-        guard hold && line.canPutBack else {
-            putBackKey = nil
-            putBackKeyRefused = false
-            return
-        }
-        guard putBackKey == nil, !putBackKeyRefused else { return }
-        putBackKey = HotKey(Shortcut.putBack) { [weak self] in self?.putBack() }
-        putBackKeyRefused = putBackKey == nil
-    }
 
     /// From the menu the line is usually up, so it comes down for a moment
     /// to show the photos going back.
@@ -994,47 +850,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func registerShortcut() {
         hotKey = nil
         guard let shortcut = Shortcut.current else { return }
-        hotKey = HotKey(shortcut) { [weak self] in self?.toggle() }
+        hotKey = HotKey(shortcut) { [weak self] in self?.summon() }
     }
 
-    private func registerSearchShortcut() {
-        searchHotKey = nil
-        guard let shortcut = Shortcut.search else { return }
-        searchHotKey = HotKey(shortcut) { [weak self] in self?.startSearch() }
-    }
-
+    /// The shortcut is off while recording, so pressing it records it
+    /// instead of summoning the line.
     private func changeShortcut() {
-        record(\.current, register: registerShortcut, other: registerSearchShortcut,
-               registered: { [weak self] in self?.hotKey != nil })
-    }
-
-    private func changeSearchShortcut() {
-        record(\.search, register: registerSearchShortcut, other: registerShortcut,
-               registered: { [weak self] in self?.searchHotKey != nil })
-    }
-
-    /// Both shortcuts are off while recording, so pressing either one
-    /// records it instead of showing or searching the line.
-    private func record(_ setting: ReferenceWritableKeyPath<Shortcut.Type, Shortcut?>,
-                        register: @escaping () -> Void, other: @escaping () -> Void,
-                        registered: @escaping () -> Bool) {
         hotKey = nil
-        searchHotKey = nil
-        ShortcutRecorder.shared.record { result in
-            // The other one first, so taking its keys fails below.
-            other()
+        ShortcutRecorder.shared.record { [weak self] result in
+            guard let self else { return }
             if let result {
-                let previous = Shortcut.self[keyPath: setting]
-                Shortcut.self[keyPath: setting] = result
-                register()
-                // Taken by another app, or by the other shortcut: keep the
-                // one that worked.
-                if result != nil && !registered() {
+                let previous = Shortcut.current
+                Shortcut.current = result
+                registerShortcut()
+                // Taken by another app: keep the one that worked.
+                if result != nil && hotKey == nil {
                     NSSound.beep()
-                    Shortcut.self[keyPath: setting] = previous
+                    Shortcut.current = previous
                 }
             }
-            register()
+            registerShortcut()
         }
     }
 
@@ -1094,21 +929,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
 
         let toggleItem = ClosureMenuItem(isRevealed ? L("Hide line") : L("Show line")) { [weak self] in
-            self?.toggle()
+            self?.summon()
         }
         if let shortcut = Shortcut.current, shortcut.key.count == 1 {
             toggleItem.keyEquivalent = shortcut.key
             toggleItem.keyEquivalentModifierMask = shortcut.modifiers
         }
         menu.addItem(toggleItem)
-
-        let searchItem = ClosureMenuItem(L("Search the line")) { [weak self] in self?.startSearch() }
-        if let shortcut = Shortcut.search, shortcut.key.count == 1 {
-            searchItem.keyEquivalent = shortcut.key
-            searchItem.keyEquivalentModifierMask = shortcut.modifiers
-        }
-        searchItem.isEnabled = line.liveCount > 0
-        menu.addItem(searchItem)
 
         let putBackItem = ClosureMenuItem(L("Put back"), key: "z") { [weak self] in
             self?.putBack()
@@ -1247,20 +1074,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let shortcutItem = NSMenuItem(title: L("Shortcut"), action: nil, keyEquivalent: "")
         let shortcuts = NSMenu()
-        // One for showing the line, one for searching it, each with its
-        // own Change Shortcut….
-        let shortcutKinds: [(String, Shortcut?, () -> Void)] = [
-            (L("Show line"), Shortcut.current, { [weak self] in self?.changeShortcut() }),
-            (L("Search the line"), Shortcut.search, { [weak self] in self?.changeSearchShortcut() }),
-        ]
-        for (i, kind) in shortcutKinds.enumerated() {
-            if i > 0 { shortcuts.addItem(.separator()) }
-            shortcuts.addItem(.sectionHeader(title: kind.0))
-            let current = NSMenuItem(title: kind.1?.display ?? L("None"), action: nil, keyEquivalent: "")
-            current.isEnabled = false
-            shortcuts.addItem(current)
-            shortcuts.addItem(ClosureMenuItem(L("Change Shortcut…"), handler: kind.2))
-        }
+        let current = NSMenuItem(title: Shortcut.current?.display ?? L("None"), action: nil, keyEquivalent: "")
+        current.isEnabled = false
+        shortcuts.addItem(current)
+        shortcuts.addItem(ClosureMenuItem(L("Change Shortcut…")) { [weak self] in self?.changeShortcut() })
         shortcutItem.submenu = shortcuts
         menu.addItem(shortcutItem)
 

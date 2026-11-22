@@ -252,6 +252,51 @@ final class Line: ObservableObject {
 
     func clearSelection() { selectedIDs.removeAll() }
 
+    // MARK: Picking with the keyboard
+
+    /// Set while the line is summoned: the one the arrow keys rest on.
+    @Published private(set) var pickedID: UUID?
+
+    /// What Return pastes. If the one picked has left the line or the
+    /// search, the newest stands in.
+    var picked: Pegged? {
+        guard pickedID != nil else { return nil }
+        let pool = pickable
+        return pool.first { $0.id == pickedID } ?? pool.last
+    }
+
+    /// What can be picked: what is shown, minus what is falling or held.
+    private var pickable: [Pegged] { shown.filter { !$0.falling && !$0.held } }
+
+    /// Summoned: the newest pickable is picked.
+    func pickNewest() {
+        pickedID = pickable.last?.id
+        followPick()
+    }
+
+    /// -1 is ←, +1 is →, as they hang on screen; stops at either end, no wrap.
+    func movePick(_ step: Int) {
+        let pool = pickable
+        guard let current = picked, let i = pool.firstIndex(where: { $0.id == current.id }) else { return }
+        pickedID = pool[min(pool.count - 1, max(0, i + step))].id
+        followPick()
+    }
+
+    func clearPick() { pickedID = nil }
+
+    /// On a line that scrolls, the picked card is kept in view.
+    private func followPick() {
+        guard Line.keepOnLine != nil, items.count > visibleCount, !isSearching,
+              let item = picked, let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let fromNewest = items.count - 1 - index
+        let anchored = Layout.anchorsPinned(pinnedLead, visible: visibleCount) ? pinnedLead : 0
+        guard index >= anchored else { return }
+        let room = CGFloat(max(0, fromNewest - (visibleCount - 1 - anchored)))
+        let low = room * Layout.spacing
+        let high = CGFloat(fromNewest) * Layout.spacing
+        scroll = min(max(scroll, low), high)
+    }
+
     // MARK: Actions on photos
 
     func copy(_ id: UUID) {

@@ -17,6 +17,8 @@ python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 | 构建并装到 `/Applications/EnCopy.app`，日常用的那份 | `scripts/install.sh` |
 | 打磁盘映像 | `scripts/make-dmg.sh` |
 
+本地检查在一个临时的 home 目录里跑，不读写真实的 `~/Library/Application Support/EnCopy`；绕过 `scripts/check.sh` 直接运行检查程序会报错退出。
+
 构建和检查都不需要 Xcode。只有 macOS 27 的 Command Line Tools 时，`scripts/swift-sdk.sh` 会让两个脚本改用 macOS 26 的 SDK。
 
 这台机器的 Xcode 27.2 在外置硬盘上。`/Applications/Xcode.app` 只是启动器，`xcode-select` 指的仍是 Command Line Tools。硬盘插着时可以让两个脚本用它，直接用 macOS 27 的 SDK 编译：
@@ -35,6 +37,17 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - PR 用 merge commit 合并：`gh pr merge --merge --delete-branch`。分支上的提交号合并后不变，工单里记的提交号一直有效。
 - 日常用的 EnCopy 在 `/Applications/EnCopy.app`，和 `build/` 里的开发版是同一个 bundle id，共用设置和数据，不能同时开。真机验收前先退出日常那份（菜单栏图标 → 退出 EnCopy），验收完再打开。
 - 真机验收的截图和录屏放 `evidence/<工单号>/`，这个目录不进 git：仓库是公开的，截图可能带到屏幕上别的内容。工单的 Resolution 写步骤、结果和文件名。
+
+## 真机走一遍
+
+用 `screencapture` 看屏幕，`cliclick` 动鼠标，再加 `evidence/tools/` 里几个小程序读辅助功能树、发按键（本地，不进 git）。走之前给 Devin 开「辅助功能」和「屏幕录制」。
+
+- 合成按键只在按下时带修饰键，抬起不带。抬起也带的话，系统会以为修饰键一直按着，之后的点击和打字全变成快捷键。`evidence/tools/mods` 能查看，`mods clear` 能清掉。
+- 点击要按住 120 毫秒左右（`cliclick dd:… w:120 du:…`）；没有按住时间的点击，有些界面不认。
+- 按键发给的是前台 App。发之前先确认前台是谁；用户正在用电脑时不发按键，改用辅助功能直接操作目标 App，或者等一等。
+- 辅助功能的授权认的是构建出的那一份，重新构建后要用户重新授权（[T-016](.project-map/tickets/T-016-stable-signing.md)）。所以先改完、构建好，再请用户授权。
+- 打开 `build/` 里的开发版，系统会把登录项改指到它。验收完重新打开 `/Applications` 那份，在它的菜单里把「登录时打开」关掉再打开一次。
+- 在微信里只用文件传输助手，只贴不发。输入框里可能有用户的草稿：贴完用 ⌘Z 撤掉，不要全选删除。
 
 ## 清缓存
 

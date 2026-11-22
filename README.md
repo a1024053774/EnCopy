@@ -6,7 +6,7 @@ EnCopy 是 macOS 上的剪贴板 App，正在做成这样：复制的东西和�
 
 ## 现在到哪了
 
-v1 还在做。当前版本换好了名字、图标和 bundle id（`app.encopy.EnCopy`），界面只留简体中文和英文，其余行为与 Tendedero 2.0.0 相同。⌥C 挑一件贴回、篮子、过期和清理按[规格](.project-map/specs/encopy-v1.md)逐步加上；进度看[项目地图](.project-map/MAP.md)，设计细节看[设计方案](design/encopy-design.html)。
+v1 还在做。当前版本换好了名字、图标和 bundle id（`app.encopy.EnCopy`），界面只留简体中文和英文。按 ⌥C 绳子落下来并拿到键盘，← → 挑一件，⏎ 贴回前台 App；直接贴要「辅助功能」权限，没有的话 ⏎ 只复制。⌥C 是唯一的全局快捷键。篮子、过期和清理按[规格](.project-map/specs/encopy-v1.md)逐步加上；进度看[项目地图](.project-map/MAP.md)，设计细节看[设计方案](design/encopy-design.html)。
 
 ## 构建
 
