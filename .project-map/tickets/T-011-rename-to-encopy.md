@@ -4,7 +4,7 @@ title: 改名成 EnCopy，原样能编译能跑
 type: build
 status: open
 blocked_by: []
-claimed_by:
+claimed_by: devin
 supersedes:
 ---
 

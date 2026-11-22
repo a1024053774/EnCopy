@@ -1,11 +1,11 @@
 // Checks the translations: every L("...") in the code has an entry in each
 // language, and no language keeps entries the code no longer uses.
-// A missing translation is only a warning, because the app shows the English
-// text instead. Everything else is an error.
+// EnCopy speaks exactly two languages, English and Simplified Chinese, and
+// both must be complete: a key missing from either one is an error.
 // Usage: swift scripts/check-strings.swift
 import Foundation
 
-let sources = URL(fileURLWithPath: "Sources/Tendedero")
+let sources = URL(fileURLWithPath: "Sources/EnCopy")
 let resources = sources.appendingPathComponent("Resources")
 let fm = FileManager.default
 
@@ -13,7 +13,6 @@ let fm = FileManager.default
 // checked, so it is reported too.
 var used = Set<String>()
 var problems: [String] = []
-var warnings: [String] = []
 let literal = try NSRegularExpression(pattern: #"\bL\(\s*"((?:[^"\\]|\\.)*)"\s*\)"#)
 let anyCall = try NSRegularExpression(pattern: #"\bL\("#)
 for case let file as URL in fm.enumerator(at: sources, includingPropertiesForKeys: nil)!
@@ -31,8 +30,12 @@ where file.pathExtension == "swift" && file.lastPathComponent != "Localization.s
     }
 }
 
+let expected = ["en.lproj", "zh-Hans.lproj"]
 let languages = try fm.contentsOfDirectory(atPath: resources.path)
     .filter { $0.hasSuffix(".lproj") }.sorted()
+if languages != expected {
+    problems.append("Resources must hold exactly en.lproj, zh-Hans.lproj; found \(languages.joined(separator: ", "))")
+}
 for folder in languages {
     let url = resources.appendingPathComponent(folder).appendingPathComponent("Localizable.strings")
     guard let table = NSDictionary(contentsOf: url) as? [String: String] else {
@@ -41,13 +44,11 @@ for folder in languages {
     }
     let keys = Set(table.keys)
     for key in used.subtracting(keys).sorted() {
-        let message = "\(folder): missing \"\(key)\""
-        if folder == "en.lproj" { problems.append(message) } else { warnings.append(message) }
+        problems.append("\(folder): missing \"\(key)\"")
     }
     for key in keys.subtracting(used).sorted() { problems.append("\(folder): unused \"\(key)\"") }
 }
 
-warnings.forEach { print("warning: \($0)") }
 if problems.isEmpty {
     print("\(used.count) strings, checked in \(languages.map { $0.replacingOccurrences(of: ".lproj", with: "") }.joined(separator: ", "))")
 } else {

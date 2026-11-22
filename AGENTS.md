@@ -8,6 +8,16 @@ EnCopy 是 [Tendedero](https://github.com/alejandrobujan/tendedero) 的 fork。�
 python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 ```
 
+## 命令
+
+| 做什么 | 命令 |
+| --- | --- |
+| 本地检查，每次改完都跑 | `scripts/check.sh` |
+| 构建 App，产物是 `build/EnCopy.app` | `scripts/build-app.sh` |
+| 打磁盘映像 | `scripts/make-dmg.sh` |
+
+构建和检查都不需要 Xcode。只有 macOS 27 的 Command Line Tools 时，`scripts/swift-sdk.sh` 会让两个脚本改用 macOS 26 的 SDK。
+
 ## Git
 
 - 远端：`origin` 是 `a1024053774/EnCopy`，地址走 `ssh.github.com:443`（这台机器连不上 22 端口）；`upstream` 是原仓库 `alejandrobujan/tendedero`，只拉不推。
