@@ -58,6 +58,6 @@ rm -rf .build build
 ```
 
 - `.build/` 是 SwiftPM 的编译缓存，`build/` 是构建出的 App 和磁盘映像，都能重新生成。
-- 检查脚本和构建脚本用的临时目录在正常结束时自己删；中途打断留下的 `encopy-*` 临时目录一并删掉。
+- 检查脚本和构建脚本用的临时目录、检查程序的偏好设置文件，在正常结束时自己删；中途打断留下的 `encopy-*` 临时目录和 `~/Library/Preferences/local.encopy.checks.plist` 一并删掉。
 - 真机验收时放到桌面的测试截图、挂到绳上的测试件，验收完删掉。`/Applications/EnCopy.app` 是日常用的那份，不删。
 - `evidence/` 是验收证据，不是缓存，不清。
