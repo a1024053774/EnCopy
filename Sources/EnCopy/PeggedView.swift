@@ -11,7 +11,7 @@ struct PeggedView: View {
     @State private var hovering = false
 
     private var copied: Bool { line.copiedIDs.contains(item.id) }
-    private var selected: Bool { line.selectedIDs.contains(item.id) }
+    private var selected: Bool { line.selectedIDs.contains(item.id) || line.picked?.id == item.id }
     private var dragging: Bool { line.draggingID == item.id }
 
     private var cornerSymbol: String {

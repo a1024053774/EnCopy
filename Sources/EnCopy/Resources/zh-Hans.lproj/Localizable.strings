@@ -104,5 +104,9 @@
 "Search the line" = "在晾衣绳上搜索";
 "%d of %d" = "%d / %d";
 
+/* Pasting back into the front app */
+"Copied. Press ⌘V to paste." = "已复制，按 ⌘V 粘贴";
+"Allow pasting…" = "去授权…";
+
 /* Zoom on hover */
 "Zoom on hover" = "悬停时放大";

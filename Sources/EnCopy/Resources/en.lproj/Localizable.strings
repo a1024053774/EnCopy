@@ -106,5 +106,9 @@
 "Search the line" = "Search the line";
 "%d of %d" = "%d of %d";
 
+/* Pasting back into the front app */
+"Copied. Press ⌘V to paste." = "Copied. Press ⌘V to paste.";
+"Allow pasting…" = "Allow pasting…";
+
 /* Zoom on hover */
 "Zoom on hover" = "Zoom on hover";

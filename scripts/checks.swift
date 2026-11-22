@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -341,6 +342,165 @@ struct CheckFailed: Error { let message: String }
         _ = eviction.hang(c, quietly: true)
         try check(eviction.selectedIDs.isEmpty && FileManager.default.fileExists(atPath: a.path), "Capacity eviction clears stale selection without deleting an external file")
         try checkDesktopCopies()
+        try checkSummon()
+    }
+
+    /// A note fixture adopted into the checks' own Notes folder, so `isText`
+    /// holds. It lives under the redirected home and goes away with it.
+    func adoptedNote(_ name: String, _ text: String) throws -> URL {
+        let dir = root.appendingPathComponent("note-src", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let src = dir.appendingPathComponent("\(name)-\(UUID().uuidString.prefix(8)).txt")
+        try text.write(to: src, atomically: true, encoding: .utf8)
+        guard let url = NoteFolder.adopt(src) else { throw CheckFailed(message: "Could not adopt the note fixture") }
+        return url
+    }
+
+    /// ⌥C summons the line: the newest hangs picked, ← → move the pick
+    /// without wrapping, ⏎ pastes it into the front app — sent only with
+    /// the Accessibility permission — and a long line scrolls to keep the
+    /// pick in view.
+    func checkSummon() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        try check(Shortcut.current == Shortcut(keyCode: kVK_ANSI_C, modifiers: [.option], key: "c"),
+                  "The one global shortcut is ⌥C")
+
+        // A, B, C hung in order: summoning picks the newest, and the arrows
+        // walk back and forth without wrapping at either end.
+        let pickLine = line()
+        let pa = try png("Pick A.png"), pb = try png("Pick B.png", red: 0.7), pc = try png("Pick C.png", red: 0.9)
+        _ = pickLine.hang(pa, quietly: true)
+        _ = pickLine.hang(pb, quietly: true)
+        _ = pickLine.hang(pc, quietly: true)
+        pickLine.pickNewest()
+        try check(pickLine.picked?.url == pc, "Summoning picks the newest item")
+        pickLine.movePick(-1)
+        try check(pickLine.picked?.url == pb, "Left moves the pick one older")
+        pickLine.movePick(-1)
+        try check(pickLine.picked?.url == pa, "Left again reaches the oldest")
+        pickLine.movePick(-1)
+        try check(pickLine.picked?.url == pa, "The pick stops at the oldest, no wrap")
+        pickLine.movePick(1)
+        try check(pickLine.picked?.url == pb, "Right moves the pick one newer")
+        pickLine.movePick(1)
+        pickLine.movePick(1)
+        try check(pickLine.picked?.url == pc, "The pick stops at the newest, no wrap")
+        pickLine.clearPick()
+        try check(pickLine.picked == nil, "Clearing leaves nothing picked")
+        pickLine.movePick(1)
+        try check(pickLine.picked == nil, "Moving with nothing picked picks nothing")
+
+        // What is taken down while picked yields the newest remaining.
+        pickLine.pickNewest()
+        pickLine.movePick(-1)
+        let pbID = pickLine.items.first { $0.url == pb }!.id
+        pickLine.discard(pbID)
+        try check(pickLine.picked?.url == pc, "A picked item taken down leaves the newest picked")
+
+        // Search narrows what can be picked: the newest match stands in.
+        let olderNote = try adoptedNote("older", "olderunique alphaword")
+        let newerNote = try adoptedNote("newer", "newerunique betaword")
+        let noteLine = line()
+        _ = noteLine.hang(olderNote, quietly: true)
+        _ = noteLine.hang(newerNote, quietly: true)
+        noteLine.pickNewest()
+        try check(noteLine.picked?.url == newerNote, "The pick starts at the newest note")
+        noteLine.query = "olderunique"
+        try check(noteLine.picked?.url == olderNote, "The pick follows what the search shows")
+        noteLine.query = ""
+        noteLine.pickNewest()
+
+        // Trusted: the line tucks away, then exactly one ⌘V is sent.
+        var order: [String] = []
+        var sent: [PasteKey] = []
+        var hints = 0
+        let pasteLine = line()
+        let qa = try png("Paste A.png"), qb = try png("Paste B.png", red: 0.7), qc = try png("Paste C.png", red: 0.9)
+        _ = pasteLine.hang(qa, quietly: true)
+        _ = pasteLine.hang(qb, quietly: true)
+        _ = pasteLine.hang(qc, quietly: true)
+        pasteLine.pickNewest()
+        pasteLine.movePick(-1)
+        let trusted = Paster(line: pasteLine, isTrusted: { true }, send: { key in
+            sent.append(key)
+            order.append("send")
+        })
+        trusted.tuckAway = { order.append("tuck") }
+        trusted.showHint = { hints += 1; order.append("hint") }
+        trusted.pastePicked()
+        try check(copiedURLs == [qb], "Pasting copies the picked item")
+        try check(sent == [.commandV] && sent.first?.flags == .maskCommand,
+                  "A trusted paste sends exactly one ⌘V")
+        try check(order == ["tuck", "send"], "The line tucks away before the key is sent")
+        try check(hints == 0, "A trusted paste shows no hint")
+        try check(PasteKey.commandV.strokes.count == 2
+                  && PasteKey.commandV.strokes[0] == (keyDown: true, flags: .maskCommand)
+                  && PasteKey.commandV.strokes[1] == (keyDown: false, flags: []),
+                  "The key up carries no modifier, so ⌘ is not left held")
+
+        // Untrusted: the note is copied, the hint shows once, no key is sent.
+        let unLine = line()
+        let unNote = try adoptedNote("untrusted", "untrusted paste keeps these words")
+        _ = unLine.hang(unNote, quietly: true)
+        unLine.pickNewest()
+        var sentUntrusted: [PasteKey] = []
+        var tucks = 0, untrustedHints = 0
+        let untrusted = Paster(line: unLine, isTrusted: { false }, send: { sentUntrusted.append($0) })
+        untrusted.tuckAway = { tucks += 1 }
+        untrusted.showHint = { untrustedHints += 1 }
+        untrusted.pastePicked()
+        try check(pasteboard.string(forType: .string) == "untrusted paste keeps these words",
+                  "An untrusted paste still copies the picked note")
+        try check(sentUntrusted.isEmpty && tucks == 1 && untrustedHints == 1,
+                  "Untrusted paste sends nothing and tucks away with one hint")
+
+        // Empty: nothing happens at all.
+        let emptyLine = line()
+        var emptyTucks = 0, emptySends = 0, emptyHints = 0
+        let empty = Paster(line: emptyLine, isTrusted: { true }, send: { _ in emptySends += 1 })
+        empty.tuckAway = { emptyTucks += 1 }
+        empty.showHint = { emptyHints += 1 }
+        let unchanged = pasteboard.changeCount
+        empty.pastePicked()
+        try check(emptyTucks == 0 && emptySends == 0 && emptyHints == 0 && pasteboard.changeCount == unchanged,
+                  "An empty line pastes nothing")
+
+        // A long line scrolls to keep the pick in view.
+        let scrollLine = line()
+        Line.keepOnLine = 25
+        scrollLine.maxItems = 25
+        scrollLine.visibleCount = 8
+        defer { Line.keepOnLine = nil }
+        for i in 0..<12 {
+            _ = scrollLine.hang(try png("Scroll \(i).png", red: CGFloat(i) / 12), quietly: true)
+        }
+        scrollLine.pickNewest()
+        try check(scrollLine.scroll == 0, "The newest pick shows the newest end")
+        for _ in 0..<8 { scrollLine.movePick(-1) }
+        try check(scrollLine.scroll == Layout.spacing, "Picking older scrolls the line one place")
+        for _ in 0..<8 { scrollLine.movePick(1) }
+        try check(scrollLine.scroll == 0, "Picking back to the newest scrolls home")
+
+        // ← and → belong to the pick; everything else stays with the field.
+        let bar = SearchBar(line: pickLine)
+        var moves: [Int] = []
+        bar.onMove = { moves.append($0) }
+        func keyDown(_ code: UInt16, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                             windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                             isARepeat: false, keyCode: code)!
+        }
+        try check(bar.takes(keyDown(UInt16(kVK_LeftArrow)), composing: false) && moves == [-1],
+                  "A plain left arrow moves the pick left")
+        try check(bar.takes(keyDown(UInt16(kVK_RightArrow)), composing: false) && moves == [-1, 1],
+                  "A plain right arrow moves the pick right")
+        moves = []
+        try check(!bar.takes(keyDown(UInt16(kVK_LeftArrow), [.shift]), composing: false) && moves.isEmpty,
+                  "Shift-left stays with the field")
+        try check(!bar.takes(keyDown(UInt16(kVK_LeftArrow)), composing: true) && moves.isEmpty,
+                  "An arrow while composing stays with the input method")
+        try check(!bar.takes(keyDown(0), composing: false) && moves.isEmpty,
+                  "A letter key stays with the field")
     }
 
     func checkDesktopCopies() throws {
@@ -515,7 +675,8 @@ struct CheckFailed: Error { let message: String }
 
 @main struct RunChecks {
     @MainActor static func main() {
-        guard Bundle.main.bundleIdentifier == "local.encopy.checks", CommandLine.arguments.count == 2 else {
+        guard Bundle.main.bundleIdentifier == "local.encopy.checks", CommandLine.arguments.count == 2,
+              NSHomeDirectory() != String(cString: getpwuid(getuid())!.pointee.pw_dir) else {
             fatalError("Run with scripts/check.sh")
         }
         _ = NSApplication.shared
