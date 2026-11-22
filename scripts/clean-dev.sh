@@ -1,7 +1,9 @@
 #!/bin/bash
 # Removes what the development copy (build/EnCopy Dev.app) keeps on this Mac:
-# its settings, its data folder and its permission records. The everyday copy
-# in /Applications has its own and is not touched.
+# its settings and its data folder. The everyday copy in /Applications has
+# its own and is not touched. The permissions macOS granted the development
+# copy stay: they are tied to its signature, which the next build shares.
+# To drop them too: tccutil reset All app.encopy.EnCopy.dev
 set -euo pipefail
 
 NAME="EnCopy Dev"
@@ -30,5 +32,4 @@ sleep 1
 defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true
 rm -f "$HOME/Library/Preferences/$BUNDLE_ID.plist"
 rm -rf "$HOME/Library/Application Support/$NAME"
-tccutil reset All "$BUNDLE_ID" >/dev/null 2>&1 || true
-echo "Removed the settings, data folder and permission records of $NAME"
+echo "Removed the settings and data folder of $NAME"

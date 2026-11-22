@@ -15,7 +15,8 @@ python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 | 本地检查，每次改完都跑 | `scripts/check.sh` |
 | 构建开发版，产物是 `build/EnCopy Dev.app` | `scripts/build-app.sh` |
 | 构建日常版并装到 `/Applications/EnCopy.app` | `scripts/install.sh` |
-| 退出开发版，删掉它的设置、数据文件夹和权限记录 | `scripts/clean-dev.sh` |
+| 退出开发版，删掉它的设置和数据文件夹 | `scripts/clean-dev.sh` |
+| 给本机构建一个固定的签名，每台机器跑一次 | `scripts/make-signing-identity.sh` |
 | 打磁盘映像 | `scripts/make-dmg.sh` |
 
 本地检查在一个临时的 home 目录里跑，不读写真实的 `~/Library/Application Support/EnCopy`；绕过 `scripts/check.sh` 直接运行检查程序会报错退出。
@@ -46,7 +47,7 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 合成按键只在按下时带修饰键，抬起不带。抬起也带的话，系统会以为修饰键一直按着，之后的点击和打字全变成快捷键。`evidence/tools/mods` 能查看，`mods clear` 能清掉。
 - 点击要按住 120 毫秒左右（`cliclick dd:… w:120 du:…`）；没有按住时间的点击，有些界面不认。
 - 按键发给的是前台 App。发之前先确认前台是谁；用户正在用电脑时不发按键，改用辅助功能直接操作目标 App，或者等一等。
-- 辅助功能的授权认的是构建出的那一份，重新构建后要用户重新授权（[T-016](.project-map/tickets/T-016-stable-signing.md)）。所以先改完、构建好，再请用户授权。开发版在系统设置里叫 EnCopy Dev，和 EnCopy 是两条。
+- 辅助功能的授权认的是签名。这台机器的构建用 `scripts/make-signing-identity.sh` 建的固定签名（[T-016](.project-map/tickets/T-016-stable-signing.md)），重新构建、重装后授权还在。EnCopy 和 EnCopy Dev 在系统设置里是两条，各授权一次。没建这个签名的机器上是 ad-hoc 签名，每次重新构建后都要用户把开关关掉再打开。
 - 开发版的设置是空的时，打开它会依次出现三个框：系统问能不能访问「桌面」文件夹（点「不允许」，验收用不到）、「让 EnCopy 接管你的截图？」、「也挂上你复制的内容？」。第二个框里的「登录时打开」默认勾着，先取消勾选再点按钮，开发版不进登录项。日常那份的登录项不受影响。
 - 开发版开着提示框时退不掉，`scripts/clean-dev.sh` 会停下并提示；关掉提示框再跑。
 - 在微信里只用文件传输助手，只贴不发。输入框里可能有用户的草稿：贴完用 ⌘Z 撤掉，不要全选删除。
@@ -62,6 +63,6 @@ scripts/clean-dev.sh
 
 - `.build/` 是 SwiftPM 的编译缓存，`build/` 是构建出的 App 和磁盘映像，都能重新生成。
 - 检查脚本和构建脚本用的临时目录、检查程序的偏好设置文件，在正常结束时自己删；中途打断留下的 `encopy-*` 临时目录和 `~/Library/Preferences/local.encopy.checks.plist` 一并删掉。
-- `scripts/clean-dev.sh` 删的是开发版的设置、数据文件夹和权限记录，真机验收时挂到开发版绳上的测试件跟着一起没了。日常那份的设置和数据它不碰。
+- `scripts/clean-dev.sh` 删的是开发版的设置和数据文件夹，真机验收时挂到开发版绳上的测试件跟着一起没了。日常那份的设置和数据它不碰。系统给开发版的权限（辅助功能、要不要访问「桌面」文件夹）它也不碰，下次构建接着用；要一起清掉，跑 `tccutil reset All app.encopy.EnCopy.dev`。
 - 真机验收时放到桌面的测试截图，验收完删掉。`/Applications/EnCopy.app` 是日常用的那份，不删。
 - `evidence/` 是验收证据，不是缓存，不清。
