@@ -88,18 +88,92 @@ final class Line: ObservableObject {
     /// The words of what hangs, read once per item.
     let search = SearchIndex()
     /// What is typed in the search field under the line.
-    @Published var query = ""
+    @Published var query = "" {
+        didSet { recomputeSearch() }
+    }
     var isSearching: Bool { !SearchIndex.words(query).isEmpty }
 
+    /// What the search found in the basket, oldest first: cards that are
+    /// not on the line.
+    @Published private(set) var basketCards: [Pegged] = []
+    /// The last search's answer for the line's own notes.
+    private var searchFound = History.Found()
+    /// Everything that matches, on the line and in the basket, shown or not.
+    private(set) var matchCount = 0
+    /// Everything there is to search: what hangs plus what is in the basket.
+    private(set) var totalCount = 0
+
     /// What hangs, narrowed by the search. A photo that is falling stays,
-    /// so its fall is not cut short.
+    /// so its fall is not cut short. While searching, the basket's matches
+    /// hang to the left of the line's own.
     var shown: [Pegged] {
         let words = SearchIndex.words(query)
         guard !words.isEmpty else { return items }
-        return items.filter { $0.falling || search.matches($0.url, words) }
+        return basketCards + items.filter { $0.falling || matches($0) }
     }
 
-    var shownCount: Int { shown.filter { !$0.falling }.count }
+    /// Whether a line item matches the words being searched: a note through
+    /// the history's answer, anything else through the index, as before.
+    private func matches(_ item: Pegged) -> Bool {
+        if isText(item.url) { return searchFound.onLine.contains(item.url) }
+        return search.matches(item.url, SearchIndex.words(query))
+    }
+
+    /// The search's basket half and counters, kept by the last query: run
+    /// when the query changes, when the line changes under a search, and
+    /// when the index finishes reading. The line's own matches come first;
+    /// the basket fills the room left across the screen.
+    private func recomputeSearch() {
+        let words = SearchIndex.words(query)
+        let liveText = items.filter { !$0.falling && isText($0.url) }.map(\.url)
+        var lineMatches = 0
+        if words.isEmpty {
+            basketCards = []
+            searchFound = History.Found()
+            lineMatches = liveCount
+        } else {
+            let found = history.search(words, onLine: liveText, limit: visibleCount)
+            searchFound = found
+            lineMatches = items.filter { !$0.falling && matches($0) }.count
+            let room = max(0, visibleCount - lineMatches)
+            var cards: [Pegged] = []
+            // Found.basket is newest first; the cards hang oldest of them
+            // left, newest next to the line. A card already shown keeps
+            // its identity, so it does not animate again.
+            for url in found.basket.prefix(room).reversed() {
+                if let kept = basketCards.first(where: { $0.url == url }) {
+                    cards.append(kept)
+                } else if let thumb = makeThumbnail(url) {
+                    cards.append(Pegged(url: url, thumb: thumb))
+                }
+            }
+            basketCards = cards
+        }
+        matchCount = lineMatches + searchFound.basketTotal
+        totalCount = liveCount + max(0, history.count - liveText.count)
+    }
+
+    /// A card the search shows from the basket: kept, not on the line.
+    func isInBasket(_ id: UUID) -> Bool {
+        basketCards.contains { $0.id == id }
+    }
+
+    /// A basket card used again — copied, pasted, taken down — comes back
+    /// onto the line as the newest, keeping its card and everything it
+    /// knows. Not searching, there is no basket to reclaim from.
+    private func reclaim(_ id: UUID, makingRoom: Bool = true) {
+        guard let i = basketCards.firstIndex(where: { $0.id == id }) else { return }
+        let item = basketCards.remove(at: i)
+        // Like hang: sweep fallen, the newest end, room made when asked.
+        sweepFallen()
+        items.append(item)
+        scroll = 0
+        history.use(item.url)
+        if makingRoom, liveCount > maxItems, let oldest = oldestLoose {
+            letGo(oldest.id)
+        }
+        save()
+    }
 
     /// Photos hung by hand. They hang together at the left end of the line,
     /// before the knot, and never fall to make room.
@@ -115,13 +189,20 @@ final class Line: ObservableObject {
     private let storeKey = "pegged"
     private let pasteboard: NSPasteboard
     private let desktop: URL
+    /// Every text note EnCopy keeps, on the line and in the basket.
+    let history: History
 
     init(pasteboard: NSPasteboard = .general,
-         desktop: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")) {
+         desktop: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop"),
+         history: History? = nil) {
         self.pasteboard = pasteboard
         self.desktop = desktop
+        self.history = history ?? History()
         restore()
-        search.onChange = { [weak self] in self?.objectWillChange.send() }
+        search.onChange = { [weak self] in
+            self?.recomputeSearch()
+            self?.objectWillChange.send()
+        }
         // What already hangs is read once, a moment after launch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.indexForSearch() }
     }
@@ -141,6 +222,7 @@ final class Line: ObservableObject {
         // The line moves anyway for a new photo, so the gaps close with it.
         sweepFallen()
         items.append(item)
+        if isText(url) { history.record(url) }
         scroll = 0
         // A full line lets the oldest photo fall off the far end. Only one: a
         // line hung on a wider screen keeps its length here instead of losing
@@ -157,6 +239,22 @@ final class Line: ObservableObject {
     func land(_ id: UUID) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         items[i].flying = false
+    }
+
+    /// The same words copied again: the item goes back to the head of the line, from wherever it
+    /// was. One that is pinned or held stays where you put it.
+    @discardableResult func rehang(_ url: URL) -> UUID? {
+        history.use(url)
+        guard let i = items.firstIndex(where: { $0.url == url && !$0.falling }) else {
+            return hang(url)
+        }
+        let item = items[i]
+        guard !item.kept, !item.held else { return item.id }
+        items.remove(at: i)
+        items.append(item)
+        scroll = 0
+        save()
+        return item.id
     }
 
     /// Called just before a photo starts falling, so the fall can be drawn
@@ -231,6 +329,7 @@ final class Line: ObservableObject {
     /// Photos whose file was deleted or moved away fall off by themselves.
     func prune() {
         for item in items where !item.falling && !FileManager.default.fileExists(atPath: item.url.path) {
+            if isText(item.url) { history.remove(item.url) }
             drop(item.id, quietly: true)
         }
     }
@@ -300,6 +399,7 @@ final class Line: ObservableObject {
     // MARK: Actions on photos
 
     func copy(_ id: UUID) {
+        reclaim(id)
         guard let item = items.first(where: { $0.id == id && !$0.falling }) else { return }
         copyPhotos([item])
     }
@@ -311,6 +411,7 @@ final class Line: ObservableObject {
     private func copyPhotos(_ photos: [Pegged]) {
         guard !photos.isEmpty else { return }
         putOnClipboard(photos.map(\.url))
+        for url in photos.map(\.url) where isText(url) { history.use(url) }
         flashCopied(photos)
     }
 
@@ -502,6 +603,9 @@ final class Line: ObservableObject {
             if let trashed { clipboardFollows(item.url, to: trashed as URL) }
             log.notice("Trashed \(item.url.lastPathComponent, privacy: .public)")
             if soundOn && !quietly { Line.trashSound?.play() }
+            // Out of the history before the line saves: the search must
+            // not find it again on the way down.
+            if isText(item.url) { history.remove(item.url) }
             drop(id, quietly: true)
             if let step, let index {
                 remember(TakenDown(url: item.url, index: index, trashed: trashed as URL?, kept: item.kept, byHand: item.byHand), in: step)
@@ -522,7 +626,8 @@ final class Line: ObservableObject {
     /// to the Trash, or the folder would fill up with forgotten screenshots.
     /// Files anywhere else, like the Desktop, stay where they are.
     func isInInbox(_ id: UUID) -> Bool {
-        guard let item = items.first(where: { $0.id == id }) else { return false }
+        guard let item = items.first(where: { $0.id == id }) ?? basketCards.first(where: { $0.id == id })
+        else { return false }
         // Copied text and links are EnCopy's own files too.
         return item.url.standardizedFileURL.path.hasPrefix(Inbox.folder.standardizedFileURL.path + "/")
             || NoteFolder.contains(item.url)
@@ -544,7 +649,8 @@ final class Line: ObservableObject {
     }
 
     func corner(of id: UUID) -> Corner {
-        guard let item = items.first(where: { $0.id == id }) else { return .hide }
+        guard let item = items.first(where: { $0.id == id }) ?? basketCards.first(where: { $0.id == id })
+        else { return .hide }
         if item.kept { return item.byHand ? .hide : .unpin }
         return isInInbox(id) ? .trash : .hide
     }
@@ -557,9 +663,11 @@ final class Line: ObservableObject {
     /// The corner cross and "Take down" both end up here. A pinned photo is
     /// never sent to the Trash: it only leaves the line.
     func discard(_ id: UUID, quietly: Bool = false, step: UUID = UUID()) {
+        reclaim(id, makingRoom: false)
         if isInInbox(id), items.first(where: { $0.id == id })?.kept == false {
             trash(id, quietly: quietly, step: step)
         } else if let item = items.first(where: { $0.id == id && !$0.falling }), let index = liveIndex(of: id) {
+            if isText(item.url) { history.remove(item.url) }
             drop(id, quietly: quietly)
             remember(TakenDown(url: item.url, index: index, trashed: nil, kept: item.kept, byHand: item.byHand), in: step)
         }
@@ -583,8 +691,13 @@ final class Line: ObservableObject {
 
     /// The oldest photo falling off a full line. Like the cross, a file from
     /// EnCopy's folder goes to the Trash, or nothing would ever take it out
-    /// of that folder. If the Trash refuses it, it still leaves the line.
+    /// of that folder — except text: it falls into the basket instead, file
+    /// and row kept. If the Trash refuses a photo, it still leaves the line.
     private func letGo(_ id: UUID) {
+        if let url = items.first(where: { $0.id == id })?.url, isText(url) {
+            drop(id, quietly: true)
+            return
+        }
         if isInInbox(id), trash(id, quietly: true, step: nil) { return }
         drop(id, quietly: true)
     }
@@ -633,6 +746,7 @@ final class Line: ObservableObject {
             } else {
                 try FileManager.default.moveItem(at: item.url, to: target)
                 clipboardFollows(item.url, to: target)
+                if isText(item.url) { history.remove(item.url) }
             }
             let identity = DesktopSave(target)
             desktopSaves[target.standardizedFileURL] = identity
@@ -678,6 +792,7 @@ final class Line: ObservableObject {
         guard let i = items.firstIndex(where: { $0.url == url && !$0.falling }),
               let thumb = makeThumbnail(url) else { return }
         items[i].thumb = thumb
+        if isText(url) { history.record(url) }
         indexForSearch()
     }
 
@@ -790,6 +905,7 @@ final class Line: ObservableObject {
             } else {
                 insert(item, atLiveIndex: photo.index)
             }
+            if isText(url) { history.record(url) }
             back.insert(item.id)
         }
         guard !back.isEmpty else {
@@ -964,6 +1080,7 @@ final class Line: ObservableObject {
         UserDefaults.standard.set(live.map(\.url.path), forKey: storeKey)
         UserDefaults.standard.set(live.filter(\.kept).map(\.url.path), forKey: keptKey)
         UserDefaults.standard.set(live.filter(\.byHand).map(\.url.path), forKey: byHandKey)
+        if isSearching { recomputeSearch() }
     }
 
     /// Everything comes back as it was. This runs before the line knows its
@@ -981,6 +1098,8 @@ final class Line: ObservableObject {
             item.kept = kept.contains(path) || item.byHand
             items.append(item)
         }
+        // Notes hung before the history existed get their rows here.
+        for item in items where isText(item.url) { history.record(item.url) }
         keepKeptFirst()
     }
 
