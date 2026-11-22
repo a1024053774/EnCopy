@@ -42,5 +42,5 @@ supersedes:
   3. ⌘⇧4 框一块屏幕。文件落在 `~/Library/Application Support/EnCopy/Screenshots/`，绳子放下来，截图夹在绳上（`walk-06-screenshot-hung.png`）。
   4. 复制两行文字，再复制一个网址。绳上先后多出一张便签和一张链接卡，菜单栏图标的说明从「晾衣绳上有 1 张」变到「3 张」，两段文字存进 `…/EnCopy/Notes/`（`walk-07-text-hung.png`、`walk-08-link-hung.png`）。指针停在菜单栏中段，三件一起挂在绳上（`walk-09-hover-all-three.png`）。
   5. 菜单里选「全部取下」，绳空了，两个文件夹也空了（`walk-12-after-cleanup.png`）。全程没有崩溃报告。
-  - 没分清的一点：合成的点击有几次没反应，菜单栏图标和菜单项都出现过，最后一次「全部取下」改用辅助功能的 AXPress 才按下去。是合成点击的时序问题还是 App 的问题没有分清；T-012 改「叫它来」时用手点菜单栏图标确认。
+  - 合成的点击有几次没反应，最后一次「全部取下」改用辅助功能的 AXPress 才按下去。T-012 真机时查清了，是验收工具的问题，不是 App 的：发 ⌘⇧4 的合成按键让系统以为 ⌘⇧ 一直按着，之后的点击都成了 ⌘⇧ 点击；另外没有按住时间的点击，有些界面不认。
 - **Xcode**：外置硬盘上的 Xcode 27.2 能用。`DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scripts/check.sh` 用 macOS 27 的 SDK 直接编译，不走 `scripts/swift-sdk.sh` 的替换，同样是 `80 checks passed`（`check-xcode27.log`）。
