@@ -30,7 +30,7 @@ swift scripts/check-strings.swift
 #    only generated files in private test folders, inside a home folder of
 #    their own so the user's Application Support stays untouched.
 CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/encopy-checks.XXXXXX")"
-trap 'rm -rf "$CHECK_DIR"' EXIT
+trap 'rm -rf "$CHECK_DIR"; rm -f "$HOME/Library/Preferences/local.encopy.checks.plist"' EXIT
 CHECK_APP="$CHECK_DIR/Checks.app"
 mkdir -p "$CHECK_APP/Contents/MacOS" "$CHECK_APP/Contents/Resources" "$CHECK_DIR/files" "$CHECK_DIR/home"
 cp -R Sources/EnCopy/Resources/en.lproj "$CHECK_APP/Contents/Resources/"
@@ -51,3 +51,10 @@ done
 swiftc -module-name EnCopy -target "$(uname -m)-apple-macosx14.0" -parse-as-library "${SOURCES[@]}" scripts/checks.swift \
     -o "$CHECK_APP/Contents/MacOS/Checks"
 CFFIXED_USER_HOME="$CHECK_DIR/home" "$CHECK_APP/Contents/MacOS/Checks" "$CHECK_DIR/files"
+# cfprefsd writes the checks' empty preferences file shortly after the app
+# exits; wait for it, then drop the domain so the trap leaves nothing.
+for _ in $(seq 1 30); do
+    [ -f "$HOME/Library/Preferences/local.encopy.checks.plist" ] && break
+    sleep 0.1
+done
+defaults delete local.encopy.checks >/dev/null 2>&1 || true
