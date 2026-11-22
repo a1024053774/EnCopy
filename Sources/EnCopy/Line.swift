@@ -245,16 +245,25 @@ final class Line: ObservableObject {
     /// was. One that is pinned or held stays where you put it.
     @discardableResult func rehang(_ url: URL) -> UUID? {
         history.use(url)
-        guard let i = items.firstIndex(where: { $0.url == url && !$0.falling }) else {
+        guard let item = items.first(where: { $0.url == url && !$0.falling }) else {
             return hang(url)
         }
-        let item = items[i]
-        guard !item.kept, !item.held else { return item.id }
-        items.remove(at: i)
-        items.append(item)
-        scroll = 0
-        save()
+        if moveToHead([item.id]) { scroll = 0 }
         return item.id
+    }
+
+    /// Used — pasted, copied out, or the same words copied again — items
+    /// go to the head of the line, several in the order they hung. What
+    /// is pinned or held stays where you put it. Returns whether any moved.
+    @discardableResult private func moveToHead(_ ids: [UUID]) -> Bool {
+        let ids = Set(ids)
+        let moving = items.filter { ids.contains($0.id) && !$0.falling && !$0.kept && !$0.held }
+        guard !moving.isEmpty else { return false }
+        let movingIDs = Set(moving.map(\.id))
+        items.removeAll { movingIDs.contains($0.id) }
+        items.append(contentsOf: moving)
+        save()
+        return true
     }
 
     /// Called just before a photo starts falling, so the fall can be drawn
@@ -408,10 +417,14 @@ final class Line: ObservableObject {
         copyPhotos(actionItems(ids))
     }
 
+    /// Copying is using: what is copied goes to the head of the line, so
+    /// the next ⌥C picks what the clipboard holds. Pasting copies first,
+    /// so it goes the same way.
     private func copyPhotos(_ photos: [Pegged]) {
         guard !photos.isEmpty else { return }
         putOnClipboard(photos.map(\.url))
         for url in photos.map(\.url) where isText(url) { history.use(url) }
+        moveToHead(photos.map(\.id))
         flashCopied(photos)
     }
 

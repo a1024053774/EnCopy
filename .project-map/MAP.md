@@ -29,6 +29,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - [T-014 EnCopy 的 bundle id](tickets/T-014-bundle-id.md): app.encopy.EnCopy
 - [T-017 开发版要不要用单独的数据位置](tickets/T-017-dev-copy-own-data.md): 单独放，开发完后删掉
 - [T-016 给本机构建一个固定的签名](tickets/T-016-stable-signing.md): 自签名证书放在单独的钥匙串里，构建时用它签；不动登录钥匙串
+- [T-019 绳上的一件贴出去后要不要挪到绳头](tickets/T-019-paste-moves-to-head.md): 挪；复制出去也挪，收藏的和拿在手上的不动
 
 ## Not yet specified
 
