@@ -4,7 +4,7 @@ title: 给本机构建一个固定的签名
 type: task
 status: open
 blocked_by: []
-claimed_by:
+claimed_by: devin
 supersedes:
 ---
 
