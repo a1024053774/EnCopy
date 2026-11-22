@@ -4,7 +4,7 @@ title: 复制的文字进篮子，重启后还能搜到
 type: build
 status: open
 blocked_by: [T-012]
-claimed_by:
+claimed_by: devin
 supersedes:
 ---
 

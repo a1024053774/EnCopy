@@ -80,7 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Inbox.isEnabled { Inbox.apply() }
         restoreSettingsOnTermination()
         startWatcher()
-        clipboardWatcher = ClipboardWatcher { [weak self] url in self?.hangCapture(url) }
+        clipboardWatcher = ClipboardWatcher(history: line.history,
+                                           onNew: { [weak self] url in self?.hangCapture(url) },
+                                           onAgain: { [weak self] url in self?.hangAgain(url) })
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() }
         noteWatcher = NoteWatcher { [weak self] in self?.line.refreshNotes() }
         noteWatcher.start()
@@ -154,11 +156,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !Inbox.wasOffered {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 self?.offerInbox()
-                self?.offerCopying()
+                self?.explainRecording()
             }
-        } else if !Self.copyingOffered {
-            // Updated from a version that only hung screenshots: shown once.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.offerCopying() }
+        } else if !Self.recordingExplained {
+            // Updated from a version that asked before keeping text: shown once.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.explainRecording() }
         } else if Self.shouldOfferLogin {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { Self.offerLogin() }
         }
@@ -272,48 +274,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if login?.state == .on { Self.openAtLogin() }
     }
 
-    // MARK: Hang what you copy
+    // MARK: Recording what you copy
 
-    private static let copyingOfferedKey = "copyingOffered"
-    private static var copyingOffered: Bool {
-        get { UserDefaults.standard.bool(forKey: copyingOfferedKey) }
-        set { UserDefaults.standard.set(newValue, forKey: copyingOfferedKey) }
+    private static let recordingExplainedKey = "recordingExplained"
+    private static var recordingExplained: Bool {
+        get { UserDefaults.standard.bool(forKey: recordingExplainedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: recordingExplainedKey) }
     }
 
     /// Asked once, on the first launch or the first after an update: what
-    /// you copy can hang too. Each kind is ticked and shown, but nothing is
-    /// kept until Turn on. Open at login rides along when it is due, so an
+    /// is kept and where. Open at login rides along when it is due, so an
     /// update asks one thing, not two.
-    private func offerCopying() {
-        Self.copyingOffered = true
+    private func explainRecording() {
+        Self.recordingExplained = true
         let alert = NSAlert()
-        alert.messageText = L("Hang what you copy too?")
-        alert.informativeText = L("Images, text and links you copy can hang on the line as well: text as a note, a link with its site. They stay on this Mac, and nothing is ever kept from a password field. Change it anytime under Hang what you copy in the menu bar.")
-        alert.addButton(withTitle: L("Turn on"))
-        alert.addButton(withTitle: L("Not now"))
+        alert.messageText = L("EnCopy keeps the text you copy")
+        alert.informativeText = String(format: L("Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images under Hang what you copy."),
+                                    (DataFolder.url.path as NSString).abbreviatingWithTildeInPath)
+        alert.addButton(withTitle: L("OK"))
+        alert.addButton(withTitle: L("Pause recording"))
         if let icon = NSImage(named: "EnCopy") ?? NSApp.applicationIconImage { alert.icon = icon }
-        let kinds: [(String, ReferenceWritableKeyPath<ClipboardWatcher.Type, Bool>)] = [
-            (L("Images"), \.imagesEnabled), (L("Text"), \.textEnabled), (L("Links"), \.linksEnabled),
-        ]
-        let boxes = kinds.map { kind -> NSButton in
-            let box = NSButton(checkboxWithTitle: kind.0, target: nil, action: nil)
-            box.state = .on
-            return box
-        }
         let login = Self.shouldOfferLogin ? NSButton(checkboxWithTitle: L("Open at login"), target: nil, action: nil) : nil
         login?.state = .on
         if login != nil { Self.loginOffered() }
-        let stack = NSStackView(views: boxes + (login.map { [$0] } ?? []))
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        // Open at login is a separate question: a little apart.
-        if login != nil { stack.setCustomSpacing(14, after: boxes[boxes.count - 1]) }
-        stack.frame = NSRect(x: 0, y: 0, width: 240, height: stack.fittingSize.height)
-        alert.accessoryView = stack
+        if let login {
+            login.frame = NSRect(x: 0, y: 0, width: 240, height: login.fittingSize.height)
+            alert.accessoryView = login
+        }
         NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            for (kind, box) in zip(kinds, boxes) { ClipboardWatcher.self[keyPath: kind.1] = box.state == .on }
+        if alert.runModal() == .alertSecondButtonReturn {
+            ClipboardWatcher.isPaused = true
             refreshClipboardWatcher()
         }
         if login?.state == .on { Self.openAtLogin() }
@@ -356,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
 
-    /// Watching the clipboard is opt in, from the menu bar only.
+    /// The clipboard is watched while recording is not paused and some kind is on.
     private func refreshClipboardWatcher() {
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() } else { clipboardWatcher.stop() }
         updateStatusIcon()
@@ -437,6 +427,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             self?.fly(id, from: from)
         }
+    }
+
+    /// The same words copied again: the item comes back to the head of the
+    /// line, from the basket if that is where it was.
+    private func hangAgain(_ url: URL) {
+        comeDown(on: nil)
+        line.rehang(url)
     }
 
     private func fly(_ id: UUID, from: CGRect) {
@@ -1002,9 +999,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.open(self.watcher.folder)
         })
 
-        // What you copy, in a section of its own: each kind is its own choice.
+        // What you copy, in a section of its own: pause is the one switch
+        // that stops all of it; each kind keeps its own choice below.
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: L("Hang what you copy")))
+        let pause = ClosureMenuItem(L("Pause recording")) { [weak self] in
+            ClipboardWatcher.isPaused.toggle()
+            self?.refreshClipboardWatcher()
+        }
+        pause.state = ClipboardWatcher.isPaused ? .on : .off
+        pause.toolTip = L("Nothing you copy is kept while this is on")
+        menu.addItem(pause)
         let kinds: [(String, String, ReferenceWritableKeyPath<ClipboardWatcher.Type, Bool>)] = [
             (L("Images"), L("Images you copy hang on the line too"), \.imagesEnabled),
             (L("Text"), L("Text you copy hangs on the line too"), \.textEnabled),

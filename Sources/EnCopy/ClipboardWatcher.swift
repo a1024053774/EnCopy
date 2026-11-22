@@ -1,18 +1,23 @@
 import AppKit
 import Carbon
 
-/// Hangs images copied to the clipboard, like a screenshot taken with Control
-/// held or an image copied in Preview. Each one is saved as a PNG in
-/// EnCopy's own folder, so on the line it behaves like any screenshot.
+/// Hangs what you copy: images as PNGs in EnCopy's own folder, text and
+/// links as notes, so on the line they behave like any screenshot.
 ///
-/// Off until the user turns it on. The pasteboard has no change notification,
-/// so its change count is checked twice a second; what was copied is only read
-/// once its types say it is a picture and nothing else.
+/// Text and links are recorded out of the box; images are opt in, and one
+/// switch pauses everything. The pasteboard has no change notification,
+/// so its change count is checked twice a second; what was copied is only
+/// read once its types say what it is and nothing private comes with it.
 @MainActor
 final class ClipboardWatcher {
-    private let onImage: (URL) -> Void
+    private let pasteboard: NSPasteboard
+    private let history: History
+    private let isSecureInput: () -> Bool
+    private let onNew: (URL) -> Void
+    /// The same words were already kept: the item comes back instead.
+    private let onAgain: (URL) -> Void
     private var timer: Timer?
-    private var lastCount = NSPasteboard.general.changeCount
+    private var lastCount: Int
     /// The last image saved. Some apps put the same image on the clipboard
     /// again; it hangs once, unless it has been taken down since.
     private var last: (png: Data, url: URL)?
@@ -21,6 +26,7 @@ final class ClipboardWatcher {
 
     private static let textKey = "clipboardTextEnabled"
     private static let linksKey = "clipboardLinksEnabled"
+    private static let pausedKey = "recordingPaused"
 
     /// Hang copied images.
     static var imagesEnabled: Bool {
@@ -28,22 +34,28 @@ final class ClipboardWatcher {
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
-    /// Hang copied text. Off until chosen: nothing you copy is kept on disk
-    /// unless you asked for it.
+    /// Hang copied text. On unless turned off: an explicit choice from
+    /// before is respected.
     static var textEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: textKey) }
+        get { UserDefaults.standard.object(forKey: textKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: textKey) }
     }
 
     /// Hang copied links: a copy that is one web address and nothing else.
-    /// Off until chosen, apart from text.
+    /// On unless turned off, apart from text.
     static var linksEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: linksKey) }
+        get { UserDefaults.standard.object(forKey: linksKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: linksKey) }
     }
 
-    /// The clipboard is watched while any kind is on.
-    static var isEnabled: Bool { imagesEnabled || textEnabled || linksEnabled }
+    /// Nothing is recorded while paused.
+    static var isPaused: Bool {
+        get { UserDefaults.standard.bool(forKey: pausedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pausedKey) }
+    }
+
+    /// The clipboard is watched while anything is on and recording is not paused.
+    static var isEnabled: Bool { !isPaused && (imagesEnabled || textEnabled || linksEnabled) }
 
     /// Copies that carry a picture but are not one. Text from a spreadsheet
     /// or a document also comes as an image of itself. A file copied in
@@ -62,14 +74,23 @@ final class ClipboardWatcher {
     private static let maxBytes = 64 * 1024 * 1024
     nonisolated private static let maxPixels = 80_000_000
 
-    init(onImage: @escaping (URL) -> Void) {
-        self.onImage = onImage
+    init(pasteboard: NSPasteboard = .general,
+         history: History,
+         isSecureInput: @escaping () -> Bool = { IsSecureEventInputEnabled() },
+         onNew: @escaping (URL) -> Void,
+         onAgain: @escaping (URL) -> Void) {
+        self.pasteboard = pasteboard
+        self.history = history
+        self.isSecureInput = isSecureInput
+        self.onNew = onNew
+        self.onAgain = onAgain
+        lastCount = pasteboard.changeCount
     }
 
     func start() {
         guard timer == nil else { return }
         // Whatever is on the clipboard already is old news.
-        lastCount = NSPasteboard.general.changeCount
+        lastCount = pasteboard.changeCount
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.check() }
         }
@@ -82,12 +103,15 @@ final class ClipboardWatcher {
         timer = nil
     }
 
-    private func check() {
-        let pb = NSPasteboard.general
+    func check() {
+        // Paused: nothing is recorded, and what was copied meanwhile is
+        // old news once recording resumes.
+        guard !Self.isPaused else { lastCount = pasteboard.changeCount; return }
+        let pb = pasteboard
         let count = pb.changeCount
         guard count != lastCount else { return }
         lastCount = count
-        if Self.textEnabled || Self.linksEnabled, let (text, rtf) = Self.copiedText(pb) {
+        if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if Note.webAddress(trimmed) != nil {
                 if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true) }
@@ -107,7 +131,7 @@ final class ClipboardWatcher {
             DispatchQueue.main.async {
                 // Copied over again in the meantime: that copy is the one that
                 // counts. Turned off in the meantime: nothing hangs.
-                guard let png, NSPasteboard.general.changeCount == count,
+                guard let png, self?.pasteboard.changeCount == count,
                       let self, self.timer != nil else { return }
                 self.save(png)
             }
@@ -119,9 +143,9 @@ final class ClipboardWatcher {
     /// also carries a picture, such as cells from a spreadsheet, is never
     /// text: it is up to the images switch.
     private static let maxChars = 100_000
-    private static func copiedText(_ pb: NSPasteboard) -> (String, Data?)? {
+    private func copiedText(_ pb: NSPasteboard) -> (String, Data?)? {
         guard let items = pb.pasteboardItems, !items.isEmpty,
-              !IsSecureEventInputEnabled(),
+              !isSecureInput(),
               pb.availableType(from: [.png, .tiff]) == nil else { return nil }
         let blocked: Set<NSPasteboard.PasteboardType> = [
             .fileURL, selfCopyType,
@@ -134,8 +158,8 @@ final class ClipboardWatcher {
         guard items.allSatisfy({ blocked.isDisjoint(with: $0.types) }),
               let text = pb.string(forType: .string),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              text.count <= maxChars else { return nil }
-        return (text, richData(pb))
+              text.count <= Self.maxChars else { return nil }
+        return (text, Self.richData(pb))
     }
 
     /// The styled version of what was copied, as RTF, when there is one.
@@ -153,11 +177,10 @@ final class ClipboardWatcher {
                                documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
     }
 
-    private var lastText: String?
-
     /// Notes and links go to their own folder, apart from the screenshots.
+    /// The same words again add nothing: the kept note comes back instead.
     private func save(text: String, rtf: Data?, link: Bool) {
-        if let last, FileManager.default.fileExists(atPath: last.url.path), lastText == text { return }
+        if let kept = history.note(holding: text) { onAgain(kept); return }
         let ext = rtf == nil ? "txt" : "rtf"
         let name = link ? "Link" : "Text"
         let fm = FileManager.default
@@ -172,9 +195,8 @@ final class ClipboardWatcher {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try (rtf ?? Data(text.utf8)).write(to: url, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            last = (Data(), url)
-            lastText = text
-            onImage(url)
+            history.record(url, text: text)
+            onNew(url)
         } catch {
             try? fm.removeItem(at: url)
             log.error("Could not save copied text: \(error.localizedDescription, privacy: .public)")
@@ -205,7 +227,7 @@ final class ClipboardWatcher {
             // What people copy can be private: only they can read it.
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             last = (png, url)
-            onImage(url)
+            onNew(url)
         } catch {
             try? fm.removeItem(at: url)
             log.error("Could not save a copied image: \(error.localizedDescription, privacy: .public)")

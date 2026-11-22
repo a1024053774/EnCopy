@@ -1,10 +1,11 @@
 import AppKit
 import Vision
 
-/// The words on what hangs, so the line can be searched. A screenshot's are
-/// read once with the system's text recognition when it hangs, on this Mac
-/// and in the background, and kept on disk with the date of the file they
-/// came from. A note's or a link's are its own, read as they are.
+/// The words on the non-text items that hang, so the line can be searched.
+/// A screenshot's or a recording's are read once with the system's text
+/// recognition when it hangs, on this Mac and in the background, and kept
+/// on disk with the date of the file they came from. A note's words are
+/// the history's, not this index's.
 ///
 /// Recognition settings follow JOHN-AMAO's search in #3.
 @MainActor
@@ -76,17 +77,10 @@ final class SearchIndex {
     }
 
     /// Whether an item has every word of the search, ignoring case, accents
-    /// and width: "menu" finds "Menú".
+    /// and width: "menu" finds "Menú". Only non-text items are asked: a
+    /// note's words are the history's.
     func matches(_ url: URL, _ words: [String]) -> Bool {
-        let text: String
-        if isText(url) {
-            guard let note = Note.cached(url) else { return false }
-            var parts = [note.title, note.body]
-            if let link = note.link { parts += [link.host ?? "", link.path] }
-            text = Self.fold(parts.joined(separator: "\n"))
-        } else {
-            text = entries[url.path]?.text ?? ""
-        }
+        let text = entries[url.path]?.text ?? ""
         return words.allSatisfy { text.contains($0) }
     }
 

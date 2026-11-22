@@ -344,6 +344,7 @@ struct CheckFailed: Error { let message: String }
         try checkDesktopCopies()
         try checkSummon()
         try checkDataFolder()
+        try checkHistory()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -679,6 +680,339 @@ struct CheckFailed: Error { let message: String }
         try check(NoteFolder.url.standardizedFileURL.path
                   == DataFolder.url.appendingPathComponent("Notes", isDirectory: true).standardizedFileURL.path,
                   "Notes are kept in the data folder")
+    }
+
+    /// Copied text, links and code: recorded out of the box, merged when
+    /// the same words come again, kept in a history that outlives the
+    /// line's length, and still found by the search after a restart.
+    func checkHistory() throws {
+        // Each scenario gets its own defaults, history file and line, so
+        // nothing one check leaves can be mistaken for another's result.
+        func freshLine(_ name: String, maxItems: Int = 100) -> Line {
+            UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+            UserDefaults.standard.set(true, forKey: "soundOff")
+            let desktop = root.appendingPathComponent("desktop-\(name)", isDirectory: true)
+            try! FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
+            let line = Line(pasteboard: pasteboard, desktop: desktop,
+                            history: History(file: root.appendingPathComponent("\(name).sqlite")))
+            line.maxItems = maxItems
+            line.visibleCount = 8
+            line.revealed = true
+            return line
+        }
+        func watcher(for line: Line,
+                     secure: @escaping () -> Bool = { false },
+                     onNew: ((URL) -> Void)? = nil,
+                     onAgain: ((URL) -> Void)? = nil) -> ClipboardWatcher {
+            ClipboardWatcher(pasteboard: pasteboard, history: line.history, isSecureInput: secure,
+                             onNew: onNew ?? { url in _ = line.hang(url, quietly: true) },
+                             onAgain: onAgain ?? { url in _ = line.rehang(url) })
+        }
+        func copyText(_ text: String, types: [NSPasteboard.PasteboardType] = []) {
+            let item = NSPasteboardItem()
+            item.setString(text, forType: .string)
+            for type in types { item.setData(Data(), forType: type) }
+            pasteboard.clearContents()
+            pasteboard.writeObjects([item])
+        }
+        defer { ClipboardWatcher.isPaused = false }
+
+        // 1. Out of the box: text and links are recorded, images still ask.
+        let first = freshLine("first")
+        try check(!ClipboardWatcher.imagesEnabled && ClipboardWatcher.textEnabled
+                  && ClipboardWatcher.linksEnabled && !ClipboardWatcher.isPaused,
+                  "Text and links are recorded out of the box; images still ask first")
+        let firstWatcher = watcher(for: first)
+        copyText("basket baseline words")
+        firstWatcher.check()
+        try check(first.liveCount == 1 && first.items[0].url.pathExtension == "txt",
+                  "A copied text hangs as a note")
+        try check(try String(contentsOf: first.items[0].url, encoding: .utf8) == "basket baseline words",
+                  "The note file holds exactly the copied text")
+        copyText("https://example.com/some/page")
+        firstWatcher.check()
+        try check(first.items.contains { Note.cached($0.url)?.link != nil },
+                  "A copied link hangs as a link")
+        try check(first.history.count == 2, "Both copies are in the history")
+
+        // 2. What must never be kept, each with proof the same words
+        //    without the marker are recorded.
+        func excluded(_ label: String, secure: Bool = false,
+                      types: [NSPasteboard.PasteboardType] = []) throws {
+            let line = freshLine(label)
+            let words = "hidden \(label) words"
+            let blocked = watcher(for: line, secure: { secure })
+            copyText(words, types: types)
+            blocked.check()
+            try check(line.liveCount == 0 && line.history.count == 0,
+                      "\(label): nothing is recorded")
+            let allowed = watcher(for: line)
+            copyText(words)
+            allowed.check()
+            try check(line.liveCount == 1 && line.history.count == 1,
+                      "\(label): the same words without the marker are recorded")
+        }
+        try excluded("secure input", secure: true)
+        try excluded("concealed copies", types: [.init("org.nspasteboard.ConcealedType")])
+        try excluded("transient copies", types: [.init("org.nspasteboard.TransientType")])
+        try excluded("remote clipboard", types: [.init("com.apple.is-remote-clipboard")])
+
+        // 3. Paused: nothing is recorded until it is resumed.
+        let pause = freshLine("pause")
+        let pauseWatcher = watcher(for: pause)
+        ClipboardWatcher.isPaused = true
+        copyText("while recording is paused")
+        pauseWatcher.check()
+        try check(!ClipboardWatcher.isEnabled && pause.liveCount == 0 && pause.history.count == 0,
+                  "Paused: the watcher is off and nothing is recorded")
+        ClipboardWatcher.isPaused = false
+        copyText("after recording resumes")
+        pauseWatcher.check()
+        try check(ClipboardWatcher.isEnabled && pause.liveCount == 1,
+                  "Resumed: the next copy is recorded")
+
+        // 4. A full line drops text into the basket, not the Trash.
+        let basket = freshLine("basket", maxItems: 3)
+        var saved: [URL] = []
+        let basketWatcher = watcher(for: basket, onNew: { url in
+            saved.append(url)
+            _ = basket.hang(url, quietly: true)
+        })
+        for n in 1...5 {
+            copyText("basket words \(n) tail\(n)")
+            basketWatcher.check()
+        }
+        try check(basket.liveCount == 3, "Three texts hang on a line of three")
+        try check(saved.count == 5 && saved.allSatisfy { FileManager.default.fileExists(atPath: $0.path) },
+                  "All five note files still exist, none went to the Trash")
+        try check(basket.history.count == 5, "The history keeps all five, basket included")
+        let mode = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("basket.sqlite").path)[.posixPermissions] as? NSNumber
+        try check(mode?.intValue == 0o600, "The history file is private to the user")
+
+        // 5. The same words again add nothing: the kept item comes back.
+        copyText("basket words 1 tail1")
+        basketWatcher.check()
+        try check(basket.history.count == 5 && saved.count == 5,
+                  "Copying a basket item's words again adds no row and no file")
+        try check(basket.items.last?.url == saved[0] && basket.liveCount == 3,
+                  "The basket item comes back as the newest on the line")
+        copyText("basket words 4 tail4")
+        basketWatcher.check()
+        try check(basket.items.last?.url == saved[3] && basket.history.count == 5,
+                  "Copying a line item's words again makes it newest, nothing added")
+        copyText("BASKET WORDS 4 TAIL4")
+        basketWatcher.check()
+        try check(basket.history.count == 6, "The same words in a different case are a new item")
+
+        // 6. The search finds the basket; Return pastes the pick.
+        let seek = freshLine("seek", maxItems: 3)
+        var seekSaved: [URL] = []
+        let seekWatcher = watcher(for: seek, onNew: { url in
+            seekSaved.append(url)
+            _ = seek.hang(url, quietly: true)
+        })
+        let seekTexts = [
+            "shared basket maple 一丁",
+            "quantum notebook violet",
+            "shared line item",
+            "plain text here",
+            "another normal note",
+        ]
+        for text in seekTexts {
+            copyText(text)
+            seekWatcher.check()
+        }
+        // The card that just fell off finishes falling, so the search
+        // below sees only what hangs and what is in the basket.
+        pump(0.7)
+        seek.closeGaps()
+        seek.query = "maple"
+        try check(seek.shown.map(\.url) == [seekSaved[0]] && seek.basketCards.count == 1,
+                  "A basket item's words show exactly its card")
+        seek.query = "一丁"
+        try check(seek.basketCards.map(\.url) == [seekSaved[0]],
+                  "A two-character search finds its basket item")
+        seek.query = "shared"
+        try check(seek.basketCards.map(\.url) == [seekSaved[0]]
+                  && seek.shown.map(\.url) == [seekSaved[0], seekSaved[2]]
+                  && seek.matchCount == 2,
+                  "A match in the basket hangs left of the one on the line")
+        try check(seek.totalCount == 5, "The total counts what hangs and what is in the basket")
+        seek.query = "ＭＡＰＬＥ"
+        try check(seek.basketCards.map(\.url) == [seekSaved[0]],
+                  "A full-width query finds the same basket item")
+        seek.query = "maple"
+        seek.pickNewest()
+        var sent: [PasteKey] = []
+        var order: [String] = []
+        let trusted = Paster(line: seek, isTrusted: { true }, send: { key in
+            sent.append(key)
+            order.append("send")
+        })
+        trusted.tuckAway = { order.append("tuck") }
+        trusted.pastePicked()
+        try check(pasteboard.string(forType: .string) == seekTexts[0],
+                  "Pasting the basket card copies exactly its text")
+        try check(sent == [.commandV] && order == ["tuck", "send"],
+                  "The picked basket card pastes with one ⌘V after the line tucks")
+        try check(seek.items.last?.url == seekSaved[0] && seek.liveCount == 3,
+                  "After pasting, the item hangs on the line as the newest")
+
+        // 7. Taking a basket card down trashes file and row; Put back
+        //    returns both, and the search finds it again.
+        let down = freshLine("down", maxItems: 2)
+        var downSaved: [URL] = []
+        let downWatcher = watcher(for: down, onNew: { url in
+            downSaved.append(url)
+            _ = down.hang(url, quietly: true)
+        })
+        for n in 1...3 {
+            copyText("take down words \(n) uniq\(n)")
+            downWatcher.check()
+        }
+        down.query = "uniq1"
+        try check(down.basketCards.map(\.url) == [downSaved[0]], "The basket card is found")
+        down.pressCorner(down.basketCards[0].id)
+        pump(0.7)
+        down.closeGaps()
+        try check(!FileManager.default.fileExists(atPath: downSaved[0].path) && down.history.count == 2,
+                  "Taking the basket card down trashes its file and its row")
+        try check(down.basketCards.isEmpty && !down.shown.contains { $0.url == downSaved[0] },
+                  "The search no longer shows it")
+        down.putBack()
+        try check(FileManager.default.fileExists(atPath: downSaved[0].path) && down.history.count == 3,
+                  "Put back restores the file and its row")
+        try check(down.shown.contains { $0.url == downSaved[0] }, "The search finds it again")
+        // Taking a line text down while not searching leaves no row
+        // either: with no search running, nothing else would sweep it.
+        down.query = ""
+        copyText("line trash words gone")
+        downWatcher.check()
+        let doomed = down.items.first { $0.url == downSaved[3] }!
+        down.pressCorner(doomed.id)
+        try check(!FileManager.default.fileExists(atPath: downSaved[3].path) && down.history.count == 3,
+                  "Taking a line text down trashes its file and its row too")
+
+        // 8. Reopen: the same files hang and the basket is still found.
+        let reopen = freshLine("reopen", maxItems: 2)
+        var reopenSaved: [URL] = []
+        let reopenWatcher = watcher(for: reopen, onNew: { url in
+            reopenSaved.append(url)
+            _ = reopen.hang(url, quietly: true)
+        })
+        for n in 1...3 {
+            copyText("reopen words \(n) mark\(n)")
+            reopenWatcher.check()
+        }
+        // A second connection to the same file and a line built without
+        // wiping defaults, as after quitting and reopening.
+        let reopened = Line(pasteboard: pasteboard,
+                            desktop: root.appendingPathComponent("desktop-reopen2", isDirectory: true),
+                            history: History(file: root.appendingPathComponent("reopen.sqlite")))
+        reopened.maxItems = 2
+        reopened.visibleCount = 8
+        try check(reopened.items.filter { !$0.falling }.map(\.url)
+                  == reopen.items.filter { !$0.falling }.map(\.url),
+                  "A reopened line hangs the same items")
+        reopened.query = "mark1"
+        try check(reopened.basketCards.map(\.url) == [reopenSaved[0]],
+                  "A reopened history still finds the basket item")
+        try check(reopened.history.count == 3, "The reopened history kept its rows")
+        reopened.query = "mark3"
+        try check(reopened.shown.contains { $0.url == reopenSaved[2] },
+                  "A line note is found by its words after reopening")
+
+        // 9. Scale: two hundred texts, the line holds eight, the history all.
+        let scale = freshLine("scale", maxItems: 8)
+        var scaleSaved: [URL] = []
+        let scaleWatcher = watcher(for: scale, onNew: { url in
+            scaleSaved.append(url)
+            _ = scale.hang(url, quietly: true)
+        })
+        func chineseTag(_ n: Int) -> String {
+            let digits = String(format: "%03d", n)
+            let kanji: [Character: Character] = ["0": "零", "1": "一", "2": "二", "3": "三", "4": "四",
+                                                 "5": "五", "6": "六", "7": "七", "8": "八", "9": "九"]
+            return String(digits.map { kanji[$0]! })
+        }
+        // Two hundred texts of the same shape, each with a tag of its own:
+        // the 150th is found among the alike, not by a mark only it has.
+        var scaleTexts: [String] = []
+        for n in 1...200 {
+            let text = "第\(n)条 大家都有的字 标\(chineseTag(n))号"
+            scaleTexts.append(text)
+            copyText(text)
+            scaleWatcher.check()
+        }
+        try check(scale.history.count == 200, "Two hundred texts are all in the history")
+        let url150 = scaleSaved[149]
+        pump(0.7)
+        scale.closeGaps()
+        scale.query = "一五零"
+        try check(scale.basketCards.map(\.url) == [url150],
+                  "The three-character tag finds only item 150 in the basket")
+        try check(try String(contentsOf: url150, encoding: .utf8) == scaleTexts[149],
+                  "Item 150's file holds exactly the text that was copied")
+        scale.query = "一五零号"
+        try check(scale.basketCards.map(\.url) == [url150],
+                  "The four-character tag finds only item 150 in the basket")
+        try check(try String(contentsOf: url150, encoding: .utf8) == scaleTexts[149],
+                  "Item 150's file still holds exactly the copied text")
+        let scaleReopened = Line(pasteboard: pasteboard,
+                                 desktop: root.appendingPathComponent("desktop-scale2", isDirectory: true),
+                                 history: History(file: root.appendingPathComponent("scale.sqlite")))
+        scaleReopened.maxItems = 8
+        scaleReopened.visibleCount = 8
+        scaleReopened.query = "一五零"
+        try check(scaleReopened.basketCards.map(\.url) == [url150],
+                  "After reopening, the same search finds only item 150")
+        try check(try String(contentsOf: url150, encoding: .utf8) == scaleTexts[149],
+                  "Item 150's file is unchanged after reopening")
+        scaleReopened.query = "一五零号"
+        try check(scaleReopened.basketCards.map(\.url) == [url150],
+                  "After reopening, the four-character tag finds only item 150")
+        copyText(scaleTexts[36])
+        scaleWatcher.check()
+        try check(scale.history.count == 200, "Copying item 37's text again leaves two hundred")
+
+        // 10. A basket card on screen only comes back: it does not drag,
+        //     its menu is Copy and Discard, and a click copies it onto the
+        //     line's newest end.
+        let peek = freshLine("peek", maxItems: 1)
+        var peekSaved: [URL] = []
+        let peekWatcher = watcher(for: peek, onNew: { url in
+            peekSaved.append(url)
+            _ = peek.hang(url, quietly: true)
+        })
+        let peekTexts = ["basket card words alpha", "the one still hanging"]
+        for text in peekTexts {
+            copyText(text)
+            peekWatcher.check()
+        }
+        pump(0.7)
+        peek.closeGaps()
+        peek.query = "alpha"
+        show(peek)
+        // A basket card's view has no url: it is the only card without one.
+        func basketCard() throws -> GrabView {
+            func all(_ sub: NSView) -> [GrabView] {
+                (sub as? GrabView).map { [$0] } ?? sub.subviews.flatMap(all)
+            }
+            guard let card = all(window.contentView!).first(where: { $0.url == nil }) else {
+                throw CheckFailed(message: "No basket card on screen")
+            }
+            return card
+        }
+        let card = try basketCard()
+        try check(card.url == nil, "A basket card does not drag")
+        try check(card.menuProvider().items.map(\.title) == ["Copy", "Discard"],
+                  "A basket card's menu is only Copy and Discard")
+        click(card)
+        pump(0.7)
+        try check(pasteboard.string(forType: .string) == peekTexts[0],
+                  "Clicking the basket card copies exactly its text")
+        try check(peek.items.last?.url == peekSaved[0] && peek.liveCount == 1,
+                  "The basket card hangs on the line as the newest")
     }
 
     func cleanUp() {

@@ -28,6 +28,37 @@ struct GrabArea: NSViewRepresentable {
     private func configure(_ view: GrabView) {
         let id = item.id
         let line = line
+        if line.isInBasket(id) {
+            // A basket card only comes back: the rest waits until the
+            // basket has ropes of its own. The view is reused, so every
+            // handler a line card would get is reset here.
+            view.url = nil
+            view.dragImage = nil
+            view.isHeld = false
+            view.toolTip = nil
+            view.onSelect = {}
+            view.onPlainPress = {}
+            view.onPlainClick = {}
+            view.onHangBack = {}
+            view.onClick = { line.copy(id) }
+            view.onDoubleClick = {}
+            view.onDragStart = {}
+            view.onDragEnd = {}
+            view.dragGroup = { [] }
+            view.onTrash = {}
+            view.onDiscard = { line.pressCorner(id) }
+            view.onLongPress = {}
+            view.onForceClick = {}
+            view.onPressChange = { pressed in line.pressedID = pressed ? id : nil }
+            view.menuProvider = {
+                let menu = NSMenu()
+                menu.autoenablesItems = false
+                menu.addItem(ClosureMenuItem(L("Copy")) { line.copy(id) })
+                menu.addItem(ClosureMenuItem(L("Discard")) { line.discard(id) })
+                return menu
+            }
+            return
+        }
         let isRecording = item.isRecording
         view.url = item.url
         view.dragImage = item.thumb
