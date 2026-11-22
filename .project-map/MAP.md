@@ -27,6 +27,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - [T-009 复制的内容默认记不记](tickets/T-009-recording-default.md): 默认打开，菜单栏可暂停
 - [T-010 保留哪些界面语言](tickets/T-010-languages.md): 只留简体中文和英文
 - [T-014 EnCopy 的 bundle id](tickets/T-014-bundle-id.md): app.encopy.EnCopy
+- [T-017 开发版要不要用单独的数据位置](tickets/T-017-dev-copy-own-data.md): 单独放，开发完后删掉
 
 ## Not yet specified
 
@@ -37,7 +38,6 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - 动画表逐项落地，按纸的轻重摆动，微风，减弱动态效果。
 - 下层绳（按天）、多选按顺序贴、⇧⏎ 纯文本贴、⌘Y 快速查看、⌘P 收藏。
 - 新图标。
-- 开发版和日常版（`/Applications/EnCopy.app`）是同一个 bundle id，共用设置和数据。篮子落盘后，真机验收会写进用户的真实历史；开发版要不要用单独的数据位置，没定。
 
 ## Out of scope
 

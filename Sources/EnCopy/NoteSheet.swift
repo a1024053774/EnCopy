@@ -6,8 +6,7 @@ import UniformTypeIdentifiers
 /// in it, so a note is known by where it lives and never mixed with captures.
 enum NoteFolder {
     /// Fixed, so it stays put even if screenshots ever go somewhere else.
-    static let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("EnCopy/Notes", isDirectory: true)
+    static let url = DataFolder.url.appendingPathComponent("Notes", isDirectory: true)
 
     static func contains(_ url: URL) -> Bool {
         url.deletingLastPathComponent().standardizedFileURL.path == Self.url.standardizedFileURL.path

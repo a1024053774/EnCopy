@@ -23,3 +23,4 @@ EnCopy 的代码、工单、文档和对话都用下面这些词。一个概念�
 | 最近清掉 | recently cleared | 过期或手动清理掉的东西先在这里放 7 天，按批次列出，能整批放回。 |
 | 清理历史 | cleanup | 按类型、时间、来源 App、包含的文字手动清一批。 |
 | 保留规则 | retention | 自动过期的规则：文字留多久、原图留多久、原图最多占多少。 |
+| 数据文件夹 | data folder | EnCopy 在这台 Mac 上存东西的文件夹，在 `~/Library/Application Support/` 下，名字跟着 App 的名字走：日常版是 `EnCopy`，开发版是 `EnCopy Dev`。 |

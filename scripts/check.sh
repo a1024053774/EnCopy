@@ -1,6 +1,7 @@
 #!/bin/bash
-# EnCopy's local checks, run after every change; four steps: the name
-# guard, the one-key guard, the strings check, and the native checks.
+# EnCopy's local checks, run after every change; five steps: the name
+# guard, the one-key guard, the data-folder guard, the strings check, and
+# the native checks.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/swift-sdk.sh
@@ -22,11 +23,18 @@ if [ "$hotkey_calls" != "1" ] \
     exit 1
 fi
 
-# 3. Every L("...") has a translation in both languages, and no language
+# 3. The data folder is decided in one place, DataFolder.swift, so nothing
+#    the development copy stores can land in the everyday copy's folder.
+if grep -rnE 'applicationSupportDirectory|Application Support' Sources/ | grep -v '^Sources/EnCopy/DataFolder.swift:'; then
+    echo "FAIL: only DataFolder.swift may name the Application Support folder" >&2
+    exit 1
+fi
+
+# 4. Every L("...") has a translation in both languages, and no language
 #    keeps an entry the code no longer uses.
 swift scripts/check-strings.swift
 
-# 4. The native checks, without XCTest or the system clipboard. Watchers use
+# 5. The native checks, without XCTest or the system clipboard. Watchers use
 #    only generated files in private test folders, inside a home folder of
 #    their own so the user's Application Support stays untouched.
 CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/encopy-checks.XXXXXX")"
@@ -39,13 +47,14 @@ cat > "$CHECK_APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>local.encopy.checks</string>
+<key>CFBundleName</key><string>EnCopy Checks</string>
 <key>CFBundleExecutable</key><string>Checks</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
 SOURCES=()
-for name in Line LineView LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown HotKey SearchBar Paste; do
+for name in Line LineView LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown HotKey SearchBar Paste DataFolder; do
     SOURCES+=("Sources/EnCopy/$name.swift")
 done
 swiftc -module-name EnCopy -target "$(uname -m)-apple-macosx14.0" -parse-as-library "${SOURCES[@]}" scripts/checks.swift \

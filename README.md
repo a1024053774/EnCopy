@@ -14,10 +14,16 @@ v1 还在做。当前版本换好了名字、图标和 bundle id（`app.encopy.E
 
 ```sh
 scripts/build-app.sh
-open build/EnCopy.app
+open "build/EnCopy Dev.app"
 ```
 
-要日常用，装到「应用程序」。脚本会先构建，退出正在运行的 EnCopy，再换上新的并打开：
+这样构建出的是开发版 EnCopy Dev。它是另一个 App，bundle id 是 `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，试用时碰不到日常那份的历史。两份都要占 ⌥C、都会接管截图，不要同时开。试完后，一条命令退出开发版并删掉它的设置、数据文件夹和权限记录：
+
+```sh
+scripts/clean-dev.sh
+```
+
+要日常用，装到「应用程序」。脚本会构建日常版（名字 EnCopy，bundle id `app.encopy.EnCopy`），退出正在运行的 EnCopy，再换上新的并打开：
 
 ```sh
 scripts/install.sh
@@ -33,7 +39,7 @@ scripts/install.sh
 scripts/check.sh
 ```
 
-依次检查四件事：代码和脚本里没有上游的名字；全局快捷键只在一处注册；每句界面文字在简体中文和英文里都有；再用真实的模型和视图代码跑一遍本地检查。本地检查不依赖 XCTest，用私有剪贴板和一个临时的 home 目录，不碰系统剪贴板，不读写你的 EnCopy 数据，也不看你的截图。
+依次检查五件事：代码和脚本里没有上游的名字；全局快捷键只在一处注册；数据文件夹只在一处决定；每句界面文字在简体中文和英文里都有；再用真实的模型和视图代码跑一遍本地检查。本地检查不依赖 XCTest，用私有剪贴板和一个临时的 home 目录，不碰系统剪贴板，不读写你的 EnCopy 数据，也不看你的截图。
 
 ## 许可
 

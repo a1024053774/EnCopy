@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-scripts/build-app.sh release
+EDITION=daily scripts/build-app.sh release
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' build/EnCopy.app/Contents/Info.plist)"
 DMG="build/EnCopy-$VERSION.dmg"
 NAME="EnCopy"

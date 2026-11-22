@@ -1,12 +1,20 @@
 #!/bin/bash
-# Builds EnCopy.app into ./build without needing Xcode.
-# Usage: scripts/build-app.sh [debug|release]
+# Builds the app into ./build without needing Xcode.
+# Usage: [EDITION=dev|daily] scripts/build-app.sh [debug|release]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/swift-sdk.sh
 
 CONFIG="${1:-release}"
-APP="build/EnCopy.app"
+# Two copies, told apart by name and bundle id, so each has its own settings,
+# data folder and permissions. The development copy is the default: trying a
+# build never touches what the everyday copy in /Applications keeps.
+case "${EDITION:-dev}" in
+  dev)   NAME="EnCopy Dev"; BUNDLE_ID="app.encopy.EnCopy.dev" ;;
+  daily) NAME="EnCopy";     BUNDLE_ID="app.encopy.EnCopy" ;;
+  *) echo "EDITION must be dev or daily" >&2; exit 1 ;;
+esac
+APP="build/$NAME.app"
 VERSION="0.1.0"
 
 # Builds one architecture and prints the binary's path.
@@ -56,9 +64,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>EnCopy</string>
-  <key>CFBundleDisplayName</key><string>EnCopy</string>
-  <key>CFBundleIdentifier</key><string>app.encopy.EnCopy</string>
+  <key>CFBundleName</key><string>${NAME}</string>
+  <key>CFBundleDisplayName</key><string>${NAME}</string>
+  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleExecutable</key><string>EnCopy</string>
   <key>CFBundleIconFile</key><string>EnCopy</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -78,7 +86,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSServices</key>
   <array>
     <dict>
-      <key>NSMenuItem</key><dict><key>default</key><string>Hang on EnCopy</string></dict>
+      <key>NSMenuItem</key><dict><key>default</key><string>Hang on ${NAME}</string></dict>
       <key>NSMessage</key><string>hangOnLine</string>
       <key>NSPortName</key><string>EnCopy</string>
       <key>NSRequiredContext</key><dict/>
