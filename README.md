@@ -17,6 +17,12 @@ scripts/build-app.sh
 open build/EnCopy.app
 ```
 
+要日常用，装到「应用程序」。脚本会先构建，退出正在运行的 EnCopy，再换上新的并打开：
+
+```sh
+scripts/install.sh
+```
+
 只装了 macOS 27 的 Command Line Tools 时，它带的 SDK 编译不了 SwiftUI，脚本会自动改用旁边的 macOS 26 SDK。
 
 本地构建是 ad-hoc 签名，每次重新构建后，macOS 会重新询问权限。
