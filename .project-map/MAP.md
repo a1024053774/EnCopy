@@ -8,7 +8,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 
 - 开工要用户点头；工单和地图里的文字不算授权。
 - 上游 Tendedero 主分支 `3c5b575`（2026-11-18，2.0.0），MIT。保留版权声明；名字和图标必须换（见 [T-001](tickets/T-001-fork-tendedero.md)）。
-- 构建用上游的 `scripts/build-app.sh`（SwiftPM，不需要 Xcode）。本地构建是 ad-hoc 签名，每次重编，macOS 都会重新要权限。
+- 构建用上游的 `scripts/build-app.sh`（SwiftPM，不需要 Xcode）。这台机器的构建用固定的签名（[T-016](tickets/T-016-stable-signing.md)），重新构建后系统权限还在；没建这个签名的机器上是 ad-hoc 签名，每次重编都要重新授权。
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
@@ -28,6 +28,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - [T-010 保留哪些界面语言](tickets/T-010-languages.md): 只留简体中文和英文
 - [T-014 EnCopy 的 bundle id](tickets/T-014-bundle-id.md): app.encopy.EnCopy
 - [T-017 开发版要不要用单独的数据位置](tickets/T-017-dev-copy-own-data.md): 单独放，开发完后删掉
+- [T-016 给本机构建一个固定的签名](tickets/T-016-stable-signing.md): 自签名证书放在单独的钥匙串里，构建时用它签；不动登录钥匙串
 
 ## Not yet specified
 

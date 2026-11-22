@@ -17,7 +17,7 @@ scripts/build-app.sh
 open "build/EnCopy Dev.app"
 ```
 
-这样构建出的是开发版 EnCopy Dev。它是另一个 App，bundle id 是 `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，试用时碰不到日常那份的历史。两份都要占 ⌥C、都会接管截图，不要同时开。试完后，一条命令退出开发版并删掉它的设置、数据文件夹和权限记录：
+这样构建出的是开发版 EnCopy Dev。它是另一个 App，bundle id 是 `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，试用时碰不到日常那份的历史。两份都要占 ⌥C、都会接管截图，不要同时开。试完后，一条命令退出开发版并删掉它的设置和数据文件夹：
 
 ```sh
 scripts/clean-dev.sh
@@ -31,7 +31,13 @@ scripts/install.sh
 
 只装了 macOS 27 的 Command Line Tools 时，它带的 SDK 编译不了 SwiftUI，脚本会自动改用旁边的 macOS 26 SDK。
 
-本地构建是 ad-hoc 签名，每次重新构建后，macOS 会重新询问权限。
+本地构建默认是 ad-hoc 签名。macOS 的权限跟着签名走，所以每次重新构建后，「辅助功能」的开关虽然还亮着，也要关掉再打开才生效。想让授权一直有效，先跑一次：
+
+```sh
+scripts/make-signing-identity.sh
+```
+
+它在一个单独的钥匙串（`~/Library/Keychains/encopy-signing.keychain-db`）里放一张自签名的代码签名证书，之后 `scripts/build-app.sh` 都用它签名，签名不随重新构建变化。它不动登录钥匙串和钥匙串搜索列表，也不要密码。这个钥匙串的密码是空的，构建才能自己解锁它；因此以你的身份运行的程序都能用它签名，而它只关系到这台 Mac 上系统授给 EnCopy 的权限。
 
 ## 检查
 

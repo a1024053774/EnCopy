@@ -99,11 +99,20 @@ PLIST
 
 # Sign with a Developer ID when one is in the keychain (or SIGN_IDENTITY is
 # set), with the hardened runtime and a secure timestamp that notarization
-# requires. Without one, sign ad hoc so the app still runs locally.
+# requires. Without one, sign with this Mac's own identity when
+# scripts/make-signing-identity.sh has made it: the signature then stays the
+# same from build to build, and so do the permissions macOS ties to it.
+# Without either, sign ad hoc so the app still runs locally.
+source scripts/signing.sh
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
 if [ -n "$IDENTITY" ]; then
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
   echo "Signed with $IDENTITY"
+elif [ -e "$SIGNING_KEYCHAIN" ]; then
+  # Locked again after a restart; its password is empty.
+  security unlock-keychain -p "" "$SIGNING_KEYCHAIN"
+  codesign --force --sign "$SIGNING_NAME" --keychain "$SIGNING_KEYCHAIN" "$APP"
+  echo "Signed with $SIGNING_NAME"
 else
   codesign --force --deep --sign - "$APP" >/dev/null
   echo "Signed ad hoc (no Developer ID found)"
