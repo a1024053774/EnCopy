@@ -13,8 +13,9 @@ python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 | 做什么 | 命令 |
 | --- | --- |
 | 本地检查，每次改完都跑 | `scripts/check.sh` |
-| 构建 App，产物是 `build/EnCopy.app` | `scripts/build-app.sh` |
-| 构建并装到 `/Applications/EnCopy.app`，日常用的那份 | `scripts/install.sh` |
+| 构建开发版，产物是 `build/EnCopy Dev.app` | `scripts/build-app.sh` |
+| 构建日常版并装到 `/Applications/EnCopy.app` | `scripts/install.sh` |
+| 退出开发版，删掉它的设置、数据文件夹和权限记录 | `scripts/clean-dev.sh` |
 | 打磁盘映像 | `scripts/make-dmg.sh` |
 
 本地检查在一个临时的 home 目录里跑，不读写真实的 `~/Library/Application Support/EnCopy`；绕过 `scripts/check.sh` 直接运行检查程序会报错退出。
@@ -35,7 +36,7 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 一个功能的收尾顺序：本地检查通过 → 真机走一遍 → 提交 → push 分支 → 开 PR → 合并 → 在 `main` 上跑 `scripts/install.sh` → 删分支 → 清缓存。检查没过不提交；不用 `--no-verify`，不 force push `main`。
 - 开 PR 一律带 `--repo a1024053774/EnCopy --base main`。这是 fork，`gh` 默认会把 PR 开到上游仓库。
 - PR 用 merge commit 合并：`gh pr merge --merge --delete-branch`。分支上的提交号合并后不变，工单里记的提交号一直有效。
-- 日常用的 EnCopy 在 `/Applications/EnCopy.app`，和 `build/` 里的开发版是同一个 bundle id，共用设置和数据，不能同时开。真机验收前先退出日常那份（菜单栏图标 → 退出 EnCopy），验收完再打开。
+- 日常用的 EnCopy 在 `/Applications/EnCopy.app`，bundle id 是 `app.encopy.EnCopy`。`build/` 里的开发版是另一个 App：名字 EnCopy Dev，bundle id `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，真机验收写不进日常那份的历史（[T-017](.project-map/tickets/T-017-dev-copy-own-data.md)）。两份都要占 ⌥C、都会接管截图，不能同时开：真机验收前先退出日常那份（菜单栏图标 → 退出 EnCopy），验收完跑 `scripts/clean-dev.sh`，再打开日常那份。
 - 真机验收的截图和录屏放 `evidence/<工单号>/`，这个目录不进 git：仓库是公开的，截图可能带到屏幕上别的内容。工单的 Resolution 写步骤、结果和文件名。
 
 ## 真机走一遍
@@ -45,8 +46,9 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 合成按键只在按下时带修饰键，抬起不带。抬起也带的话，系统会以为修饰键一直按着，之后的点击和打字全变成快捷键。`evidence/tools/mods` 能查看，`mods clear` 能清掉。
 - 点击要按住 120 毫秒左右（`cliclick dd:… w:120 du:…`）；没有按住时间的点击，有些界面不认。
 - 按键发给的是前台 App。发之前先确认前台是谁；用户正在用电脑时不发按键，改用辅助功能直接操作目标 App，或者等一等。
-- 辅助功能的授权认的是构建出的那一份，重新构建后要用户重新授权（[T-016](.project-map/tickets/T-016-stable-signing.md)）。所以先改完、构建好，再请用户授权。
-- 打开 `build/` 里的开发版，系统会把登录项改指到它。验收完重新打开 `/Applications` 那份，在它的菜单里把「登录时打开」关掉再打开一次。
+- 辅助功能的授权认的是构建出的那一份，重新构建后要用户重新授权（[T-016](.project-map/tickets/T-016-stable-signing.md)）。所以先改完、构建好，再请用户授权。开发版在系统设置里叫 EnCopy Dev，和 EnCopy 是两条。
+- 开发版的设置是空的时，打开它会依次出现三个框：系统问能不能访问「桌面」文件夹（点「不允许」，验收用不到）、「让 EnCopy 接管你的截图？」、「也挂上你复制的内容？」。第二个框里的「登录时打开」默认勾着，先取消勾选再点按钮，开发版不进登录项。日常那份的登录项不受影响。
+- 开发版开着提示框时退不掉，`scripts/clean-dev.sh` 会停下并提示；关掉提示框再跑。
 - 在微信里只用文件传输助手，只贴不发。输入框里可能有用户的草稿：贴完用 ⌘Z 撤掉，不要全选删除。
 
 ## 清缓存
@@ -55,9 +57,11 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 
 ```sh
 rm -rf .build build
+scripts/clean-dev.sh
 ```
 
 - `.build/` 是 SwiftPM 的编译缓存，`build/` 是构建出的 App 和磁盘映像，都能重新生成。
 - 检查脚本和构建脚本用的临时目录、检查程序的偏好设置文件，在正常结束时自己删；中途打断留下的 `encopy-*` 临时目录和 `~/Library/Preferences/local.encopy.checks.plist` 一并删掉。
-- 真机验收时放到桌面的测试截图、挂到绳上的测试件，验收完删掉。`/Applications/EnCopy.app` 是日常用的那份，不删。
+- `scripts/clean-dev.sh` 删的是开发版的设置、数据文件夹和权限记录，真机验收时挂到开发版绳上的测试件跟着一起没了。日常那份的设置和数据它不碰。
+- 真机验收时放到桌面的测试截图，验收完删掉。`/Applications/EnCopy.app` 是日常用的那份，不删。
 - `evidence/` 是验收证据，不是缓存，不清。

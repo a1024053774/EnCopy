@@ -21,8 +21,7 @@ final class SearchIndex {
     /// Called when new words arrive, so a search under way sees them.
     var onChange: () -> Void = {}
 
-    private static let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("EnCopy/SearchIndex.json")
+    private static let file = DataFolder.url.appendingPathComponent("SearchIndex.json")
 
     init() {
         if let data = try? Data(contentsOf: Self.file),

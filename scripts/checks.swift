@@ -343,6 +343,7 @@ struct CheckFailed: Error { let message: String }
         try check(eviction.selectedIDs.isEmpty && FileManager.default.fileExists(atPath: a.path), "Capacity eviction clears stale selection without deleting an external file")
         try checkDesktopCopies()
         try checkSummon()
+        try checkDataFolder()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -664,6 +665,20 @@ struct CheckFailed: Error { let message: String }
         try check(try Data(contentsOf: newCapture) == originalBytes && !fm.fileExists(atPath: desktopCopy.path)
                   && line.items.filter { canonical($0.url) == canonical(newCapture) && !$0.falling }.count == 1,
                   "Undo after copy watcher callbacks preserves the original and restores exactly one card")
+    }
+
+    /// The data folder is named after the app, so the development copy's
+    /// files can never land in the everyday copy's folder.
+    func checkDataFolder() throws {
+        let expected = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("EnCopy Checks", isDirectory: true)
+        try check(DataFolder.url.standardizedFileURL.path == expected.standardizedFileURL.path,
+                  "The data folder is in Application Support, named after the app")
+        try check(NoteFolder.url.standardizedFileURL.path
+                  == DataFolder.url.appendingPathComponent("Notes", isDirectory: true).standardizedFileURL.path,
+                  "Notes are kept in the data folder")
     }
 
     func cleanUp() {

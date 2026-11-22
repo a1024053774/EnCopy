@@ -4,13 +4,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-scripts/build-app.sh
+EDITION=daily scripts/build-app.sh
 DEST="/Applications/EnCopy.app"
 
-# Quit the running copy first. On SIGTERM it puts the system screenshot
-# settings back; the new copy takes them over again when it opens. A copy
-# that is showing a dialog does not quit this way, and killing it would
-# skip that step, so stop and say so.
+# Quit the running copy first — whichever copy it is, since both executables
+# are named EnCopy. On SIGTERM it puts the system screenshot settings back;
+# the new copy takes them over again when it opens. A copy that is showing a
+# dialog does not quit this way, and killing it would skip that step, so stop
+# and say so.
 if pgrep -x EnCopy >/dev/null; then
   pkill -TERM -x EnCopy
   for _ in $(seq 25); do
@@ -25,5 +26,8 @@ fi
 
 rm -rf "$DEST"
 ditto build/EnCopy.app "$DEST"
+# A second bundle with the everyday copy's id must not lie around in build/
+# where it can be opened by mistake.
+rm -rf build/EnCopy.app
 open "$DEST"
 echo "Installed $DEST"
