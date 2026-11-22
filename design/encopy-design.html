@@ -1,0 +1,1751 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EnCopy 设计方案</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: a reading column (760px) under a full-width working prototype (1080px).
+   EnCopy draws only the twine, the pegs and the paper; the desktop is the user's. */
+:root {
+  /* page */
+  --bg: #f1f3f6;
+  --surface: #ffffff;
+  --ink: #18202a;
+  --muted: #5c6773;
+  --hair: #dbe0e6;
+  --accent: #9a5b14;
+  --select: #e9b43c;
+  --c-text: #5e9a6c;
+  --c-image: #c2873a;
+  --danger: #b42318;
+  --danger-ink: #ffffff;
+  --wall-a: #c7d1db;
+  --wall-b: #e3e8ed;
+  --menubar: rgba(255, 255, 255, .74);
+  --win: #ffffff;
+  --win-bar: #eef1f4;
+  --code-bg: #1e242b;
+  --code-fg: #d7e0e8;
+  --link: #2f7f8b;
+  --file: #4a74c2;
+  --mark: #fde68a;
+  --mark-ink: #3b2f00;
+  --toast-bg: #1c232b;
+  --toast-fg: #f3f5f7;
+  --f-display: "Space Grotesk", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --f-body: "Inter", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "PingFang SC", monospace;
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+
+  /* paper: the paper stays paper in dark mode; only the twine and the band follow the theme */
+  --p-twine: #8a6d45;
+  --p-twine-hi: #c9ab7c;
+  --p-peg: #c48f55;
+  --p-peg-hi: #e7bd86;
+  --p-peg-pin: #59626c;
+  --p-receipt: #fbfaf4;
+  --p-tractor: #f5f8f0;
+  --p-tractor-bar: #e1edd6;
+  --p-kraft: #d4b086;
+  --p-manila: #edd59b;
+  --p-polaroid: #fdfdfa;
+  --p-ink: #2a251f;
+  --p-sub: #76695a;
+  --p-rule: #cdbf9f;
+  --p-sel: #d38a22;
+  --p-band: rgba(247, 244, 236, .88);
+  --p-band-ink: #2a251f;
+  --p-band-sub: #76695a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111519; --surface: #181d23; --ink: #e5eaef; --muted: #98a3ae; --hair: #2a323b;
+    --accent: #e0a253; --select: #e9b43c; --c-text: #74b083; --c-image: #d29a50;
+    --danger: #f97066; --danger-ink: #1a0d0b;
+    --wall-a: #1b222a; --wall-b: #27303a; --menubar: rgba(30, 36, 43, .78);
+    --win: #1d2329; --win-bar: #232a31; --code-bg: #0f1317; --code-fg: #cfd9e2;
+    --link: #55a9b4; --file: #6f95dc; --mark: #f2c94c; --mark-ink: #2a2000;
+    --toast-bg: #e8edf2; --toast-fg: #141a20;
+    --p-twine: #a98a5e; --p-twine-hi: #d4b98b; --p-band: rgba(34, 30, 25, .88); --p-band-ink: #efe7da; --p-band-sub: #b5a893;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111519; --surface: #181d23; --ink: #e5eaef; --muted: #98a3ae; --hair: #2a323b;
+  --accent: #e0a253; --select: #e9b43c; --c-text: #74b083; --c-image: #d29a50;
+  --danger: #f97066; --danger-ink: #1a0d0b;
+  --wall-a: #1b222a; --wall-b: #27303a; --menubar: rgba(30, 36, 43, .78);
+  --win: #1d2329; --win-bar: #232a31; --code-bg: #0f1317; --code-fg: #cfd9e2;
+  --link: #55a9b4; --file: #6f95dc; --mark: #f2c94c; --mark-ink: #2a2000;
+  --toast-bg: #e8edf2; --toast-fg: #141a20;
+  --p-twine: #a98a5e; --p-twine-hi: #d4b98b; --p-band: rgba(34, 30, 25, .88); --p-band-ink: #efe7da; --p-band-sub: #b5a893;
+  color-scheme: dark;
+}
+
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.7 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 72px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; }
+.top { padding-block: 44px 18px; max-width: 760px; }
+.eyebrow { font: 500 12px/1.4 var(--f-mono); letter-spacing: .06em; color: var(--muted); }
+h1 { font: 700 clamp(40px, 7vw, 64px)/1 var(--f-display); letter-spacing: -.02em; margin: 12px 0 16px; }
+.lead { font-size: 18px; line-height: 1.6; margin: 0; text-wrap: pretty; }
+.try { margin: 22px 0 14px; font-size: 14px; color: var(--muted); max-width: 760px; }
+.try b { color: var(--ink); font-weight: 600; }
+
+/* ---------- the Mac ---------- */
+.mac {
+  --cw: 126px; --ch: 104px;
+  position: relative; height: clamp(480px, 58vw, 610px); border-radius: 14px; overflow: hidden;
+  background: linear-gradient(160deg, var(--wall-a), var(--wall-b));
+  box-shadow: 0 0 0 1px var(--hair), 0 30px 60px -36px rgba(15, 25, 35, .45);
+  outline: none; isolation: isolate;
+  --dot-all: var(--p-band-sub); --dot-text: var(--p-receipt); --dot-link: var(--p-kraft); --dot-image: var(--p-polaroid); --dot-file: var(--p-manila); --dot-pin: var(--p-peg-pin);
+}
+.mac:focus-visible, .mac:focus-within { box-shadow: 0 0 0 1px var(--hair), 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent); }
+.menubar {
+  position: relative; z-index: 7; height: 26px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; background: var(--menubar); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  font-size: 12px; color: var(--ink); border-bottom: 1px solid color-mix(in srgb, var(--hair) 60%, transparent);
+}
+.mb-left, .mb-right { display: flex; gap: 14px; align-items: center; white-space: nowrap; }
+.mb-left b { font-weight: 650; }
+.mb-right { font-variant-numeric: tabular-nums; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.mb-icon { width: 18px; height: 12px; display: block; transform-origin: 50% 0; }
+.mb-icon path { stroke: var(--ink); fill: none; stroke-width: 1.3; }
+.mb-icon rect { fill: var(--ink); }
+.hot { position: absolute; left: 38%; width: 24%; top: 0; height: 26px; }
+.hot::after {
+  content: "停在这里"; position: absolute; inset: 4px 0; border: 1px dashed var(--muted); border-radius: 5px;
+  font-size: 10px; color: var(--muted); display: grid; place-items: center; opacity: 0; transition: opacity .2s;
+}
+@media (hover: hover) and (pointer: fine) { .mac:hover .hot::after { opacity: .85; } }
+.mac.is-open .hot::after { opacity: 0 !important; }
+
+.win {
+  position: absolute; left: 7%; right: 7%; top: 96px; bottom: 50px; z-index: 2; background: var(--win);
+  border-radius: 10px; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .35), 0 0 0 1px var(--hair);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.wbar { height: 28px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--win-bar); border-bottom: 1px solid var(--hair); font-size: 12px; color: var(--muted); }
+.wbar i { width: 10px; height: 10px; border-radius: 50%; background: var(--hair); }
+.wbar span { margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wbody { flex: 1; overflow: auto; padding: 14px 22px 20px; font-size: 13.5px; line-height: 1.65; color: var(--ink); min-width: 0; }
+.wbody h4 { margin: 0 0 6px; font: 600 17px/1.3 var(--f-display); }
+.wbody p { margin: 0 0 6px; }
+.caret { display: inline-block; width: 1.5px; height: 1.1em; background: var(--accent); vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.pasted { animation: flash 1.4s ease-out; border-radius: 4px; }
+@keyframes flash { 0% { background: color-mix(in srgb, var(--select) 45%, transparent); } 100% { background: transparent; } }
+.p-img { width: 180px; max-width: 100%; aspect-ratio: 3 / 2; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px var(--hair); margin: 4px 0 8px; }
+.p-img svg { width: 100%; height: 100%; display: block; }
+.p-code { font: 12px/1.5 var(--f-mono); background: var(--code-bg); color: var(--code-fg); padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-all; margin: 4px 0 8px; }
+.p-code.plain { background: transparent; color: var(--ink); padding: 0; }
+.p-link { color: var(--link); text-decoration: underline; word-break: break-all; }
+.p-file { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; background: var(--win-bar); border: 1px solid var(--hair); font-size: 12.5px; }
+.p-file i { width: 10px; height: 13px; border: 1.5px solid var(--file); border-radius: 2px; }
+
+.panel {
+  position: absolute; top: 26px; left: 0; right: 0; z-index: 6; max-height: calc(100% - 26px);
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  transform: translateY(calc(-100% - 40px)); visibility: hidden;
+  transition: transform 160ms var(--ease-out), visibility 0s linear 160ms;
+}
+.panel.open { transform: none; visibility: visible; transition: transform var(--open-dur, 260ms) var(--open-ease, var(--ease-out)), visibility 0s; }
+.panel.summon { background: var(--p-band); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 16px 34px -24px rgba(60, 40, 20, .5); }
+.row { position: relative; overflow: hidden; }
+.rope { position: absolute; left: 0; top: 0; pointer-events: none; }
+.rope path { fill: none; }
+.rope .wire { stroke: var(--p-twine); stroke-width: 2.6; stroke-linecap: round; }
+.rope .twist { stroke: var(--p-twine-hi); stroke-width: 2.6; stroke-dasharray: 1.6 3.4; }
+.rope .knot { fill: var(--p-twine); }
+.rtag { position: absolute; z-index: 4; left: 10px; top: 30px; padding: 2px 7px; white-space: nowrap; background: var(--p-kraft); color: var(--p-ink); font: 600 10.5px/1.4 var(--f-mono); border-radius: 2px; box-shadow: 0 1px 2px rgba(60, 40, 20, .3); }
+.basket { position: absolute; z-index: 4; right: 12px; bottom: 6px; padding: 2px 9px; white-space: nowrap; background: var(--p-receipt); color: var(--p-ink); font: 10.5px/1.5 var(--f-mono); border: 1px dashed var(--p-rule); border-radius: 999px; }
+.empty { position: absolute; left: 90px; top: 58px; font: 12.5px var(--f-mono); color: var(--p-band-sub); }
+
+/* card: peg + number + face(paper + meta). Position and swing are written per frame as one transform. */
+.card { position: absolute; left: 0; top: 0; width: var(--cw); height: var(--ch); transform-origin: 50% -6px; cursor: pointer; z-index: 1; will-change: transform; color: var(--p-ink); }
+.card.sel { z-index: 3; }
+.clip { position: absolute; z-index: 3; left: 50%; top: -16px; width: 10px; height: 29px; margin-left: -5px; border-radius: 2px 2px 3px 3px; transform-origin: 50% 0;
+  background: linear-gradient(90deg, var(--p-peg), var(--p-peg-hi) 46%, var(--p-peg) 54%, #a9773f); box-shadow: 0 1px 1.5px rgba(60, 40, 20, .4); }
+.clip::after { content: ""; position: absolute; left: -2px; right: -2px; top: 10px; height: 3px; border-radius: 2px; background: linear-gradient(#a3a9af, #e1e4e7, #7f868d); }
+.card.pinned .clip { background: linear-gradient(90deg, var(--p-peg-pin), #7c8691 46%, var(--p-peg-pin) 54%, #454c54); }
+.num { position: absolute; z-index: 4; top: -13px; left: calc(50% + 9px); width: 19px; height: 19px; border-radius: 50%; text-align: center; background: var(--p-receipt); color: var(--p-ink); border: 1px solid var(--p-rule); font: 700 10px/17px var(--f-mono); box-shadow: 0 1px 1px rgba(60, 40, 20, .2); transition: background-color 110ms var(--ease-out), color 110ms var(--ease-out); }
+.card.sel .num { background: var(--p-sel); color: #fff; border-color: transparent; }
+.face { position: absolute; inset: 0; filter: drop-shadow(0 3px 4px rgba(70, 50, 25, .28)); transition: transform 110ms var(--ease-out), filter 110ms var(--ease-out); }
+.card.sel .face { transform: translateY(4px) scale(1.06); filter: drop-shadow(0 0 1.2px var(--p-sel)) drop-shadow(0 0 1.2px var(--p-sel)) drop-shadow(0 0 1.2px var(--p-sel)) drop-shadow(0 9px 10px rgba(70, 50, 25, .32)); }
+.card.multi .face { filter: drop-shadow(0 0 1.2px var(--p-sel)) drop-shadow(0 0 1.2px var(--p-sel)) drop-shadow(0 3px 4px rgba(70, 50, 25, .28)); }
+.paper { position: absolute; inset: 0; overflow: hidden; }
+.meta { position: absolute; left: 0; right: 0; bottom: 7px; height: 14px; display: flex; justify-content: space-between; align-items: center; gap: 4px; padding: 0 9px; font: 500 9px var(--f-mono); color: var(--p-sub); white-space: nowrap; overflow: hidden; }
+.meta span { overflow: hidden; text-overflow: ellipsis; }
+.f-text { padding: 9px 9px 0; }
+.f-text .t { font: 650 11px/1.3 var(--f-mono); padding-bottom: 4px; border-bottom: 1px dashed var(--p-rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-text .b { margin-top: 4px; font: 10px/1.42 var(--f-mono); color: var(--p-sub); white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.f-code { position: absolute; inset: 0 12px 25px 12px; margin: 0; padding: 8px 2px 0; font: 9.5px/1.45 var(--f-mono); white-space: pre-wrap; word-break: break-all; overflow: hidden; color: #2e3a28; }
+.f-link { padding: 14px 10px 0; }
+.f-link .site { font-weight: 650; font-size: 12px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-link .path { font-size: 10px; line-height: 1.35; color: #5c4a33; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.f-img { position: absolute; inset: 6px 6px 24px 6px; }
+.f-img svg { width: 100%; height: 100%; display: block; }
+.ocr, .thumbtag { position: absolute; z-index: 2; font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 4px; }
+.ocr { top: 10px; right: 10px; background: var(--mark); color: var(--mark-ink); }
+.thumbtag { top: 10px; left: 10px; background: rgba(20, 24, 30, .72); color: #fff; }
+.f-file { display: grid; justify-items: center; padding: 22px 6px 0; text-align: center; }
+.f-file .fn { font-size: 10.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-all; }
+.f-file .fd { font-size: 9.5px; color: var(--p-sub); }
+mark { background: var(--mark); color: var(--mark-ink); border-radius: 2px; padding: 0 1px; }
+/* text: a till receipt with a torn bottom edge */
+.card[data-kind="text"] .paper {
+  background: var(--p-receipt);
+  -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 9px 100%;
+  mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 9px 100%;
+}
+.card[data-kind="text"] .meta { left: 1px; right: 1px; bottom: 6px; height: 16px; background: var(--p-receipt); }
+/* code: tractor-feed printout */
+.card[data-kind="code"] .paper { background: repeating-linear-gradient(var(--p-tractor) 0 13px, var(--p-tractor-bar) 13px 26px); }
+.card[data-kind="code"] .paper::before, .card[data-kind="code"] .paper::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 9px; background: radial-gradient(circle at 4.5px 6.5px, rgba(90, 80, 60, .38) 1.8px, transparent 2.3px) 0 0 / 9px 13px repeat-y, var(--p-tractor);
+}
+.card[data-kind="code"] .paper::before { left: 0; border-right: 1px dotted rgba(90, 80, 60, .3); }
+.card[data-kind="code"] .paper::after { right: 0; border-left: 1px dotted rgba(90, 80, 60, .3); }
+.card[data-kind="code"] .meta { left: 10px; right: 10px; padding: 0 3px; background: var(--p-tractor); }
+/* link: kraft luggage tag */
+.card[data-kind="link"] .paper { background: var(--p-kraft); clip-path: polygon(11px 0, calc(100% - 11px) 0, 100% 11px, 100% 100%, 0 100%, 0 11px); }
+.card[data-kind="link"] .paper::before { content: ""; position: absolute; top: 7px; right: 10px; width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle, rgba(60, 40, 20, .45) 0 2.6px, #f1e1c3 2.8px 4.6px, transparent 4.9px); }
+.card[data-kind="link"] .meta { color: #5c4a33; background: var(--p-kraft); }
+/* image: polaroid */
+.card[data-kind="image"] .paper { background: var(--p-polaroid); }
+.card[data-kind="image"] .meta { bottom: 5px; }
+/* file: manila folder */
+.card[data-kind="file"] .paper { background: var(--p-manila); clip-path: polygon(0 8px, 7px 8px, 11px 0, 46px 0, 50px 8px, 100% 8px, 100% 100%, 0 100%); }
+.card[data-kind="file"] .meta { color: #6a5530; background: var(--p-manila); }
+.flight { position: absolute; z-index: 8; pointer-events: none; transform-origin: 0 0; will-change: transform, opacity; }
+.flight .face { transform: none !important; }
+
+.sbar { position: sticky; bottom: 0; z-index: 5; display: none; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px 10px; background: var(--p-band); color: var(--p-band-ink); border-top: 1px dashed color-mix(in srgb, var(--p-band-sub) 55%, transparent); }
+.panel.summon .sbar { display: flex; }
+.search { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; padding: 0 9px; height: 30px; min-width: 0; background: var(--p-receipt); border: 1px solid var(--p-rule); border-radius: 3px; color: var(--p-sub); }
+.search svg { flex: none; width: 13px; height: 13px; }
+.search svg circle, .search svg path { fill: none; stroke-width: 1.6; stroke: currentColor; }
+.search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; font: 12.5px var(--f-mono); color: var(--p-ink); }
+.search input::placeholder { color: var(--p-sub); }
+.search:focus-within { border-color: var(--p-sel); box-shadow: 0 0 0 2px color-mix(in srgb, var(--p-sel) 30%, transparent); }
+.chips { display: flex; gap: 2px; flex-wrap: wrap; align-items: center; }
+.chips button { font: 11.5px/1.4 var(--f-mono); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 8px; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; color: inherit; }
+.chips button i { width: 8px; height: 8px; border-radius: 1px; box-shadow: inset 0 0 0 1px rgba(80, 60, 30, .4); }
+.chips button[aria-pressed="true"] { background: var(--p-receipt); color: var(--p-ink); border-color: var(--p-rule); }
+.chips button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tabhint { font: 11px var(--f-mono); opacity: .7; }
+
+.hint, .toast { position: absolute; z-index: 9; left: 50%; bottom: 12px; max-width: calc(100% - 32px); font-size: 12.5px; line-height: 1.4; padding: 7px 12px; border-radius: 999px; background: var(--toast-bg); color: var(--toast-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hint { transform: translateX(-50%); }
+.toast { opacity: 0; transform: translate(-50%, 8px); transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out); pointer-events: none; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.ql { position: absolute; inset: 26px 0 0; z-index: 10; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); cursor: zoom-out; }
+.ql-box { position: relative; }
+.ql-box .card { width: 126px; height: 104px; transform-origin: 0 0; cursor: zoom-out; }
+
+/* keys under the Mac */
+.under { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start; justify-content: space-between; margin-top: 12px; }
+.modeline { flex: 1 1 300px; min-width: 0; margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+.modeline b { color: var(--ink); }
+.keys { flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.kgroup { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.klabel { font: 600 12px var(--f-body); color: var(--muted); margin-right: 2px; }
+.keys button { display: inline-flex; align-items: center; gap: 6px; font: 12.5px/1.3 var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--hair); border-bottom-width: 2px; border-radius: 7px; padding: 5px 9px; cursor: pointer; transition: transform 120ms var(--ease-out); }
+.keys button:active { transform: scale(.97); }
+.keys button kbd { font: 600 12px var(--f-mono); border: 0; padding: 0; background: none; }
+@media (hover: hover) and (pointer: fine) { .keys button:hover { border-color: var(--muted); } }
+.keys button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.keys .global button { border-color: var(--ink); }
+.keys .sim button { border-style: dashed; border-bottom-width: 1px; }
+.kclosed { margin: 0; font-size: 12.5px; color: var(--muted); text-align: right; max-width: 34em; }
+
+/* ---------- document ---------- */
+.doc { max-width: 760px; margin-top: 40px; }
+.doc section { padding-block: 30px; border-top: 1px solid var(--hair); }
+.doc h2 { font: 650 22px/1.3 var(--f-display); margin: 0 0 12px; text-wrap: balance; }
+.doc h3 { font: 600 16px/1.4 var(--f-body); margin: 22px 0 8px; }
+.doc p { margin: 0 0 12px; }
+.doc ul, .doc ol { padding-left: 1.3em; margin: 0 0 12px; }
+.doc li { margin: 6px 0; }
+.doc li::marker { color: var(--muted); }
+code { font: .86em var(--f-mono); background: var(--surface); border: 1px solid var(--hair); border-radius: 4px; padding: 0 4px; word-break: break-word; }
+kbd { font: 600 .84em var(--f-mono); border: 1px solid var(--hair); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--surface); white-space: nowrap; }
+.tbl { overflow-x: auto; margin: 10px 0 16px; border: 1px solid var(--hair); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.55; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--hair); }
+tr:last-child td { border-bottom: 0; }
+th { font-weight: 600; color: var(--muted); font-size: 12.5px; background: color-mix(in srgb, var(--bg) 55%, var(--surface)); white-space: nowrap; }
+th.grp { color: var(--ink); font-size: 13px; }
+td.k { white-space: nowrap; font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; min-width: 14em; overflow-wrap: anywhere; }
+table.wide { min-width: 680px; }
+.tag { display: inline-block; font: 500 11px/1.5 var(--f-body); padding: 0 6px; border-radius: 4px; border: 1px solid var(--hair); color: var(--muted); white-space: nowrap; }
+.tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--hair)); }
+.steps > li { margin: 14px 0; }
+.steps .acc { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
+.pick { color: var(--accent); font-weight: 600; }
+.status { display: inline-block; font: 600 11.5px/1.6 var(--f-body); padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); vertical-align: 2px; }
+.foot { margin-top: 12px; font-size: 13px; color: var(--muted); max-width: 760px; }
+
+/* settings mocks: retention and cleanup */
+.seg { display: inline-flex; flex-wrap: wrap; padding: 3px; gap: 2px; border-radius: 10px; background: color-mix(in srgb, var(--bg) 60%, var(--surface)); border: 1px solid var(--hair); }
+.seg button { font: 600 12.5px/1.2 var(--f-body); color: var(--muted); background: transparent; border: 0; border-radius: 7px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:disabled { opacity: .4; cursor: default; }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ret { background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; margin: 14px 0 18px; }
+.ret-head { padding: 10px 16px; font: 600 12.5px var(--f-body); color: var(--muted); background: color-mix(in srgb, var(--bg) 55%, var(--surface)); border-bottom: 1px solid var(--hair); }
+.ret-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--hair); }
+.ret-row h4 { margin: 0; font: 600 14px/1.4 var(--f-body); }
+.ret-row p { margin: 2px 0 0 !important; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.ret-row .fixed { font-size: 13px; white-space: nowrap; }
+.ret-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.usage { padding: 14px 16px 16px; }
+.usage h4 { margin: 0; font: 600 14px var(--f-body); }
+.ubar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--hair); margin: 10px 0 8px; }
+.ubar i { display: block; height: 100%; min-width: 0; transition: width 240ms var(--ease-out); }
+.ubar .u-text { background: var(--c-text); }
+.ubar .u-orig { background: var(--c-image); }
+.ubar .u-thumb { background: color-mix(in srgb, var(--c-image) 40%, var(--surface)); }
+.ulegend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ulegend span { display: inline-flex; align-items: center; gap: 6px; }
+.ulegend i { width: 9px; height: 9px; border-radius: 2px; }
+.ulegend b { color: var(--ink); font-weight: 600; }
+.forecast { margin: 12px 0 0 !important; font-size: 13.5px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.forecast b { font-weight: 600; }
+.sample { margin: 8px 0 0 !important; font-size: 12px; color: var(--muted); }
+.btn { font: 600 13px/1.2 var(--f-body); padding: 8px 14px; border-radius: 8px; border: 1px solid var(--hair); background: var(--surface); color: var(--ink); cursor: pointer; transition: transform 120ms var(--ease-out); }
+.btn:active { transform: scale(.97); }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: var(--danger-ink); }
+.btn:disabled { opacity: .45; cursor: default; transform: none; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cl-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.cl-box { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13.5px; line-height: 1.6; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.cl-box p { margin: 0 !important; flex: 1 1 260px; min-width: 0; }
+.cl-confirm { border: 1px solid var(--danger); }
+.cl-banner { background: color-mix(in srgb, var(--c-text) 14%, var(--surface)); }
+.cl-box .btns { display: flex; gap: 8px; }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .mb-left .opt { display: none; }
+  .hot { left: 30%; width: 34%; }
+  .win { left: 4%; right: 4%; }
+  .wbody { padding: 12px 14px 16px; }
+  .keys { align-items: flex-start; }
+  .kgroup { justify-content: flex-start; }
+  .kclosed { text-align: left; }
+  .ret-row { grid-template-columns: minmax(0, 1fr); }
+  .cl-actions { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel { transform: none; opacity: 0; transition: opacity 120ms linear, visibility 0s linear 120ms; }
+  .panel.open { opacity: 1; transition: opacity 120ms linear, visibility 0s; }
+  .face, .num, .toast, .ubar i, .keys button, .btn { transition: none !important; }
+  .pasted, .caret { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">设计方案 · v0.4 · 2026-11-22</div>
+    <h1>EnCopy</h1>
+    <p class="lead">按 <kbd>⌥C</kbd>，最近复制过的东西会像晾在绳上的纸条一样垂下来：方向键挑一张，回车就贴回你正在打字的地方。挂不下的掉进篮子，一年内的文字、所有截图里的字，打字就能搜到。</p>
+  </header>
+
+  <p class="try"><b>试一下：</b>点一下屏幕，按 <kbd>⌥C</kbd>。<kbd>←</kbd> <kbd>→</kbd> 挑，<kbd>⏎</kbd> 贴进「笔记」，看它怎么飞过去。直接打字就是搜索，试试「预算」。<kbd>⌘⌫</kbd> 取下一张，<kbd>↓</kbd> 放下更早的绳。下面「在笔记里复制一句」能看新纸条挂上来；把指针停在菜单栏正中，能看路过时的滑落和微风。</p>
+
+  <div class="mac" id="mac" tabindex="0" aria-label="EnCopy 原型。点一下后按 Option+C。" aria-describedby="mode">
+    <div class="menubar">
+      <div class="mb-left"><span class="dot" aria-hidden="true"></span><b>笔记</b><span>文件</span><span class="opt">编辑</span><span class="opt">格式</span><span class="opt">窗口</span></div>
+      <div class="hot" id="hot" aria-hidden="true"></div>
+      <div class="mb-right">
+        <svg class="mb-icon" id="mbIcon" viewBox="0 0 18 12" aria-hidden="true"><path d="M1 2 Q9 7 17 2"/><rect x="4.5" y="3" width="2" height="5" rx=".6"/><rect x="11.5" y="3" width="2" height="5" rx=".6"/></svg>
+        <span>周日 15:13</span>
+      </div>
+    </div>
+
+    <div class="win" aria-label="前台 App：笔记">
+      <div class="wbar"><i></i><i></i><i></i><span>周报草稿 · 笔记</span></div>
+      <div class="wbody" id="noteBody">
+        <h4>周报草稿</h4>
+        <p>本周完成：首页改版评审，剪贴板方案初稿。</p>
+        <p>下周计划：</p>
+        <p class="caretline"><span class="caret"></span></p>
+      </div>
+    </div>
+
+    <div class="panel" id="panel" aria-hidden="true">
+      <div id="rows"></div>
+      <div class="sbar">
+        <label class="search" for="q">
+          <svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="6" cy="6" r="4.3"/><path d="M9.2 9.2 L12.6 12.6"/></svg>
+          <span class="sr">搜索全部历史</span>
+          <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="直接打字搜全部历史，截图里的字也算">
+        </label>
+        <div class="chips" id="chips" role="group" aria-label="类型筛选"></div>
+        <span class="tabhint">Tab 切换</span>
+      </div>
+    </div>
+
+    <div class="ql" id="ql" hidden><div class="ql-box" id="qlBox"></div></div>
+    <div class="hint" id="hint">点一下这块屏幕，再按 ⌥C</div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="under">
+    <p class="modeline" id="mode"></p>
+    <div class="keys" id="keys">
+      <div class="kgroup global"><span class="klabel">全局，只有这一个</span><button type="button" data-k="optc"><kbd>⌥C</kbd>拉下 / 收起</button></div>
+      <div class="kgroup" id="lineKeys" hidden>
+        <span class="klabel">绳子打开后才有</span>
+        <button type="button" data-k="left"><kbd>←</kbd></button>
+        <button type="button" data-k="right"><kbd>→</kbd></button>
+        <button type="button" data-k="down"><kbd>↓</kbd>更早</button>
+        <button type="button" data-k="up"><kbd>↑</kbd></button>
+        <button type="button" data-k="enter"><kbd>⏎</kbd>贴</button>
+        <button type="button" data-k="senter"><kbd>⇧⏎</kbd>纯文本贴</button>
+        <button type="button" data-k="tab"><kbd>Tab</kbd>类型</button>
+        <button type="button" data-k="cmdp"><kbd>⌘P</kbd>收藏</button>
+        <button type="button" data-k="cmdbs"><kbd>⌘⌫</kbd>取下</button>
+        <button type="button" data-k="cmdz"><kbd>⌘Z</kbd>撤销</button>
+        <button type="button" data-k="clean"><kbd>⌘⇧⌫</kbd>清掉筛出的</button>
+        <button type="button" data-k="esc"><kbd>Esc</kbd></button>
+      </div>
+      <p class="kclosed" id="kclosed">绳子收着时，方向键、⏎、Tab、⌘1–9、⌘P、⌘⌫、⌘Z、Esc 都是「笔记」的，EnCopy 一个也不拿。</p>
+      <div class="kgroup sim"><span class="klabel">模拟你在别处的操作</span><button type="button" data-k="copy">在「笔记」里复制一句</button></div>
+    </div>
+  </div>
+
+  <main class="doc">
+    <section id="decided">
+      <h2>这一版定下的 <span class="status">方案和计划都定了，等你说开工</span></h2>
+      <div class="tbl">
+        <table>
+          <tbody>
+            <tr><td class="k">叫出方式</td><td>全局只占 <kbd>⌥C</kbd> 一个键。其他键只在绳子打开时有效，收起就还给当前 App。</td></tr>
+            <tr><td class="k">样式</td><td>纸。一种东西一种纸，看形状就知道是文本、代码、链接、截图还是文件。</td></tr>
+            <tr><td class="k">保留</td><td>文字一年；截图原图 30 天后缩成缩略图，图里的字照样能搜；原图最多占 1 GB。清理前能看到会清什么。</td></tr>
+            <tr><td class="k">手动清理</td><td>可以按类型、时间、来源 App、搜索词清；先看预览再清，清掉的 7 天内能整批放回。</td></tr>
+            <tr><td class="k">动画</td><td>细腻：纸条按轻重摆动，挂上、取下、贴出去都有来去的路线。按键从不等动画。</td></tr>
+            <tr><td class="k">双击</td><td>贴到前台 App；「在预览里打开」挪进右键菜单。</td></tr>
+            <tr><td class="k"><kbd>⌥C</kbd> 落点</td><td>屏幕顶部，落在指针所在的那块屏幕。</td></tr>
+            <tr><td class="k">记录</td><td>默认打开，菜单栏可以一键暂停。</td></tr>
+            <tr><td class="k">语言</td><td>只留简体中文和英文。</td></tr>
+            <tr><td class="k">做法</td><td>在 Tendedero 上改，不从零写；名字和图标换成 EnCopy 自己的，bundle id 是 <code>app.encopy.EnCopy</code>。</td></tr>
+            <tr><td class="k">进度</td><td>方案和实施计划都写完了，还没开工。你说开工后从第一张施工票 T-011 开始。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="premise">
+      <h2>为什么合并这两个</h2>
+      <p>Tendedero 其实会监听剪贴板：源码里的 <code>ClipboardWatcher.swift</code> 每半秒看一次，复制的文字、链接、图片都能挂上绳，只是菜单栏「挂上复制的内容」里的三个开关默认全关。它缺的是 iCopy 擅长的那一半：</p>
+      <ul>
+        <li><b>绳子很短。</b>默认挂满一屏宽就到头，最多能设到 100 件；挂满后最老的一件扔进废纸篓，没有历史可翻。</li>
+        <li><b>不收文件。</b>在访达里复制的文件被明确跳过。</li>
+        <li><b>只能用鼠标。</b>绳子面板从不拿键盘焦点，没有「叫出来、方向键挑、回车」这条路。</li>
+        <li><b>只复制，不粘贴。</b>单击是复制，还得自己再按 <kbd>⌘V</kbd>。iCopy 回车就直接输入到前台 App。</li>
+      </ul>
+      <p>反过来，iCopy 没有 Tendedero 的那一半：截图不落桌面直接上绳，截图里的字能搜，拖出去就能用，长按标注，完全不联网。EnCopy 在 Tendedero 的晾衣绳上加一只篮子装历史，再加一套键盘。</p>
+      <div class="tbl">
+        <table class="wide">
+          <thead><tr><th>能力</th><th>iCopy 1.3.4（你这台 Mac 上的设置）</th><th>Tendedero（主分支源码）</th><th>EnCopy</th></tr></thead>
+          <tbody>
+            <tr><td class="k">叫出来</td><td><kbd>⌥C</kbd> 弹出竖向列表，落在上次关闭的位置</td><td>指针停在菜单栏正中，或 <kbd>⌃⌥T</kbd>；搜索另有 <kbd>⌃⌥F</kbd></td><td>指针停在菜单栏正中，或 <kbd>⌥C</kbd>。全局只占 <kbd>⌥C</kbd></td></tr>
+            <tr><td class="k">记什么</td><td>纯文本、富文本、图片、文件</td><td>文本、链接、图片，默认全关；文件不收</td><td>文本、链接、代码、图片、文件，默认打开</td></tr>
+            <tr><td class="k">留多久</td><td>一个总容量（你设的 1 GB）加一个总时间（你设的一周），所有东西共用</td><td>一屏宽，最多 100 件</td><td>文字和图片分开算；旧截图先缩成缩略图；另有手动清理</td></tr>
+            <tr><td class="k">找东西</td><td>五个分组加搜索</td><td><kbd>⌃⌥F</kbd> 搜绳上的东西，截图里的字也能搜</td><td><kbd>⌥C</kbd> 后直接打字搜整个历史，含截图里的字；<kbd>Tab</kbd> 切分组</td></tr>
+            <tr><td class="k">用出去</td><td>回车、双击输入到前台 App；数字快捷键</td><td>单击复制，拖进 App 或文件夹，长按标注</td><td>回车贴、<kbd>⌘1</kbd>–<kbd>⌘9</kbd>、单击复制，Tendedero 的手势全留</td></tr>
+            <tr><td class="k">截图</td><td>当普通图片记下</td><td>接管截图，不落桌面；录屏能裁剪</td><td>照搬 Tendedero</td></tr>
+            <tr><td class="k">隐私</td><td>按 App 的监听黑名单</td><td>跳过密码框、密码管理器标记、通用剪贴板；不联网</td><td>两样都要，黑名单多一档「记，但一小时后清」</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="concept">
+      <h2>一根绳，一只篮子</h2>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>东西</th><th>在 EnCopy 里是什么</th></tr></thead>
+          <tbody>
+            <tr><td class="k">绳</td><td>最近的东西，一屏宽能挂几件就挂几件。挂在绳上的不过期。</td></tr>
+            <tr><td class="k">篮子</td><td>从绳上掉下去的全部历史。<kbd>⌥C</kbd> 后按 <kbd>↓</kbd>，按天放下「昨天」「本周」「更早」三根绳。</td></tr>
+            <tr><td class="k">木夹</td><td>每张纸一个。收藏的那张夹子漆成深灰，钉在绳结左边，不掉也不过期。</td></tr>
+            <tr><td class="k">号码牌</td><td><kbd>⌥C</kbd> 时夹子旁挂 1 到 9 的圆贴纸，<kbd>⌘1</kbd>–<kbd>⌘9</kbd> 直接贴。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><b>路过：</b>指针停在菜单栏正中，绳子滑下来。只用鼠标，不拿键盘：单击复制，双击贴，指针离开就收起。</li>
+        <li><b>叫它来：</b>按 <kbd>⌥C</kbd>，绳子落在指针所在的那块屏幕，同时接管键盘。EnCopy 自己不变成前台 App，你正在打字的 App 还在前台，所以回车能把东西贴回去。路过时按 <kbd>⌥C</kbd>，绳子不动，直接接管键盘。</li>
+      </ul>
+      <p>最新的一件挂在绳结右边第一个，编号 1，越往右越旧。Tendedero 是新的挂在最右端；改成从左往右，号码顺序和阅读顺序一致，也和 iCopy 里「1 是最新」一致。</p>
+    </section>
+
+    <section id="keys-sec">
+      <h2>按键：全局只占一个 ⌥C</h2>
+      <p>EnCopy 只注册一个全局快捷键 <kbd>⌥C</kbd>，可以改。其余按键只在 <kbd>⌥C</kbd> 把绳子拉下来、拿到键盘之后才生效；绳子一收，这些键全部还给你正在用的 App：<kbd>⌘P</kbd> 还是打印，<kbd>⌘Z</kbd> 还是那个 App 的撤销。路过模式只用鼠标，不拿任何键。</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>按键</th><th>做什么</th><th>来自</th></tr></thead>
+          <tbody>
+            <tr><th class="grp" colspan="3">全局，任何时候</th></tr>
+            <tr><td class="k"><kbd>⌥C</kbd></td><td>拉下绳子并接管键盘；再按一次收起</td><td><span class="tag">iCopy</span></td></tr>
+            <tr><th class="grp" colspan="3">绳子打开后才有，收起就还回去</th></tr>
+            <tr><td class="k"><kbd>←</kbd> <kbd>→</kbd></td><td>在绳上挑，往右是更早</td><td><span class="tag new">新</span></td></tr>
+            <tr><td class="k"><kbd>↓</kbd> <kbd>↑</kbd></td><td>放下下一根绳（昨天、本周、更早），或回到上一根</td><td><span class="tag new">新</span></td></tr>
+            <tr><td class="k">直接打字</td><td>搜全部历史，包括截图里的字。结果挂成一根绳，也有号码牌</td><td><span class="tag">Tendedero</span> <span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>Tab</kbd> <kbd>⇧Tab</kbd></td><td>全部 · 文本 · 链接 · 图片 · 文件 · 收藏</td><td><span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>⏎</kbd></td><td>贴到刚才那个 App</td><td><span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>⇧⏎</kbd></td><td>按纯文本贴</td><td><span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>⌘1</kbd>–<kbd>⌘9</kbd></td><td>直接贴第几件</td><td><span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>⌘C</kbd></td><td>只复制，不贴</td><td><span class="tag">Tendedero</span></td></tr>
+            <tr><td class="k"><kbd>⌘P</kbd></td><td>夹到收藏</td><td><span class="tag">Tendedero</span> <span class="tag">iCopy</span></td></tr>
+            <tr><td class="k"><kbd>⌘⌫</kbd></td><td>取下（删除），<kbd>⌘Z</kbd> 放回</td><td><span class="tag">Tendedero</span></td></tr>
+            <tr><td class="k"><kbd>⌘⇧⌫</kbd></td><td>打开「清理历史」，条件按当前的搜索词和类型填好</td><td><span class="tag new">新</span></td></tr>
+            <tr><td class="k"><kbd>⌘Y</kbd></td><td>快速查看，和访达一样</td><td><span class="tag">Tendedero</span></td></tr>
+            <tr><td class="k"><kbd>⇧←</kbd> <kbd>⇧→</kbd></td><td>多选几件，<kbd>⏎</kbd> 按顺序一次贴出去</td><td><span class="tag">iCopy</span> 的堆栈，简化版</td></tr>
+            <tr><td class="k"><kbd>Esc</kbd></td><td>先清多选，再清搜索，再收起下层的绳，最后收起</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>打字就是搜索，所以空格和退格留给搜索框；取下用 <kbd>⌘⌫</kbd>，快速查看用 <kbd>⌘Y</kbd>。Tendedero 现有的全局键 <kbd>⌃⌥T</kbd>、<kbd>⌃⌥F</kbd>，以及指针停在绳上时临时借走的 <kbd>⌫</kbd>、空格、<kbd>⌘Z</kbd>、<kbd>⌘C</kbd>、<kbd>Esc</kbd>，EnCopy 全部去掉。</p>
+      <p>鼠标手势保留 Tendedero 的：单击复制，长按标注，拖进 App 发一份，拖进文件夹存走，拖进废纸篓取下，右键里有分享、钉住、拿在手上。只改一处：双击改成贴到前台 App；「在预览里打开」挪进右键菜单。</p>
+    </section>
+
+    <section id="style">
+      <h2>样式：纸</h2>
+      <p>一种东西一种纸。你按 <kbd>⌥C</kbd> 是为了找东西，形状比颜色更快分出是链接还是截图。桌面壁纸是你自己的，EnCopy 只画麻绳、木夹和纸。</p>
+      <div class="tbl">
+        <table class="wide">
+          <thead><tr><th>内容</th><th>纸</th><th>一眼怎么认</th><th>纸上写什么</th></tr></thead>
+          <tbody>
+            <tr><td class="k">文本</td><td>收银小票</td><td>底边锯齿</td><td>第一行当标题，等宽字；一条虚线，下面是正文，最多三行</td></tr>
+            <tr><td class="k">代码</td><td>针式打印纸</td><td>两侧一排孔，浅绿条纹</td><td>等宽字，保留换行</td></tr>
+            <tr><td class="k">链接</td><td>牛皮纸吊牌</td><td>上方两角切掉，右上一个穿绳孔</td><td>站点名加粗，下面是路径</td></tr>
+            <tr><td class="k">图片、截图</td><td>拍立得</td><td>白边，下边更宽</td><td>缩略图；下边写来源和时间</td></tr>
+            <tr><td class="k">文件</td><td>牛皮纸文件夹</td><td>左上有标签页</td><td>文件名和所在文件夹</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>状态</h3>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>状态</th><th>样子</th></tr></thead>
+          <tbody>
+            <tr><td class="k">选中</td><td>琥珀色描边沿着纸的形状走，纸往下沉 4 点、放大到 1.06 倍，号码贴纸变琥珀色</td></tr>
+            <tr><td class="k">多选</td><td>同样的描边，不放大</td></tr>
+            <tr><td class="k">收藏</td><td>木夹漆成深灰，钉在绳结左边</td></tr>
+            <tr><td class="k">只剩缩略图</td><td>拍立得左上角一个深色「缩略图」小标</td></tr>
+            <tr><td class="k">搜中图里的字</td><td>右上角黄底「图中文字」</td></tr>
+            <tr><td class="k">文件已不在原处</td><td>文件夹褪成灰色，写「已不在原处」，7 天后清</td></tr>
+            <tr><td class="k">验证码</td><td>小票顶上印一行「10 分钟后清」</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><b>材料：</b>麻绳是两股颜色缠在一起；木夹中间一圈金属弹簧；号码牌是圆形贴纸；行标签（今天、昨天）是一小块牛皮纸。</li>
+        <li><b>尺寸：</b>一张纸 126×104 点，间距 142 点，绳子正中下垂 15 点；窄屏 94×86 点。正文用等宽字，中文回落到苹方。</li>
+        <li><b>深色模式：</b>纸还是浅色的纸；麻绳、底下的面板和搜索栏跟着系统变深。</li>
+        <li><b>考虑过没选：</b>「原生」（细钢丝挂玻璃相框）最省事，但看起来就是 Tendedero；「暗房」（<kbd>⌥C</kbd> 时屏幕变暗，只亮选中那张）专注感强，但一天几十次，屏幕每次都暗一下。</li>
+      </ul>
+    </section>
+
+    <section id="motion">
+      <h2>动画：细腻，但按键从不等它</h2>
+      <p>纸挂在绳上，就该像纸一样动：挂上去会晃，取下来会掉，有风会飘。<kbd>⌥C</kbd> 和方向键一天要按几十上百次，所以有三条规矩：</p>
+      <ol>
+        <li><b>按键在按下那一帧生效。</b>选中、搜索、贴出去都不等动画。动画在旁边跑，下一次按键随时打断它，从当前位置和速度接着走，不排队。</li>
+        <li><b>越常用越克制。</b><kbd>⌥C</kbd>、方向键、打字，动作短、幅度小；纸条挂上来、取下来、路过时滑下来，这些不常有的时刻才给足晃动。</li>
+        <li><b>全部用弹簧，按纸的轻重晃。</b>小票最轻，晃得最久；文件夹最重，最快停下。</li>
+      </ol>
+      <div class="tbl">
+        <table class="wide">
+          <thead><tr><th>时刻</th><th>怎么动</th><th>参数</th></tr></thead>
+          <tbody>
+            <tr><td class="k"><kbd>⌥C</kbd> 拉下</td><td>面板落下；麻绳从绷直弹到下垂；每张纸轻晃 1.5–3°。搜索框第一帧就能打字</td><td class="num">面板 spring(response 0.28, damping 0.86)，约 0.26 秒停稳；绳 spring(0.3, 0.85)</td></tr>
+            <tr><td class="k"><kbd>⌥C</kbd>、<kbd>Esc</kbd> 收起</td><td>面板向上收，不回弹</td><td class="num">0.16 秒 ease-out cubic-bezier(.23, 1, .32, 1)</td></tr>
+            <tr><td class="k">路过滑下</td><td>慢一点；纸条从左到右依次晃起，像一阵风扫过；麻绳弹两下</td><td class="num">面板 spring(0.42, 0.82)，沿用 Tendedero；晃 5–9°，最右一张晚 0.26 秒；绳 spring(0.5, 0.5)</td></tr>
+            <tr><td class="k"><kbd>←</kbd> <kbd>→</kbd> 挑</td><td>选中那张沉下、放大、描边；要滚动时整根绳滑过去，纸条因为惯性往反方向荡 1–2°。按住方向键连发时不荡</td><td class="num">选中 0.11 秒 ease-out；滑动 spring(0.24, 1)，不回弹</td></tr>
+            <tr><td class="k">打字搜索、<kbd>Tab</kbd></td><td>不匹配的纸向上淡出；剩下的滑拢；新出现的从上方落到绳上</td><td class="num">淡出 0.12 秒；滑拢 spring(0.24, 1)；落下 spring(0.42, 0.72)</td></tr>
+            <tr><td class="k"><kbd>↓</kbd> 放下一根绳</td><td>新绳从上一根下面落下，麻绳弹一下</td><td class="num">0.2 秒 ease-out；绳 spring(0.3, 0.85)</td></tr>
+            <tr><td class="k"><kbd>⏎</kbd> 贴出去</td><td>选中那张离开夹子，缩小着飞向你的光标；面板同时收起。真正的粘贴在按键那一帧就发出，飞的只是告诉你它去了哪</td><td class="num">飞 0.3 秒 ease-out cubic-bezier(.23, 1, .32, 1)，缩到 0.16 倍</td></tr>
+            <tr><td class="k">新复制的挂上来</td><td>新纸从上方落到绳结右边，木夹先张开再夹紧，晃 16° 慢慢停；其余纸往右让一格</td><td class="num">晃 interpolatingSpring(stiffness 46, damping 2.6)；让位 spring(0.55, 0.78)，都沿用 Tendedero</td></tr>
+            <tr><td class="k">绳子收着时复制</td><td>菜单栏图标里的小夹子晃一下，不弹任何东西</td><td class="num">0.6 秒，一次</td></tr>
+            <tr><td class="k"><kbd>⌘P</kbd> 收藏</td><td>纸沿绳滑到绳结左边，夹子变深灰，落定时轻晃</td><td class="num">spring(0.55, 0.78)</td></tr>
+            <tr><td class="k"><kbd>⌘⌫</kbd> 取下</td><td>木夹张开，纸先立刻沉 5 点，再带着当时的摆动往下掉、转一点、淡出；两边的纸滑拢</td><td class="num">0.42 秒：前 10% 用 ease-out 让按键那一帧就有反应，之后按重力加速</td></tr>
+            <tr><td class="k">单击复制</td><td>那张纸轻轻一跳</td><td class="num">向上约 7 点，spring(0.42, 0.72) 落回</td></tr>
+            <tr><td class="k">微风</td><td>绳子开着、你 4 秒没按键时，偶尔吹过一阵；打字和挑选时不吹</td><td class="num">间隔 7–16 秒，每张 1.6–3.4°，各自错开 0–0.35 秒，沿用 Tendedero；<kbd>⌥C</kbd> 时幅度减半</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><b>纸的轻重</b>（摆动弹簧 stiffness / damping，越大越快停）：小票 38 / 2.4，吊牌 42 / 2.6，拍立得 46 / 2.8，打孔纸 50 / 3.0，文件夹 58 / 3.4。拍立得那一档就是 Tendedero 现在的挂上手感。</p>
+      <p><b>和 Tendedero 不同的一处：</b>它收起绳子用 0.22 秒 ease-in，起步慢；EnCopy 改成 0.16 秒 ease-out，按 <kbd>Esc</kbd> 那一刻就开始走。</p>
+      <p><b>减弱动态效果：</b>系统打开「减弱动态效果」时，不晃、不吹风、不飞、不掉；面板只做 0.12 秒淡入淡出，选中只换描边，取下只淡出。</p>
+      <p><b>实现：</b>面板和滑动直接用 SwiftUI 的 <code>spring(response:dampingFraction:)</code>，摆动用 <code>interpolatingSpring(stiffness:damping:)</code>，数值照上表。绳子的下垂和每张纸的摆角放进一个按屏幕刷新率计算的小循环，全部静止后停掉，不空转；在 120 Hz 屏上自动跟到 120 帧。</p>
+    </section>
+
+    <section id="retention">
+      <h2>保留和过期：分开算，先缩再删</h2>
+      <p>你在 iCopy 里设一周，是为了省空间。在它那套规则里，想多留文字就得连截图一起多留：只有一个总容量（1 GB）和一个总时间，一句十几个字的文字和一张 3.24 MB 的截图（你面板里就有一张）用同一把尺子。照这个大小算，1 GB 只装得下三百来张截图。</p>
+      <p>EnCopy 把两者分开：文字几乎不占地方，放心留一年；真正占地方的是截图原图，30 天后缩成缩略图，图里的字留着，还能搜到。</p>
+      <div class="tbl">
+        <table class="wide">
+          <thead><tr><th>什么</th><th>留多久（默认）</th><th>到期以后</th><th>空间不够时</th></tr></thead>
+          <tbody>
+            <tr><td class="k">挂在绳上的</td><td>不过期</td><td></td><td>不动</td></tr>
+            <tr><td class="k">收藏</td><td>一直</td><td></td><td>不动，单独显示占用</td></tr>
+            <tr><td class="k">文字、链接、代码</td><td>一年</td><td>先进「最近清掉」，7 天内能找回，之后才删</td><td>从不因为空间被删</td></tr>
+            <tr><td class="k">截图和图片</td><td>原图 30 天</td><td>原图删掉，留长边 1024 像素的缩略图和图里识别出的字：还能看、能搜、能贴（贴出去是缩略图）。缩略图跟文字一样留一年</td><td>原图合计超过上限（默认 1 GB）时，从最旧的原图开始提前缩</td></tr>
+            <tr><td class="k">文件</td><td>只记路径，不复制文件本体；一年</td><td>原文件被删或挪走时，标「已不在原处」，7 天后清</td><td>几乎不占地方</td></tr>
+            <tr><td class="k">验证码</td><td>10 分钟</td><td>直接删，不进「最近清掉」</td><td></td></tr>
+            <tr><td class="k">按 App：「一小时后清」</td><td>1 小时</td><td>直接删</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><b>时间从最后一次用到算起。</b>「用到」是从 EnCopy 贴出去、复制出去，或者又复制了一遍一样的内容。一样的内容只存一份，又复制一遍就挪回绳头，重新计时。</li>
+        <li><b>验证码：</b>4 到 8 位纯数字，来自「信息」或「邮件」，或者前后有「验证码」「code」字样。</li>
+        <li><b>什么时候清：</b>每天一次，在 Mac 空闲时；打开 EnCopy 时补一次；<kbd>⌥C</kbd> 开着的时候不清。设置里随时能看到下一次会清什么。</li>
+      </ul>
+      <h3>保留设置</h3>
+      <p>下面这块能点。篮子里的数据是编的示例；文字每条按 1.5 KB 估算（含搜索索引），截图原图按你那张的 3.2 MB 估算，缩略图按 0.15 MB 估算。</p>
+      <div class="ret" id="ret">
+        <div class="ret-head">EnCopy 设置 · 保留</div>
+        <div class="ret-row">
+          <div><h4 id="rt-text">文字、链接、代码、文件</h4><p>从最后一次用到算起。到期先进「最近清掉」，7 天内能找回。</p></div>
+          <div class="seg" role="group" aria-labelledby="rt-text" data-key="text"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4 id="rt-img">截图和图片的原图</h4><p>到期后缩成缩略图，图里的字留着；缩略图跟着文字的期限走。</p></div>
+          <div class="seg" role="group" aria-labelledby="rt-img" data-key="img"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4 id="rt-cap">原图最多占用</h4><p>超出时从最旧的原图开始提前缩。文字不会因为空间被删。</p></div>
+          <div class="seg" role="group" aria-labelledby="rt-cap" data-key="cap"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4>收藏、挂在绳上的</h4><p>不过期，不算进上面的上限。</p></div>
+          <div class="fixed">一直留</div>
+        </div>
+        <div class="ret-row">
+          <div><h4>手动清理</h4><p>按类型、时间、来源 App 清，见下一节。</p></div>
+          <button type="button" class="btn" id="toClean">清理历史…</button>
+        </div>
+        <div class="usage">
+          <h4>占用和下一次清理</h4>
+          <div class="ubar" aria-hidden="true"><i class="u-text" id="uText"></i><i class="u-orig" id="uOrig"></i><i class="u-thumb" id="uThumb"></i></div>
+          <div class="ulegend" id="uLegend"></div>
+          <p class="forecast" id="forecast"></p>
+          <p class="sample">示例篮子：文字 29,780 条、截图 1,826 张，按最后一次用到的时间分布在 1 天内到 1 年以上。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="cleanup">
+      <h2>手动清理：想清什么，自己挑</h2>
+      <p>自动规则管日常；你想「现在就清一批」时，用「清理历史」。先挑条件，看预览，再清。清掉的东西先进「最近清掉」，7 天内能整批放回。</p>
+      <h3>从哪里打开</h3>
+      <ul>
+        <li>设置 → 保留 →「清理历史…」。</li>
+        <li>菜单栏图标 →「清理历史…」。</li>
+        <li><kbd>⌥C</kbd> 打开后，先用搜索和 <kbd>Tab</kbd> 筛出想清的，再按 <kbd>⌘⇧⌫</kbd>：清理面板打开，条件已经按你筛的填好。</li>
+        <li>右键某一根绳的标签（今天、昨天、本周、更早）→「清掉这一根」。</li>
+      </ul>
+      <h3>能按什么清</h3>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>条件</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td class="k">类型</td><td>文本、链接、代码、图片、文件，可以多选</td></tr>
+            <tr><td class="k">时间</td><td>今天、最近 7 天、最近 30 天、30 天以前、全部，或自定义起止日期；按最后一次用到的时间算</td></tr>
+            <tr><td class="k">来源 App</td><td>只清某几个 App 复制的，可以多选，列出每个 App 有多少件</td></tr>
+            <tr><td class="k">包含的文字</td><td>只清内容里有这些字的，截图里识别出的字也算；从 <kbd>⌥C</kbd> 的搜索带过来</td></tr>
+            <tr><td class="k">收藏</td><td>默认不清，要勾上才清</td></tr>
+            <tr><td class="k">图片怎么清</td><td>「只清原图」：缩成缩略图，图里的字还能搜，省出大部分空间；「整张清掉」：连缩略图一起</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>清之前、清之后</h3>
+      <ul>
+        <li><b>按钮写清楚会发生什么：</b>「清掉 3,402 件，腾出 540 MB」，不写「确定」。</li>
+        <li><b>清之前有预览：</b>每类多少、一共腾出多少、哪些早就只剩缩略图这次不动。</li>
+        <li><b>「最近清掉」按批次列：</b>「今天 15:20 手动清理 3,402 件」「昨晚自动清理 412 件」，每批可以整批放回，或者立刻彻底删除。7 天后自动删除。</li>
+        <li><b>找不回的事先说：</b>「只清原图」删掉的原图找不回，面板上直接写出来。</li>
+        <li><b>清空全部要再确认一次：</b>类型全选、时间选「全部」时，按钮变成「清空全部历史…」，在面板里再点一次才清。</li>
+      </ul>
+      <h3>清理面板</h3>
+      <p>下面这块能点，数据是编的示例，规模接近上面的示例篮子按默认规则清理后剩下的部分。来源 App 和包含的文字两个条件在示例里不演示。</p>
+      <div class="ret" id="clean">
+        <div class="ret-head">EnCopy · 清理历史</div>
+        <div class="ret-row">
+          <div><h4 id="cl-type-h">类型</h4><p>可以多选。</p></div>
+          <div class="seg" role="group" aria-labelledby="cl-type-h" id="clType"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4 id="cl-time-h">时间</h4><p>按最后一次用到的时间算。真实界面里还有「自定义」起止日期。</p></div>
+          <div class="seg" role="group" aria-labelledby="cl-time-h" id="clTime"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4 id="cl-img-h">图片怎么清</h4><p>只清原图：缩成缩略图，图里的字还能搜；删掉的原图找不回。</p></div>
+          <div class="seg" role="group" aria-labelledby="cl-img-h" id="clImg"></div>
+        </div>
+        <div class="ret-row">
+          <div><h4><label for="clFav">也清掉收藏的</label></h4><p>默认不清。</p></div>
+          <input type="checkbox" id="clFav">
+        </div>
+        <div class="usage">
+          <h4>会清掉什么</h4>
+          <p class="forecast" id="clPreview"></p>
+          <div class="cl-actions"><button type="button" class="btn" id="clCancel">取消</button><button type="button" class="btn danger" id="clGo"></button></div>
+          <div class="cl-box cl-confirm" id="clConfirm" hidden><p id="clConfirmText"></p><div class="btns"><button type="button" class="btn" id="clNo">先不清</button><button type="button" class="btn danger" id="clYes">清空</button></div></div>
+          <div class="cl-box cl-banner" id="clBanner" role="status" hidden><p id="clBannerText"></p><div class="btns"><button type="button" class="btn" id="clUndo">放回</button></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <h2>隐私和权限</h2>
+      <ul>
+        <li>照搬 Tendedero 的规矩：在密码框里输入时、密码管理器标为私密或临时的、从 iPhone 通用剪贴板过来的，一律不记。全部在本机，不联网，存下的文件只有你能读。</li>
+        <li>App 黑名单三档：不记、记但一小时后清、正常。预装「密码」和「钥匙串访问」为不记。</li>
+        <li>记录默认打开。第一次启动说清楚记什么、存在哪、留多久，菜单栏可以一键暂停。</li>
+        <li>贴到前台 App 要「辅助功能」权限，和 iCopy 一样。第一次按 <kbd>⏎</kbd> 时才请求；没给权限时只复制，并提示按 <kbd>⌘V</kbd>。</li>
+      </ul>
+    </section>
+
+    <section id="tech">
+      <h2>技术路线</h2>
+      <p>在 Tendedero 上 fork。代码是 MIT 许可，可以直接改；名字和图标不在许可里，所以新 App 叫 EnCopy，图标自己画。Swift、AppKit、SwiftUI，macOS 14 起。Tendedero 一共约 6,600 行，规模小，改得动。</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>部分</th><th>做法</th></tr></thead>
+          <tbody>
+            <tr><td class="k">原样保留</td><td>手势（<code>GrabArea</code>），便签与 Markdown，截图接管（<code>ScreenshotWatcher</code>、<code>Inbox</code>），标注、裁剪、放大、拿在手上、分享、快速查看，全屏时隐藏</td></tr>
+            <tr><td class="k">全局快捷键</td><td>只注册 <kbd>⌥C</kbd>，沿用 <code>HotKey.swift</code>。去掉 <kbd>⌃⌥T</kbd>、<kbd>⌃⌥F</kbd> 和指针停在绳上时临时注册的全局键；这些键改由 <kbd>⌥C</kbd> 面板拿到键盘后自己处理</td></tr>
+            <tr><td class="k">纸</td><td>重画 <code>PeggedView</code>：五种纸各一个形状（锯齿边、打孔、吊牌缺角、拍立得白边、文件夹标签页），木夹、麻绳、号码贴纸。<code>LineView</code> 的绳子换成麻绳</td></tr>
+            <tr><td class="k">动画</td><td>面板和滑动用 SwiftUI 弹簧；摆动从 <code>PeggedView</code> 里现有的 <code>swing</code> 扩成按纸的轻重取参数；绳子下垂和微风放进一个按帧计算的循环，静止就停。取下、贴出去的飞行画在一个不拿焦点的透明窗口上，不耽误粘贴</td></tr>
+            <tr><td class="k">改 <code>ClipboardWatcher</code></td><td>收文件，只记路径和书签；记下复制时的前台 App；App 三档规则；认验证码；一样的内容合并成一件；默认打开</td></tr>
+            <tr><td class="k">改 <code>Line</code></td><td>挂满时最老的一件从「扔进废纸篓」改成「放进篮子」；新的挂在绳结右边；号码牌</td></tr>
+            <tr><td class="k">换存储</td><td>现在绳上有什么存在 UserDefaults 里（一串文件路径），搜索索引是一个 JSON 文件，只管绳上那几件。换成 SQLite：一张历史表加 FTS5 全文索引，截图识别出的文字一起进索引。用系统自带的 libsqlite3，不加第三方依赖。原图、缩略图、富文本照旧存成文件</td></tr>
+            <tr><td class="k">清理</td><td>自动规则和手动清理共用一套「先算后做」：先按条件算出要动的清单，预览显示的就是这份清单，确认后才执行。每件东西记「最后一次用到」和状态（完整、只剩缩略图、最近清掉）。「最近清掉」带批次号，整批放回就是把状态改回来</td></tr>
+            <tr><td class="k">⌥C 面板</td><td>Tendedero 的绳子面板故意不拿键盘，这点不动。另加一个能拿键盘、但不激活 App 的面板，放搜索框和选择状态；Tendedero 的搜索栏已经是这么做的</td></tr>
+            <tr><td class="k">贴入</td><td>面板收起后，把选中的放上剪贴板，再对前台 App 发一次 <kbd>⌘V</kbd>。需要辅助功能权限</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="plan">
+      <h2>分几步做</h2>
+      <p>每一步都能单独用起来。第 1 步拆成两张施工票：T-011 改名成 EnCopy、原样能跑，T-012 <kbd>⌥C</kbd> 挑一件贴回前台 App；第 2 步从 T-013 开始。后面的等前三张做完、对照 spec 看过再切。验收分两层：自动检查每次改完都跑，真机在备忘录、微信、终端里每步收尾走一遍。</p>
+      <ol class="steps">
+        <li><b>先打通一条线。</b>fork，改名，能编译运行。<kbd>⌥C</kbd> 拉下现有的绳子，<kbd>←</kbd> <kbd>→</kbd> 挑，<kbd>⏎</kbd> 贴进前台 App。先验掉最没把握的三件事：全局快捷键、拿键盘却不抢前台、模拟粘贴。
+          <span class="acc">验收：在备忘录、微信、终端里各试一次，焦点不跑，贴进去的就是选中的那件；绳子收起后 <kbd>⌘Z</kbd>、方向键在这三个 App 里照常工作。</span></li>
+        <li><b>篮子、过期和清理。</b>SQLite 历史；挂满掉进篮子；打字搜全部历史，含截图里的字；自动规则、清理面板、「最近清掉」。
+          <span class="acc">验收：连续复制 200 件，第 150 件用三四个字能搜到并贴出；重启后都还在；清理面板预览的件数和实际清掉的一致，整批放回后一件不少。</span></li>
+        <li><b>iCopy 的日常件。</b><kbd>Tab</kbd> 筛选、<kbd>⌘1</kbd>–<kbd>⌘9</kbd>、文件、来源 App、App 三档规则、验证码。
+          <span class="acc">验收：在「不记」的 App 里复制的内容，历史和索引里都查不到；验证码 10 分钟后查不到。</span></li>
+        <li><b>纸和动画。</b>五种纸、木夹、麻绳；上面动画表里的每一行；减弱动态效果。<kbd>↓</kbd> 按天展开，<kbd>⇧</kbd> 多选按顺序贴。
+          <span class="acc">验收：在 60 Hz 和 120 Hz 屏上各走一遍动画表；按住方向键连发时不掉帧、纸不荡；打开「减弱动态效果」后只剩淡入淡出。</span></li>
+      </ol>
+    </section>
+
+    <section id="later">
+      <h2>先不做</h2>
+      <ul>
+        <li>快捷回复。先用「收藏」里的小票代替，用多了再单独做。</li>
+        <li>iCloud 同步、Excel 导入导出。EnCopy 先保持不联网。</li>
+        <li>从 iCopy 导入历史。它的数据格式没有公开，要逆向，单独评估。</li>
+      </ul>
+    </section>
+
+    <section id="files">
+      <h2>计划放在哪</h2>
+      <p>所有决定都定了。实施计划用项目地图管理，都在项目文件夹里：</p>
+      <ul>
+        <li><code>.project-map/MAP.md</code>：目标、已定的决定、还没切成工单的部分、不做的。每次开工先看它。</li>
+        <li><code>.project-map/specs/encopy-v1.md</code>：v1 的 spec，写着验收方式。</li>
+        <li><code>.project-map/specs/tendedero-fork-map.md</code>：Tendedero 每个文件留、改还是删，在哪一步动。</li>
+        <li><code>.project-map/tickets/</code>：每个决定一张票（T-001 到 T-010、T-014），三张施工票 T-011 到 T-013，每张都有验收清单。</li>
+        <li><code>CONTEXT.md</code>：词汇表，代码、文档和对话统一用这些词。</li>
+      </ul>
+      <p>前三张施工票做完后，对照 spec 看哪里不对，再切下一批。</p>
+    </section>
+  </main>
+
+  <p class="foot">原型里的条目、设置里的篮子和清理面板里的数据都是编的示例。依据：iCopy 1.3.4 的设置页和 ⌥C 面板（在你的 Mac 上看的），Tendedero 主分支源码（2026-11-22 拉取），动画参数里标「沿用 Tendedero」的取自它的 <code>PeggedView.swift</code>、<code>LineView.swift</code> 和 <code>Line.swift</code>。</p>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const mac = $('#mac'), panel = $('#panel'), rowsEl = $('#rows'), q = $('#q'), chipsEl = $('#chips');
+  const noteBody = $('#noteBody'), toastEl = $('#toast'), hintEl = $('#hint'), modeEl = $('#mode');
+  const hot = $('#hot'), ql = $('#ql'), qlBox = $('#qlBox'), keysEl = $('#keys'), lineKeys = $('#lineKeys'), kclosed = $('#kclosed'), mbIcon = $('#mbIcon');
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const ART = {
+    chart: '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><rect width="120" height="80" fill="#fbfcfd"/><rect width="120" height="10" fill="#e7ebef"/><circle cx="6" cy="5" r="1.6" fill="#b9c1c9"/><circle cx="11" cy="5" r="1.6" fill="#b9c1c9"/><rect x="10" y="17" width="34" height="4" rx="2" fill="#2b333c"/><rect x="10" y="24" width="22" height="3" rx="1.5" fill="#a9b2bb"/><polyline points="10,66 26,58 42,61 58,46 74,50 90,34 108,38" fill="none" stroke="#3b8c98" stroke-width="2.2" stroke-linejoin="round"/><polyline points="10,70 26,66 42,68 58,60 74,63 90,55 108,57" fill="none" stroke="#c2873a" stroke-width="1.6" stroke-dasharray="3 2"/><line x1="10" y1="73" x2="110" y2="73" stroke="#d5dbe1"/></svg>',
+    ui: '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><rect width="120" height="80" fill="#eceff2"/><rect width="34" height="80" fill="#2b3038"/><rect x="7" y="14" width="20" height="4" rx="2" fill="#7c8590"/><rect x="7" y="24" width="20" height="4" rx="2" fill="#e9b43c"/><rect x="7" y="34" width="20" height="4" rx="2" fill="#7c8590"/><rect x="7" y="44" width="20" height="4" rx="2" fill="#7c8590"/><rect x="42" y="12" width="70" height="26" rx="4" fill="#fff"/><rect x="48" y="18" width="26" height="3" rx="1.5" fill="#5c6773"/><rect x="92" y="17" width="14" height="6" rx="3" fill="#4a74c2"/><rect x="48" y="28" width="34" height="3" rx="1.5" fill="#a9b2bb"/><rect x="42" y="44" width="70" height="26" rx="4" fill="#fff"/><rect x="48" y="50" width="30" height="3" rx="1.5" fill="#5c6773"/><rect x="92" y="49" width="14" height="6" rx="3" fill="#c8ced4"/><rect x="48" y="60" width="22" height="3" rx="1.5" fill="#a9b2bb"/></svg>',
+    board: '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><rect width="120" height="80" fill="#f7f6f1"/><path d="M12 20 h40 v28 h-40z" fill="none" stroke="#2f6fb0" stroke-width="2"/><path d="M64 14 h44 v20 h-44z" fill="none" stroke="#2f6fb0" stroke-width="2"/><path d="M64 44 h44 v24 h-44z" fill="none" stroke="#b5452f" stroke-width="2"/><path d="M52 34 C58 34 58 24 64 24" fill="none" stroke="#333" stroke-width="1.6"/><path d="M86 34 v10" stroke="#333" stroke-width="1.6"/><rect x="17" y="28" width="24" height="3" rx="1.5" fill="#2f6fb0"/><rect x="69" y="21" width="26" height="3" rx="1.5" fill="#2f6fb0"/><rect x="69" y="53" width="30" height="3" rx="1.5" fill="#b5452f"/></svg>',
+    bars: '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><rect width="120" height="80" fill="#1d232a"/><rect x="10" y="10" width="30" height="4" rx="2" fill="#8a96a3"/><g fill="#5b7fb8"><rect x="12" y="46" width="9" height="22" rx="1.5"/><rect x="26" y="38" width="9" height="30" rx="1.5"/><rect x="40" y="50" width="9" height="18" rx="1.5"/><rect x="54" y="32" width="9" height="36" rx="1.5"/><rect x="68" y="42" width="9" height="26" rx="1.5"/><rect x="96" y="36" width="9" height="32" rx="1.5"/></g><rect x="82" y="24" width="9" height="44" rx="1.5" fill="#9cc0f0"/></svg>',
+    login: '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><rect width="120" height="80" fill="#f3f5f8"/><rect x="30" y="10" width="60" height="60" rx="6" fill="#fff" stroke="#dfe4ea"/><circle cx="60" cy="22" r="5" fill="#c2873a"/><rect x="38" y="33" width="44" height="7" rx="2" fill="#eef1f4" stroke="#d5dbe1"/><rect x="38" y="44" width="44" height="7" rx="2" fill="#eef1f4" stroke="#d5dbe1"/><rect x="38" y="56" width="44" height="7" rx="3.5" fill="#3b8c98"/></svg>'
+  };
+
+  let seq = 0;
+  const mk = (day, o) => Object.assign({ id: 'c' + (seq++), day, pinned: false }, o);
+  let items = [
+    mk(9, { kind: 'text', title: '邮件签名', body: '产品设计组\n周一至周五 10:00–19:00', app: '备忘录', ago: '2 个月前', pinned: true }),
+    mk(9, { kind: 'file', name: '品牌规范 v3.pdf', folder: '设计资料', app: '访达', ago: '3 周前', pinned: true }),
+    mk(0, { kind: 'text', title: '周会改到周四 15:00', body: '记得带上 Q4 预算表和上周的转化数据。', app: '微信', ago: '2 分钟前' }),
+    mk(0, { kind: 'link', url: 'https://github.com/alejandrobujan/tendedero', app: 'Safari', ago: '4 分钟前' }),
+    mk(0, { kind: 'image', art: 'chart', ocr: 'Q4 预算 渠道 转化率 十一月 投放', app: '截图', ago: '12 分钟前' }),
+    mk(0, { kind: 'code', body: 'git clone git@github.com:alejandrobujan/tendedero.git\ncd tendedero\nscripts/build-app.sh', app: '终端', ago: '20 分钟前' }),
+    mk(0, { kind: 'file', name: '发票-2026-11.pdf', folder: '下载', app: '访达', ago: '38 分钟前' }),
+    mk(0, { kind: 'link', url: 'https://tendedero.app/', app: 'Safari', ago: '1 小时前' }),
+    mk(0, { kind: 'text', title: '给设计组', body: '附件是 v0.3 方案，周四会上过一遍，有问题提前说。', app: '邮件', ago: '2 小时前' }),
+    mk(0, { kind: 'image', art: 'ui', ocr: '偏好设置 快捷键 剪切板 黑名单 数据备份', app: '截图', ago: '3 小时前' }),
+    mk(0, { kind: 'code', body: '{ "textKeep": "1y", "imageKeep": "30d" }', app: 'Xcode', ago: '5 小时前' }),
+    mk(0, { kind: 'text', title: '快递单号', body: 'SF 1428 5530 9921，周三下午到。', app: '微信', ago: '6 小时前' }),
+    mk(1, { kind: 'text', title: '午饭', body: '楼下那家面馆，12:10 门口见。', app: '微信', ago: '昨天 18:40' }),
+    mk(1, { kind: 'image', art: 'board', ocr: '会议室 3F 北区 白板 流程', app: '截图', ago: '昨天 16:02' }),
+    mk(1, { kind: 'link', url: 'https://developer.apple.com/documentation/appkit/nspanel', app: 'Safari', ago: '昨天 15:30' }),
+    mk(1, { kind: 'file', name: '季度复盘.key', folder: '文稿', app: '访达', ago: '昨天 11:05' }),
+    mk(1, { kind: 'code', body: 'brew install tendedero', app: '终端', ago: '昨天 10:12' }),
+    mk(1, { kind: 'text', title: '预算口径', body: '按自然月算，不含税；渠道费用单列。', app: '飞书', ago: '昨天 09:41' }),
+    mk(2, { kind: 'image', art: 'bars', ocr: '日活 留存 周环比 预算', app: '截图', ago: '周四 17:20' }),
+    mk(2, { kind: 'text', title: '访客网络', body: '名称 Guest-5G，密码问前台。', app: '备忘录', ago: '周三 09:15' }),
+    mk(2, { kind: 'link', url: 'https://github.com/alejandrobujan/tendedero/blob/main/Sources/Tendedero/ClipboardWatcher.swift', app: 'Safari', ago: '周三 08:50' }),
+    mk(2, { kind: 'file', name: '合同扫描.pdf', folder: '下载', app: '访达', ago: '周二 16:30' }),
+    mk(2, { kind: 'code', body: "SELECT * FROM history\nWHERE kind = 'image'\nORDER BY used DESC LIMIT 9;", app: 'DataGrip', ago: '周二 11:02' }),
+    mk(3, { kind: 'text', title: '周报模板', body: '本周完成 / 下周计划 / 需要支持', app: '备忘录', ago: '11月12日' }),
+    mk(3, { kind: 'image', art: 'login', ocr: '登录 注册 忘记密码', app: '截图', ago: '11月10日' }),
+    mk(3, { kind: 'link', url: 'https://sqlite.org/fts5.html', app: 'Safari', ago: '11月8日' }),
+    mk(3, { kind: 'file', name: '设计稿-首页.fig', folder: '下载', app: '访达', ago: '11月3日' }),
+    mk(3, { kind: 'text', title: '地址模板', body: '收件人 / 电话 / 省市区 / 详细地址', app: '备忘录', ago: '10月30日' }),
+    mk(3, { kind: 'image', art: 'board', ocr: '迭代排期 白板 九月', app: '截图', ago: '9月18日', thumb: true })
+  ];
+  const SAMPLES = [
+    { kind: 'text', title: '评审改到下周二', body: '10:00，3F 北区会议室，记得投屏。' },
+    { kind: 'link', url: 'https://tendedero.app/?lang=zh' },
+    { kind: 'code', body: 'scripts/build-app.sh && open build/EnCopy.app' },
+    { kind: 'text', title: '快递到了', body: '放在前台，取件码 4417。' }
+  ];
+
+  const FILTERS = [
+    { name: '全部', dot: 'var(--dot-all)', test: () => true, clean: ['text', 'link', 'code', 'image', 'file'] },
+    { name: '文本', dot: 'var(--dot-text)', test: (it) => it.kind === 'text' || it.kind === 'code', clean: ['text', 'code'] },
+    { name: '链接', dot: 'var(--dot-link)', test: (it) => it.kind === 'link', clean: ['link'] },
+    { name: '图片', dot: 'var(--dot-image)', test: (it) => it.kind === 'image', clean: ['image'] },
+    { name: '文件', dot: 'var(--dot-file)', test: (it) => it.kind === 'file', clean: ['file'] },
+    { name: '收藏', dot: 'var(--dot-pin)', test: (it) => it.pinned, clean: ['text', 'link', 'code', 'image', 'file'] }
+  ];
+  const DAYS = ['今天', '昨天', '本周', '更早'];
+  const MODE_TEXT = {
+    none: '<b>收着。</b>EnCopy 只占一个全局键 ⌥C，别的键都还是「笔记」的。',
+    hover: '<b>路过模式。</b>只用鼠标：单击复制，双击贴进「笔记」，指针离开就收起。键盘还在「笔记」手里。',
+    summon: '<b>⌥C 模式。</b>键盘交给 EnCopy，前台还是「笔记」。←→ 挑，⏎ 贴回去，打字就是搜索。一收起，这些键马上还回去。'
+  };
+
+  let mode = null, shown = 1, sel = { row: 0, idx: 0 }, filter = 0, query = '';
+  let multi = [], scrolls = {}, undoStack = [], curRows = [], G = {}, focused = false, lastKeyAt = 0;
+  const rowEls = new Map();
+
+  chipsEl.innerHTML = FILTERS.map((f, i) => `<button type="button" data-i="${i}" aria-pressed="${i === 0}"><i style="background:${f.dot}"></i>${f.name}</button>`).join('');
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const words = () => (mode === 'summon' ? query.trim().toLowerCase().split(/\s+/).filter(Boolean) : []);
+  function hl(s) {
+    s = String(s == null ? '' : s);
+    const ws = words();
+    if (!ws.length) return esc(s);
+    const re = new RegExp('(' + ws.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+    return s.split(re).map((p, i) => (i % 2 ? '<mark>' + esc(p) + '</mark>' : esc(p))).join('');
+  }
+  const textOf = (it) => [it.title, it.body, it.url, it.name, it.folder, it.app].filter(Boolean).join(' ').toLowerCase();
+  const hay = (it) => textOf(it) + ' ' + (it.ocr || '').toLowerCase();
+  const ocrHit = (it) => { const ws = words(); return ws.length > 0 && !!it.ocr && ws.some((w) => !textOf(it).includes(w) && it.ocr.toLowerCase().includes(w)); };
+  function linkParts(url) {
+    const u = new URL(url);
+    return { site: u.hostname.replace(/^www\./, ''), path: (u.pathname + u.search).replace(/\/$/, '') || '/' };
+  }
+  function label(it) {
+    const s = it.title || it.name || (it.url ? linkParts(it.url).site : '') || (it.kind === 'image' ? '截图' : (it.body || '').split('\n')[0]);
+    return s.length > 16 ? s.slice(0, 16) + '…' : s;
+  }
+  const find = (id) => items.find((x) => x.id === id);
+
+  function face(it) {
+    let inner = '';
+    if (it.kind === 'text') inner = `<div class="f-text"><div class="t">${hl(it.title)}</div><div class="b">${hl(it.body)}</div></div>`;
+    else if (it.kind === 'code') inner = `<pre class="f-code">${hl(it.body)}</pre>`;
+    else if (it.kind === 'link') { const p = linkParts(it.url); inner = `<div class="f-link"><div class="site">${hl(p.site)}</div><div class="path">${hl(p.path)}</div></div>`; }
+    else if (it.kind === 'image') inner = `<div class="f-img">${ART[it.art]}</div>${it.thumb ? '<span class="thumbtag">缩略图</span>' : ''}${ocrHit(it) ? '<span class="ocr">图中文字</span>' : ''}`;
+    else if (it.kind === 'file') inner = `<div class="f-file"><div class="fn">${hl(it.name)}</div><div class="fd">${hl(it.folder)}</div></div>`;
+    return `<div class="paper">${inner}</div><div class="meta"><span>${hl(it.app)}</span><span>${esc(it.ago)}</span></div>`;
+  }
+
+  function buildRows() {
+    const f = FILTERS[filter].test;
+    if (mode === 'summon' && query.trim()) {
+      const ws = words();
+      const res = items.filter(f).filter((it) => ws.every((w) => hay(it).includes(w)));
+      return [{ key: 'search', label: `搜索 · ${res.length} 件`, pins: 0, items: res, numbered: true }];
+    }
+    const pins = items.filter((it) => it.pinned && f(it));
+    const rows = [{ key: 'd0', label: DAYS[0], pins: pins.length, items: pins.concat(items.filter((it) => !it.pinned && it.day === 0 && f(it))), numbered: true }];
+    if (mode === 'summon') {
+      for (let d = 1; d < shown; d++) rows.push({ key: 'd' + d, label: DAYS[d], pins: 0, items: items.filter((it) => !it.pinned && it.day === d && f(it)), numbered: false });
+    }
+    return rows;
+  }
+
+  function geometry() {
+    const W = rowsEl.clientWidth || mac.clientWidth;
+    const small = W < 560;
+    G = small
+      ? { W, cw: 94, ch: 86, step: 106, x0: 56, knot: 16, sag: 9, ropeY: 20, rowH: 136 }
+      : { W, cw: 126, ch: 104, step: 142, x0: 72, knot: 20, sag: 15, ropeY: 20, rowH: 160 };
+    mac.style.setProperty('--cw', G.cw + 'px');
+    mac.style.setProperty('--ch', G.ch + 'px');
+  }
+  const xOf = (row, i) => (row.x0 || G.x0) + i * G.step + (row.pins && i >= row.pins ? G.knot : 0);
+  const numberOf = (row, i) => { if (mode !== 'summon' || !row.numbered) return ''; const k = i - (row.pins || 0); return k >= 0 && k < 9 ? String(k + 1) : ''; };
+  const currentId = () => { const r = curRows[sel.row]; return r && r.items[sel.idx] ? r.items[sel.idx].id : null; };
+  function firstIdx() { const r = buildRows()[0]; return r && r.items.length > (r.pins || 0) ? (r.pins || 0) : 0; }
+
+  /* ---------- motion: one small spring loop for the twine and the paper ---------- */
+  const springKC = (response, damping) => { const w = 2 * Math.PI / response; return { k: w * w, c: 2 * damping * w }; };
+  const SP = {
+    key: springKC(0.24, 1),        // keyboard moves: no overshoot
+    reflow: springKC(0.55, 0.78),  // Tendedero's reorder spring
+    drop: springKC(0.42, 0.72),    // Tendedero's arrival spring
+    ropeKey: springKC(0.3, 0.85),
+    ropeSoft: springKC(0.5, 0.5)
+  };
+  // Pendulum per paper, stiffness / damping: lighter paper swings longer.
+  const PEND = { text: [38, 2.4], link: [42, 2.6], image: [46, 2.8], code: [50, 3.0], file: [58, 3.4] };
+  const cardsM = new Map();  // "rowKey:id" -> state
+  const ropesM = new Map();  // rowKey -> state
+  let raf = 0, lastT = 0;
+  const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ropeY = (r, x) => { const t = clampN(x / G.W, 0, 1); return G.ropeY + 4 * r.sag * t * (1 - t); };
+  const ampToVel = (c, deg) => deg * Math.sqrt(c.pk);
+
+  function writeRope(r) {
+    const W = G.W, y0 = G.ropeY;
+    const d = `M0 ${y0} Q ${W / 2} ${(y0 + 2 * r.sag).toFixed(2)} ${W} ${y0}`;
+    r.R.wire.setAttribute('d', d);
+    r.R.twist.setAttribute('d', d);
+    const pin = r.pinKey && cardsM.get(r.pinKey);
+    if (pin) {
+      const kx = pin.x + G.cw + (G.step - G.cw + G.knot) / 2;
+      r.R.knot.setAttribute('cx', kx.toFixed(2));
+      r.R.knot.setAttribute('cy', ropeY(r, kx).toFixed(2));
+      r.R.knot.style.display = '';
+    } else r.R.knot.style.display = 'none';
+  }
+  function writeCard(c) {
+    const r = ropesM.get(c.row);
+    if (!r) return;
+    const y = ropeY(r, c.x + G.cw / 2) + 3 + c.dy;
+    c.el.style.transform = `translate3d(${c.x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${c.th.toFixed(3)}deg)`;
+    c.el.style.opacity = c.x < r.x0 - 6 ? '0.18' : '';
+  }
+  function flush() { for (const r of ropesM.values()) writeRope(r); for (const c of cardsM.values()) writeCard(c); }
+  function settle() {
+    for (const r of ropesM.values()) { r.sag = r.tsag; r.vsag = 0; }
+    for (const c of cardsM.values()) { c.x = c.tx; c.vx = 0; c.th = 0; c.vth = 0; c.dy = 0; c.vdy = 0; }
+  }
+  function kick() {
+    if (reduce()) { settle(); flush(); return; }
+    if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    raf = 0;
+    const dt = Math.min(0.05, Math.max(0, (now - lastT) / 1000));
+    lastT = now;
+    const n = Math.max(1, Math.ceil(dt * 240)), h = dt / n;
+    for (let i = 0; i < n; i++) {
+      for (const c of cardsM.values()) {
+        c.vx += (c.sx.k * (c.tx - c.x) - c.sx.c * c.vx) * h; c.x += c.vx * h;
+        c.vth += (-c.pk * c.th - c.pc * c.vth) * h; c.th += c.vth * h;
+        c.vdy += (-SP.drop.k * c.dy - SP.drop.c * c.vdy) * h; c.dy += c.vdy * h;
+      }
+      for (const r of ropesM.values()) { r.vsag += (r.sp.k * (r.tsag - r.sag) - r.sp.c * r.vsag) * h; r.sag += r.vsag * h; }
+    }
+    let busy = false;
+    for (const r of ropesM.values()) {
+      if (Math.abs(r.tsag - r.sag) < 0.02 && Math.abs(r.vsag) < 0.05) { r.sag = r.tsag; r.vsag = 0; } else busy = true;
+    }
+    for (const c of cardsM.values()) {
+      const rest = Math.abs(c.tx - c.x) < 0.05 && Math.abs(c.vx) < 0.05 && Math.abs(c.th) < 0.01 && Math.abs(c.vth) < 0.02 && Math.abs(c.dy) < 0.05 && Math.abs(c.vdy) < 0.05;
+      if (rest) { c.x = c.tx; c.vx = 0; c.th = 0; c.vth = 0; c.dy = 0; c.vdy = 0; } else busy = true;
+    }
+    flush();
+    if (busy && mode) raf = requestAnimationFrame(tick);
+  }
+  function stateFor(id) { for (const c of cardsM.values()) if (c.key.slice(c.key.indexOf(':') + 1) === id) return c; return null; }
+
+  // Panel open curves: a spring written as CSS linear(), so the browser runs it off the main thread.
+  function springEase(response, damping, ms) {
+    const w = 2 * Math.PI / response, z = damping, pts = [], N = 40;
+    for (let i = 0; i <= N; i++) {
+      const t = (i / N) * ms / 1000;
+      let v;
+      if (z < 1) { const wd = w * Math.sqrt(1 - z * z); v = 1 - Math.exp(-z * w * t) * (Math.cos(wd * t) + (z * w / wd) * Math.sin(wd * t)); }
+      else v = 1 - Math.exp(-w * t) * (1 + w * t);
+      pts.push(+v.toFixed(4));
+    }
+    pts[N] = 1;
+    return `linear(${pts.join(', ')})`;
+  }
+  const canLinear = window.CSS && CSS.supports && CSS.supports('transition-timing-function', 'linear(0, 1)');
+  const EASE_KEY = canLinear ? springEase(0.28, 0.86, 260) : 'cubic-bezier(.23, 1, .32, 1)';
+  const EASE_SOFT = canLinear ? springEase(0.42, 0.82, 420) : 'cubic-bezier(.23, 1, .32, 1)';
+
+  let breezeT = 0;
+  function stopBreeze() { clearTimeout(breezeT); breezeT = 0; }
+  function startBreeze() { stopBreeze(); if (!reduce()) breezeT = setTimeout(gust, 7000 + Math.random() * 9000); }
+  function gust() {
+    breezeT = 0;
+    if (!mode) return;
+    const quiet = mode === 'hover' || performance.now() - lastKeyAt > 4000;
+    if (quiet && !document.hidden) {
+      const scale = mode === 'summon' ? 0.5 : 1;
+      for (const c of cardsM.values()) {
+        const key = c.key;
+        setTimeout(() => { const cc = cardsM.get(key); if (cc && mode) { cc.vth += ampToVel(cc, (1.6 + Math.random() * 1.8) * scale); kick(); } }, Math.random() * 350);
+      }
+    }
+    startBreeze();
+  }
+
+  function render(opts) {
+    opts = opts || {};
+    const why = opts.why || 'key';
+    panel.classList.toggle('open', !!mode);
+    panel.classList.toggle('summon', mode === 'summon');
+    panel.setAttribute('aria-hidden', mode ? 'false' : 'true');
+    mac.classList.toggle('is-open', !!mode);
+    chipsEl.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', i === filter ? 'true' : 'false'));
+    hintEl.hidden = !!mode;
+    hintEl.textContent = coarse ? '点下面的 ⌥C 键，把绳子拉下来' : (focused ? '按 ⌥C（Option + C）' : '点一下这块屏幕，再按 ⌥C · 或把指针停在菜单栏正中');
+    modeEl.innerHTML = MODE_TEXT[mode || 'none'];
+    lineKeys.hidden = mode !== 'summon';
+    kclosed.hidden = mode === 'summon';
+    if (!mode) { stopBreeze(); if (raf) { cancelAnimationFrame(raf); raf = 0; } return; }
+
+    geometry();
+    curRows = buildRows();
+    if (curRows.length) {
+      sel.row = Math.max(0, Math.min(sel.row, curRows.length - 1));
+      sel.idx = Math.max(0, Math.min(sel.idx, curRows[sel.row].items.length - 1));
+    }
+    const keep = new Set(curRows.map((r) => r.key));
+    for (const [k, R] of rowEls) {
+      if (keep.has(k)) continue;
+      R.div.remove(); rowEls.delete(k); ropesM.delete(k);
+      for (const key of [...cardsM.keys()]) if (key.startsWith(k + ':')) cardsM.delete(key);
+    }
+    const selId = currentId();
+    const qkey = words().join(' ');
+    const W = G.W;
+    const motion = !reduce();
+    const xSpring = why === 'reflow' || why === 'arrive' ? SP.reflow : SP.key;
+
+    curRows.forEach((row, ri) => {
+      let R = rowEls.get(row.key), freshRow = false;
+      if (!R) {
+        const div = document.createElement('div');
+        div.className = 'row';
+        div.innerHTML = '<svg class="rope" aria-hidden="true"><path class="wire"/><path class="twist"/><circle class="knot" r="3.5"/></svg><span class="rtag"></span><div class="empty" hidden></div><div class="basket" hidden></div>';
+        R = { div, svg: div.querySelector('svg'), wire: div.querySelector('.wire'), twist: div.querySelector('.twist'), knot: div.querySelector('.knot'), tag: div.querySelector('.rtag'), empty: div.querySelector('.empty'), basket: div.querySelector('.basket'), cards: new Map() };
+        rowEls.set(row.key, R);
+        freshRow = true;
+      }
+      rowsEl.appendChild(R.div);
+      const showBasket = row.key === 'd0' && (mode === 'hover' || shown === 1);
+      const h = G.rowH + (showBasket ? 26 : 0);
+      R.div.style.height = h + 'px';
+      R.svg.setAttribute('viewBox', `0 0 ${W} ${h}`);
+      R.svg.setAttribute('width', W);
+      R.svg.setAttribute('height', h);
+      R.tag.textContent = row.label;
+      row.x0 = Math.max(G.x0, R.tag.offsetWidth + 22);
+
+      let rs = ropesM.get(row.key);
+      if (!rs) { rs = { R, sag: 0, vsag: 0, tsag: G.sag, sp: SP.ropeKey, x0: row.x0, pinKey: null }; ropesM.set(row.key, rs); }
+      rs.R = R; rs.tsag = G.sag; rs.x0 = row.x0;
+      rs.pinKey = row.pins ? row.key + ':' + row.items[row.pins - 1].id : null;
+      if (why === 'open' || freshRow) { rs.sag = why === 'resize' ? G.sag : 0; rs.vsag = 0; rs.sp = mode === 'hover' && why === 'open' ? SP.ropeSoft : SP.ropeKey; }
+      if (freshRow && why === 'rows' && motion) R.div.animate([{ opacity: 0, transform: 'translateY(-14px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: 'cubic-bezier(.23, 1, .32, 1)' });
+
+      const prevS = scrolls[row.key] || 0;
+      let s = prevS;
+      if (mode === 'summon' && ri === sel.row && row.items.length) {
+        const x = xOf(row, sel.idx);
+        if (x - s < row.x0) s = x - row.x0;
+        if (x + G.cw - s > W - 16) s = x + G.cw - (W - 16);
+      }
+      const maxS = row.items.length ? Math.max(0, xOf(row, row.items.length - 1) + G.cw + 16 - W) : 0;
+      s = Math.max(0, Math.min(s, maxS));
+      scrolls[row.key] = s;
+      const ds = s - prevS;
+
+      const live = new Set();
+      row.items.forEach((it, i) => {
+        live.add(it.id);
+        const key = row.key + ':' + it.id;
+        let el = R.cards.get(it.id);
+        if (el && el.dataset.falling) el = null;
+        let fresh = false;
+        if (!el) {
+          el = document.createElement('div');
+          el.className = 'card';
+          el.dataset.id = it.id;
+          el.innerHTML = '<i class="clip"></i><b class="num"></b><div class="face"></div>';
+          R.cards.set(it.id, el);
+          R.div.appendChild(el);
+          fresh = true;
+        }
+        if (el._q !== qkey || el._pin !== it.pinned || fresh) {
+          el.querySelector('.face').innerHTML = face(it);
+          el._q = qkey;
+          el._pin = it.pinned;
+        }
+        el.dataset.kind = it.kind;
+        el.classList.toggle('pinned', it.pinned);
+        el.classList.toggle('sel', mode === 'summon' && it.id === selId);
+        el.classList.toggle('multi', mode === 'summon' && multi.length > 1 && multi.includes(it.id));
+        const n = numberOf(row, i);
+        const nb = el.querySelector('.num');
+        nb.textContent = n;
+        nb.hidden = !n;
+
+        const tx = xOf(row, i) - s;
+        let c = cardsM.get(key);
+        if (!c || fresh) {
+          const p = PEND[it.kind] || PEND.text;
+          c = { key, el, row: row.key, x: tx, vx: 0, tx, sx: xSpring, th: 0, vth: 0, pk: p[0], pc: p[1], dy: 0, vdy: 0 };
+          cardsM.set(key, c);
+          if (motion && why !== 'open' && why !== 'resize') {
+            if (why === 'arrive' && it.id === opts.arrivedId) {
+              c.dy = -46; c.th = 16;
+              el.animate({ opacity: [0, 1] }, { duration: 160, easing: 'linear' });
+              el.querySelector('.clip').animate([{ transform: 'rotate(-18deg) scaleY(1.08)' }, { transform: 'none' }], { duration: 220, delay: 140, easing: 'cubic-bezier(.23, 1, .32, 1)', fill: 'backwards' });
+            } else if (why !== 'rows') {
+              c.dy = -12;
+              el.animate({ opacity: [0, 1] }, { duration: 140, easing: 'cubic-bezier(.23, 1, .32, 1)' });
+            }
+          }
+        } else {
+          c.el = el; c.tx = tx; c.sx = xSpring;
+          if (why === 'open' || why === 'resize') { c.x = tx; c.vx = 0; }
+        }
+        if (!motion) return;
+        if (why === 'open') {
+          c.th = 0; c.vth = 0; c.dy = 0; c.vdy = 0;
+          const amp = mode === 'hover' ? 5 + Math.random() * 4 : 1.5 + Math.random() * 1.5;
+          const sign = i % 2 ? 1 : -1;
+          const delay = mode === 'hover' ? (Math.max(0, tx) / W) * 260 : Math.random() * 80;
+          setTimeout(() => { const cc = cardsM.get(key); if (cc && mode) { cc.vth += sign * ampToVel(cc, amp); kick(); } }, delay);
+        } else if (freshRow && why === 'rows') {
+          c.vth += (i % 2 ? 1 : -1) * ampToVel(c, 1.5);
+        } else if (ds && !opts.repeat && why === 'key') {
+          c.vth += clampN(-ds * 0.08, -18, 18);
+        }
+      });
+
+      for (const [id, el] of R.cards) {
+        if (live.has(id) || el.dataset.falling) continue;
+        cardsM.delete(row.key + ':' + id);
+        R.cards.delete(id);
+        if (motion) {
+          const base = el.style.transform || 'none';
+          el.animate([{ opacity: 1, transform: base }, { opacity: 0, transform: base + ' translateY(-12px)' }], { duration: 120, easing: 'cubic-bezier(.23, 1, .32, 1)', fill: 'forwards' }).onfinish = () => el.remove();
+        } else el.remove();
+      }
+
+      R.empty.hidden = row.items.length > 0;
+      if (!row.items.length) R.empty.textContent = row.key === 'search' ? `没找到「${query.trim()}」` : `这根绳上没有「${FILTERS[filter].name}」`;
+      R.basket.hidden = !showBasket;
+      if (showBasket) {
+        const cnt = items.filter((it) => !it.pinned && it.day > 0 && FILTERS[filter].test(it)).length;
+        R.basket.textContent = mode === 'summon' ? `篮子里还有 ${cnt} 件 · 按 ↓ 放下来` : `篮子里还有 ${cnt} 件`;
+      }
+    });
+
+    flush();
+    kick();
+
+    if (mode === 'summon' && curRows[sel.row]) {
+      const R = rowEls.get(curRows[sel.row].key);
+      const sbar = panel.querySelector('.sbar');
+      const pr = panel.getBoundingClientRect(), rr = R.div.getBoundingClientRect();
+      const bottom = pr.bottom - sbar.offsetHeight;
+      if (rr.bottom > bottom) panel.scrollTop += rr.bottom - bottom;
+      else if (rr.top < pr.top) panel.scrollTop -= pr.top - rr.top;
+    }
+    if (why === 'open') startBreeze();
+  }
+
+  let toastT;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toastEl.classList.remove('show'), 2000);
+  }
+  function refocus() { if (mode === 'summon' && !coarse) q.focus({ preventScroll: true }); }
+
+  function openSummon() {
+    const wasHover = mode === 'hover';
+    mode = 'summon'; shown = 1; query = ''; q.value = ''; multi = [];
+    sel = { row: 0, idx: firstIdx() };
+    if (wasHover) { render({ why: 'key' }); }
+    else {
+      scrolls = {}; panel.scrollTop = 0;
+      panel.style.setProperty('--open-dur', '260ms');
+      panel.style.setProperty('--open-ease', EASE_KEY);
+      render({ why: 'open' });
+    }
+    refocus();
+  }
+  function openHover() {
+    if (mode) return;
+    mode = 'hover'; scrolls = {}; panel.scrollTop = 0;
+    panel.style.setProperty('--open-dur', '420ms');
+    panel.style.setProperty('--open-ease', EASE_SOFT);
+    render({ why: 'open' });
+  }
+  function close() {
+    const hadFocus = mac.contains(document.activeElement);
+    mode = null; shown = 1; query = ''; q.value = ''; multi = [];
+    ql.hidden = true;
+    render();
+    if (hadFocus && !coarse) mac.focus({ preventScroll: true });
+  }
+  const toggleSummon = () => (mode === 'summon' ? close() : openSummon());
+
+  function move(d, shift, repeat) {
+    const r = curRows[sel.row];
+    if (!r || !r.items.length) return;
+    const cur = currentId();
+    if (shift) { if (!multi.includes(cur)) multi.push(cur); } else multi = [];
+    sel.idx = Math.max(0, Math.min(r.items.length - 1, sel.idx + d));
+    if (shift) { const id = currentId(); if (!multi.includes(id)) multi.push(id); }
+    render({ why: 'key', repeat });
+  }
+  function vertical(d) {
+    if (query.trim()) { toast('搜索时只有一根绳，Esc 清掉搜索再翻'); return; }
+    const from = curRows[sel.row];
+    const fromX = from && from.items.length ? xOf(from, sel.idx) - (scrolls[from.key] || 0) : G.x0;
+    if (d > 0) {
+      if (sel.row < shown - 1) sel.row++;
+      else if (shown < DAYS.length) { shown++; sel.row = shown - 1; }
+      else { toast('已经到最早的一根绳了'); return; }
+    } else {
+      if (sel.row > 0) sel.row--;
+      else if (shown > 1) shown = 1;
+      else return;
+    }
+    multi = [];
+    curRows = buildRows();
+    const r = curRows[sel.row];
+    if (r && r.items.length) {
+      let best = 0, bd = Infinity;
+      r.items.forEach((_, i) => { const dd = Math.abs(xOf(r, i) - (scrolls[r.key] || 0) - fromX); if (dd < bd) { bd = dd; best = i; } });
+      sel.idx = best;
+    } else sel.idx = 0;
+    render({ why: 'rows' });
+  }
+  function cycleFilter(d) {
+    filter = (filter + d + FILTERS.length) % FILTERS.length;
+    multi = [];
+    sel = { row: 0, idx: firstIdx() };
+    render({ why: 'filter' });
+  }
+
+  function insert(it, plain) {
+    const caretLine = noteBody.querySelector('.caretline');
+    let el;
+    if (it.kind === 'image') { el = document.createElement('div'); el.className = 'p-img'; el.innerHTML = ART[it.art]; }
+    else if (it.kind === 'file') { el = document.createElement('p'); el.innerHTML = `<span class="p-file"><i></i>${esc(it.name)}</span>`; }
+    else if (it.kind === 'code') { el = document.createElement('pre'); el.className = 'p-code' + (plain ? ' plain' : ''); el.textContent = it.body; }
+    else if (it.kind === 'link') { el = document.createElement('p'); el.innerHTML = plain ? esc(it.url) : `<span class="p-link">${esc(it.url)}</span>`; }
+    else { el = document.createElement('p'); el.innerHTML = plain ? esc(it.title + ' ' + it.body.replace(/\n/g, ' ')) : `<strong>${esc(it.title)}</strong><br>${esc(it.body).replace(/\n/g, '<br>')}`; }
+    el.classList.add('pasted');
+    noteBody.insertBefore(el, caretLine);
+    noteBody.scrollTop = noteBody.scrollHeight;
+  }
+  // The pasted paper flies to the caret on its own layer; the paste itself does not wait for it.
+  function flyToCaret(it) {
+    const c = stateFor(it.id);
+    if (!c || reduce()) return 0;
+    const m = mac.getBoundingClientRect();
+    const a = c.el.querySelector('.face').getBoundingClientRect();
+    const caret = noteBody.querySelector('.caret').getBoundingClientRect();
+    const f = document.createElement('div');
+    f.className = 'card flight' + (it.pinned ? ' pinned' : '');
+    f.dataset.kind = it.kind;
+    f.innerHTML = `<div class="face">${face(it)}</div>`;
+    f.style.left = (a.left - m.left) + 'px';
+    f.style.top = (a.top - m.top) + 'px';
+    f.style.width = a.width + 'px';
+    f.style.height = a.height + 'px';
+    mac.appendChild(f);
+    const dx = caret.left - a.left, dy = caret.top - a.top;
+    f.animate([
+      { transform: `rotate(${c.th.toFixed(2)}deg)`, opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) scale(.16)`, opacity: 0.15 }
+    ], { duration: 300, easing: 'cubic-bezier(.23, 1, .32, 1)', fill: 'forwards' }).onfinish = () => f.remove();
+    return 220;
+  }
+  function paste(ids, plain) {
+    const list = ids.map(find).filter(Boolean);
+    if (!list.length) return;
+    const delay = mode ? flyToCaret(list[0]) : 0;
+    close();
+    setTimeout(() => {
+      list.forEach((it) => insert(it, plain));
+      list.forEach((it) => { if (!it.pinned) { items = items.filter((x) => x !== it); it.day = 0; it.ago = '刚刚'; } });
+      const head = items.findIndex((x) => !x.pinned);
+      items.splice(head < 0 ? items.length : head, 0, ...list.filter((it) => !it.pinned));
+      let msg;
+      if (list.length > 1) msg = `按顺序贴了 ${list.length} 件到「笔记」`;
+      else if (list[0].thumb) msg = '原图已过期，贴的是缩略图';
+      else msg = plain ? '已按纯文本贴到「笔记」' : '已贴到「笔记」，这件挪回绳头，重新计时';
+      toast(msg);
+    }, delay);
+  }
+  function orderedSelection() {
+    const pos = (id) => { for (let r = 0; r < curRows.length; r++) { const i = curRows[r].items.findIndex((x) => x.id === id); if (i >= 0) return r * 1000 + i; } return 1e9; };
+    return multi.slice().sort((a, b) => pos(a) - pos(b));
+  }
+  function pasteSel(plain) {
+    const ids = multi.length > 1 ? orderedSelection() : [currentId()].filter(Boolean);
+    paste(ids, plain);
+  }
+  function pasteNth(n) {
+    const r = curRows[0];
+    if (!r) return;
+    const it = r.items[(r.pins || 0) + n - 1];
+    if (it) paste([it.id], false); else toast(`第 ${n} 件还没有`);
+  }
+  function copy(id) {
+    const it = find(id);
+    if (!it) return;
+    const c = stateFor(id);
+    if (c && !reduce()) { c.vdy -= 110; c.vth += ampToVel(c, 1.2); kick(); }
+    toast(`已复制「${label(it)}」`);
+  }
+  function relocate(id) { curRows.forEach((r, ri) => { const i = r.items.findIndex((x) => x.id === id); if (i >= 0) sel = { row: ri, idx: i }; }); }
+  function pin() {
+    const id = currentId(), it = find(id);
+    if (!it) return;
+    it.pinned = !it.pinned;
+    if (!it.pinned && it.day > 3) it.day = 0;
+    curRows = buildRows();
+    relocate(id);
+    render({ why: 'reflow' });
+    const c = stateFor(id);
+    if (c && !reduce()) { setTimeout(() => { const cc = stateFor(id); if (cc) { cc.vth += ampToVel(cc, 4); kick(); } }, 260); }
+    toast(it.pinned ? '夹到收藏了：钉在绳结左边，不会掉，也不过期' : '取消收藏，回到绳上');
+  }
+  function dropCard(R, id, el) {
+    el.dataset.falling = '1';
+    el.classList.remove('sel', 'multi');
+    let c = null;
+    for (const [k, v] of cardsM) if (v.el === el) { c = v; cardsM.delete(k); break; }
+    const done = () => { el.remove(); if (R.cards.get(id) === el) R.cards.delete(id); };
+    if (!c || reduce()) { el.animate({ opacity: [1, 0] }, { duration: 120, fill: 'forwards' }).onfinish = done; return; }
+    const r = ropesM.get(c.row);
+    const y = ropeY(r, c.x + G.cw / 2) + 3 + c.dy;
+    const dir = c.vth > 0.5 ? 1 : c.vth < -0.5 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+    el.querySelector('.clip').animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${-dir * 24}deg)` }], { duration: 90, easing: 'cubic-bezier(.23, 1, .32, 1)', fill: 'forwards' });
+    el.animate([
+      { transform: `translate3d(${c.x}px, ${y}px, 0) rotate(${c.th}deg)`, opacity: 1, easing: 'cubic-bezier(.23, 1, .32, 1)' },
+      { transform: `translate3d(${c.x}px, ${y + 5}px, 0) rotate(${c.th}deg)`, opacity: 1, offset: 0.1, easing: 'cubic-bezier(.5, 0, .9, .5)' },
+      { transform: `translate3d(${c.x + dir * 16}px, ${y + 280}px, 0) rotate(${c.th + dir * 24}deg)`, opacity: 0 }
+    ], { duration: 420, fill: 'forwards' }).onfinish = done;
+  }
+  function letGo() {
+    const ids = multi.length > 1 ? multi.slice() : [currentId()].filter(Boolean);
+    if (!ids.length) return;
+    const removed = ids.map((id) => ({ it: find(id), at: items.findIndex((x) => x.id === id) })).filter((r) => r.it);
+    ids.forEach((id) => { for (const R of rowEls.values()) { const el = R.cards.get(id); if (el && !el.dataset.falling) dropCard(R, id, el); } });
+    undoStack.push(removed);
+    items = items.filter((x) => !ids.includes(x.id));
+    multi = [];
+    render({ why: 'reflow' });
+    toast(`取下了 ${ids.length} 件 · ⌘Z 放回`);
+  }
+  function undo() {
+    const last = undoStack.pop();
+    if (!last) { toast('没有可以撤销的'); return; }
+    last.sort((a, b) => a.at - b.at).forEach(({ it, at }) => items.splice(Math.min(at, items.length), 0, it));
+    render({ why: 'reflow' });
+    toast(`放回了 ${last.length} 件`);
+  }
+  function quickLook() {
+    const it = find(currentId());
+    if (!it) return;
+    const sc = Math.max(1.4, Math.min(3, (mac.clientWidth * 0.7) / 126, (mac.clientHeight * 0.6) / 104));
+    qlBox.style.width = 126 * sc + 'px';
+    qlBox.style.height = 104 * sc + 'px';
+    qlBox.innerHTML = `<div class="card${it.pinned ? ' pinned' : ''}" data-kind="${it.kind}" style="transform:scale(${sc})"><i class="clip"></i><div class="face">${face(it)}</div></div>`;
+    ql.hidden = false;
+  }
+  function cleanFiltered() {
+    const parts = [];
+    if (filter) parts.push(`类型「${FILTERS[filter].name}」`);
+    if (query.trim()) parts.push(`包含「${query.trim()}」`);
+    clPrefill(FILTERS[filter].clean);
+    toast(`会打开「清理历史」，条件已填好：${parts.length ? parts.join('、') : '全部类型'}`);
+  }
+  function simulateCopy() {
+    const s = SAMPLES[simIndex++ % SAMPLES.length];
+    const it = mk(0, Object.assign({ app: '笔记', ago: '刚刚' }, s));
+    const head = items.findIndex((x) => !x.pinned);
+    items.splice(head < 0 ? items.length : head, 0, it);
+    if (mode) {
+      if (!query.trim()) { scrolls.d0 = 0; if (mode === 'summon') sel = { row: 0, idx: firstIdx() }; }
+      render({ why: 'arrive', arrivedId: it.id });
+      toast('挂上来一件：新的在绳结右边第一个');
+    } else {
+      if (!reduce()) mbIcon.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(-14deg)' }, { transform: 'rotate(9deg)' }, { transform: 'rotate(-4deg)' }, { transform: 'rotate(0deg)' }], { duration: 600, easing: 'ease-out' });
+      toast('绳子收着，只在菜单栏的小夹子上晃一下');
+    }
+  }
+  let simIndex = 0;
+  function escape() {
+    if (!ql.hidden) { ql.hidden = true; return; }
+    if (multi.length) { multi = []; render({ why: 'key' }); return; }
+    if (query) { query = ''; q.value = ''; sel = { row: 0, idx: firstIdx() }; render({ why: 'filter' }); return; }
+    if (shown > 1) { shown = 1; sel.row = 0; render({ why: 'key' }); return; }
+    close();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    const ae = document.activeElement;
+    const inside = mac.contains(ae) || ae === document.body || ae == null;
+    if (e.altKey && e.code === 'KeyC' && !e.metaKey && !e.ctrlKey) {
+      if (!inside) return;
+      e.preventDefault();
+      toggleSummon();
+      return;
+    }
+    if (mode !== 'summon' || !inside) return;
+    lastKeyAt = performance.now();
+    if (!ql.hidden) { e.preventDefault(); ql.hidden = true; return; }
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd) {
+      const m = /^Digit([1-9])$/.exec(e.code);
+      if (m) { e.preventDefault(); pasteNth(+m[1]); return; }
+      if (e.code === 'KeyC' && !q.value.slice(q.selectionStart, q.selectionEnd)) { e.preventDefault(); const id = currentId(); if (id) copy(id); return; }
+      if (e.code === 'KeyP') { e.preventDefault(); pin(); return; }
+      if (e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
+      if (e.code === 'KeyY') { e.preventDefault(); quickLook(); return; }
+      if (e.key === 'Backspace' && e.shiftKey) { e.preventDefault(); cleanFiltered(); return; }
+      if (e.key === 'Backspace') { e.preventDefault(); letGo(); return; }
+      return;
+    }
+    switch (e.key) {
+      case 'ArrowLeft': e.preventDefault(); move(-1, e.shiftKey, e.repeat); break;
+      case 'ArrowRight': e.preventDefault(); move(1, e.shiftKey, e.repeat); break;
+      case 'ArrowDown': e.preventDefault(); vertical(1); break;
+      case 'ArrowUp': e.preventDefault(); vertical(-1); break;
+      case 'Enter': e.preventDefault(); pasteSel(e.shiftKey); break;
+      case 'Tab': e.preventDefault(); cycleFilter(e.shiftKey ? -1 : 1); break;
+      case 'Escape': e.preventDefault(); escape(); break;
+      default: break;
+    }
+  });
+
+  q.addEventListener('input', () => {
+    query = q.value;
+    multi = [];
+    lastKeyAt = performance.now();
+    panel.scrollTop = 0;
+    sel = { row: 0, idx: query.trim() ? 0 : firstIdx() };
+    render({ why: 'filter' });
+  });
+
+  rowsEl.addEventListener('click', (e) => {
+    const c = e.target.closest('.card');
+    if (!c || c.dataset.falling) return;
+    const id = c.dataset.id;
+    if (mode === 'summon') { multi = []; relocate(id); render({ why: 'key' }); }
+    copy(id);
+    refocus();
+  });
+  rowsEl.addEventListener('dblclick', (e) => {
+    const c = e.target.closest('.card');
+    if (!c || c.dataset.falling) return;
+    paste([c.dataset.id], false);
+  });
+  chipsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    filter = +b.dataset.i;
+    multi = [];
+    sel = { row: 0, idx: firstIdx() };
+    render({ why: 'filter' });
+    refocus();
+  });
+  ql.addEventListener('click', () => { ql.hidden = true; refocus(); });
+
+  let hoverT, leaveT;
+  hot.addEventListener('mouseenter', () => { clearTimeout(leaveT); if (mode) return; hoverT = setTimeout(openHover, 300); });
+  hot.addEventListener('mouseleave', () => { clearTimeout(hoverT); if (mode === 'hover') leaveT = setTimeout(close, 450); });
+  panel.addEventListener('mouseenter', () => clearTimeout(leaveT));
+  panel.addEventListener('mouseleave', () => { if (mode === 'hover') leaveT = setTimeout(close, 350); });
+
+  mac.addEventListener('focusin', () => { focused = true; if (!mode) render(); });
+  mac.addEventListener('focusout', () => setTimeout(() => { focused = mac.contains(document.activeElement); if (!mode) render(); }, 0));
+  mac.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.card, input, button, .ql')) return;
+    if (!coarse) setTimeout(() => (mode === 'summon' ? q : mac).focus({ preventScroll: true }), 0);
+  });
+
+  keysEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const k = b.dataset.k;
+    if (k === 'optc') { toggleSummon(); return; }
+    if (k === 'copy') { simulateCopy(); if (mode === 'summon') refocus(); return; }
+    if (mode !== 'summon') return;
+    lastKeyAt = performance.now();
+    if (!ql.hidden) ql.hidden = true;
+    switch (k) {
+      case 'left': move(-1, false, false); break;
+      case 'right': move(1, false, false); break;
+      case 'down': vertical(1); break;
+      case 'up': vertical(-1); break;
+      case 'enter': pasteSel(false); break;
+      case 'senter': pasteSel(true); break;
+      case 'tab': cycleFilter(1); break;
+      case 'cmdp': pin(); break;
+      case 'cmdbs': letGo(); break;
+      case 'cmdz': undo(); break;
+      case 'clean': cleanFiltered(); break;
+      case 'esc': escape(); break;
+    }
+    refocus();
+  });
+
+  let rT;
+  new ResizeObserver(() => { clearTimeout(rT); rT = setTimeout(() => { if (mode) render({ why: 'resize' }); }, 60); }).observe(mac);
+
+  /* ---------- shared numbers for the two settings mocks (estimates, see the page text) ---------- */
+  const MB_TEXT = 1.5 / 1024, MB_ORIG = 3.2, MB_THUMB = 0.15;
+  const nf = new Intl.NumberFormat('zh-CN');
+  const fmtMB = (mb) => (mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.max(1, Math.round(mb)) + ' MB');
+
+  /* ---------- retention settings mock ---------- */
+  const RET = {
+    text: { opts: [[30, '一个月'], [90, '三个月'], [365, '一年'], [Infinity, '一直']], val: 365 },
+    img: { opts: [[7, '7 天'], [30, '30 天'], [90, '90 天'], [Infinity, '一直']], val: 30 },
+    cap: { opts: [[500, '500 MB'], [1024, '1 GB'], [5120, '5 GB'], [Infinity, '不限']], val: 1024 }
+  };
+  // Example basket, bucketed by days since last use. upTo is the bucket's oldest edge in days.
+  const BUCKETS = [
+    { name: '1 天内', upTo: 1, text: 60, img: 6 },
+    { name: '1–7 天', upTo: 7, text: 420, img: 40 },
+    { name: '7–30 天', upTo: 30, text: 1500, img: 120 },
+    { name: '1–3 个月', upTo: 90, text: 3800, img: 260 },
+    { name: '3–12 个月', upTo: 365, text: 10000, img: 500 },
+    { name: '1 年以上', upTo: Infinity, text: 14000, img: 900 }
+  ];
+  const keepName = (key) => RET[key].opts.find((o) => o[0] === RET[key].val)[1];
+
+  function simulate() {
+    const tk = RET.text.val, ik = Math.min(RET.img.val, tk), cap = RET.cap.val;
+    let textKept = 0, textGone = 0, imgGone = 0, thumbs = 0;
+    const orig = [];
+    BUCKETS.forEach((b, i) => {
+      if (b.upTo <= tk) textKept += b.text; else textGone += b.text;
+      if (b.upTo > tk) imgGone += b.img;
+      else if (b.upTo <= ik) orig[i] = b.img;
+      else thumbs += b.img;
+    });
+    const timeShrunk = thumbs;
+    // Space cap: shrink the oldest originals first; the newest bucket stays (it is what hangs on the line).
+    let origMB = orig.reduce((n, c) => n + (c || 0) * MB_ORIG, 0);
+    let capShrunk = 0, reach = null;
+    for (let i = orig.length - 1; i >= 1 && origMB > cap; i--) {
+      if (!orig[i]) continue;
+      const take = Math.min(orig[i], Math.ceil((origMB - cap) / MB_ORIG));
+      orig[i] -= take; capShrunk += take; thumbs += take; origMB -= take * MB_ORIG;
+    }
+    for (let i = 0; i < orig.length; i++) if (orig[i]) reach = BUCKETS[i].name;
+    const origCount = orig.reduce((n, c) => n + (c || 0), 0);
+    return { textKept, textGone, imgGone, thumbs, timeShrunk, capShrunk, origCount, reach, textMB: textKept * MB_TEXT, origMB, thumbMB: thumbs * MB_THUMB };
+  }
+  function renderRetention() {
+    document.querySelectorAll('#ret .seg').forEach((seg) => {
+      const key = seg.dataset.key;
+      seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.v === RET[key].val || (b.dataset.v === 'inf' && RET[key].val === Infinity))));
+    });
+    const r = simulate();
+    const total = r.textMB + r.origMB + r.thumbMB || 1;
+    $('#uText').style.width = (r.textMB / total * 100) + '%';
+    $('#uOrig').style.width = (r.origMB / total * 100) + '%';
+    $('#uThumb').style.width = (r.thumbMB / total * 100) + '%';
+    $('#uLegend').innerHTML =
+      `<span><i style="background:var(--c-text)"></i>文字 <b>${fmtMB(r.textMB)}</b> · ${nf.format(r.textKept)} 条</span>` +
+      `<span><i style="background:var(--c-image)"></i>截图原图 <b>${fmtMB(r.origMB)}</b> · ${nf.format(r.origCount)} 张</span>` +
+      `<span><i style="background:color-mix(in srgb, var(--c-image) 40%, var(--surface))"></i>缩略图 <b>${fmtMB(r.thumbMB)}</b> · ${nf.format(r.thumbs)} 张</span>` +
+      `<span>合计 <b>${fmtMB(r.textMB + r.origMB + r.thumbMB)}</b></span>`;
+    const imgName = RET.img.val > RET.text.val ? keepName('text') : keepName('img');
+    let html = `<b>能往回找：</b>文字 ${keepName('text')}；截图原图 ${imgName}${r.capShrunk && r.reach ? '，但受空间上限限制，原图实际只留到「' + r.reach + '」' : ''}，更早的截图${RET.text.val === Infinity ? '一直' : '在' + keepName('text') + '内'}还能按图里的字搜到。`;
+    const acts = [];
+    if (r.textGone) acts.push(`${nf.format(r.textGone)} 条文字进「最近清掉」，7 天内能找回`);
+    if (r.timeShrunk) acts.push(`${nf.format(r.timeShrunk)} 张截图原图到期，缩成缩略图`);
+    if (r.capShrunk) acts.push(`原图超过 ${keepName('cap')}，再提前缩 ${nf.format(r.capShrunk)} 张最旧的`);
+    if (r.imgGone) acts.push(`${nf.format(r.imgGone)} 张截图连缩略图一起清掉`);
+    html += '<br><b>第一次清理会：</b>' + (acts.length ? acts.join('；') + '。' : '什么都不清。');
+    $('#forecast').innerHTML = html;
+  }
+  document.querySelectorAll('#ret .seg').forEach((seg) => {
+    const key = seg.dataset.key;
+    seg.innerHTML = RET[key].opts.map(([v, name]) => `<button type="button" data-v="${v === Infinity ? 'inf' : v}">${name}</button>`).join('');
+    seg.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      RET[key].val = b.dataset.v === 'inf' ? Infinity : +b.dataset.v;
+      renderRetention();
+    });
+  });
+  $('#toClean').addEventListener('click', () => { const s = $('#cleanup'); s.scrollIntoView({ behavior: reduce() ? 'auto' : 'smooth', block: 'start' }); });
+
+  /* ---------- cleanup sheet mock ---------- */
+  // Example library after the default rules ran: five buckets of last use, up to one year.
+  const CL_TYPES = [
+    { key: 'text', name: '文本', unit: '条', counts: [36, 252, 900, 2280, 6000], fav: [0, 0, 1, 3, 5] },
+    { key: 'link', name: '链接', unit: '条', counts: [15, 105, 375, 950, 2500], fav: [0, 0, 0, 0, 0] },
+    { key: 'code', name: '代码', unit: '段', counts: [6, 42, 150, 380, 1000], fav: [0, 0, 0, 0, 0] },
+    { key: 'image', name: '图片', unit: '张', counts: [6, 40, 120, 260, 500], fav: [0, 0, 0, 0, 2] },
+    { key: 'file', name: '文件', unit: '个', counts: [3, 21, 75, 190, 500], fav: [0, 0, 0, 1, 2] }
+  ];
+  const CL_TIMES = [['今天', [0]], ['最近 7 天', [0, 1]], ['最近 30 天', [0, 1, 2]], ['30 天以前', [3, 4]], ['全部', [0, 1, 2, 3, 4]]];
+  const ORIG_BUCKETS = new Set([0, 1, 2]);
+  const CL_DEFAULT = () => ({ types: new Set(['image']), time: 2, img: 'orig', fav: false });
+  let cl = CL_DEFAULT(), clLast = null;
+  const clType = $('#clType'), clTime = $('#clTime'), clImg = $('#clImg'), clFav = $('#clFav');
+  const clPreview = $('#clPreview'), clGo = $('#clGo'), clConfirm = $('#clConfirm'), clBanner = $('#clBanner');
+  clType.innerHTML = CL_TYPES.map((t) => `<button type="button" data-t="${t.key}">${t.name}</button>`).join('');
+  clTime.innerHTML = CL_TIMES.map((t, i) => `<button type="button" data-i="${i}">${t[0]}</button>`).join('');
+  clImg.innerHTML = '<button type="button" data-m="orig">只清原图，留缩略图</button><button type="button" data-m="whole">整张清掉</button>';
+
+  function clCompute() {
+    const buckets = CL_TIMES[cl.time][1];
+    let removed = 0, freed = 0, shrunk = 0, keptThumbs = 0;
+    const parts = [];
+    for (const t of CL_TYPES) {
+      if (!cl.types.has(t.key)) continue;
+      let n = 0;
+      for (const b of buckets) {
+        const cnt = t.counts[b] + (cl.fav ? t.fav[b] : 0);
+        if (t.key === 'image') {
+          if (cl.img === 'orig') {
+            if (ORIG_BUCKETS.has(b)) { shrunk += cnt; freed += cnt * (MB_ORIG - MB_THUMB); } else keptThumbs += cnt;
+          } else { n += cnt; freed += cnt * (ORIG_BUCKETS.has(b) ? MB_ORIG : MB_THUMB); }
+        } else { n += cnt; freed += cnt * MB_TEXT; }
+      }
+      if (n) parts.push(`${t.name} ${nf.format(n)} ${t.unit}`);
+      removed += n;
+    }
+    return { removed, freed, shrunk, keptThumbs, parts, all: cl.types.size === CL_TYPES.length && cl.time === CL_TIMES.length - 1 };
+  }
+  function clRender() {
+    clType.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(cl.types.has(b.dataset.t))));
+    clTime.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.i === cl.time)));
+    const hasImg = cl.types.has('image');
+    clImg.querySelectorAll('button').forEach((b) => { b.setAttribute('aria-pressed', String(b.dataset.m === cl.img)); b.disabled = !hasImg; });
+    clFav.checked = cl.fav;
+    const r = clCompute();
+    const lines = [];
+    if (r.removed) lines.push(`<b>会清掉：</b>${r.parts.join('、')}，共 ${nf.format(r.removed)} 件。先进「最近清掉」，7 天内能整批放回。`);
+    if (r.shrunk) lines.push(`<b>会缩小：</b>${nf.format(r.shrunk)} 张截图只删原图，留缩略图和图里的字；删掉的原图找不回。`);
+    if (r.keptThumbs) lines.push(`另有 ${nf.format(r.keptThumbs)} 张截图早就只剩缩略图，这次不动。`);
+    if (r.removed || r.shrunk) lines.push(`<b>腾出：</b>约 ${fmtMB(r.freed)}。${cl.fav ? '' : '收藏的不动。'}`);
+    else lines.push('按这些条件，没有要清的。');
+    clPreview.innerHTML = lines.join('<br>');
+    let text;
+    if (!r.removed && !r.shrunk) text = '没有要清的';
+    else if (r.all && r.removed) text = '清空全部历史…';
+    else if (r.removed && r.shrunk) text = `清掉 ${nf.format(r.removed)} 件，缩小 ${nf.format(r.shrunk)} 张`;
+    else if (r.removed) text = `清掉 ${nf.format(r.removed)} 件，腾出 ${fmtMB(r.freed)}`;
+    else text = `缩小 ${nf.format(r.shrunk)} 张截图，腾出 ${fmtMB(r.freed)}`;
+    clGo.textContent = text;
+    clGo.disabled = !r.removed && !r.shrunk;
+    return r;
+  }
+  function clDo(r) {
+    clConfirm.hidden = true;
+    clLast = r;
+    const bits = [];
+    if (r.removed) bits.push(`清掉 ${nf.format(r.removed)} 件`);
+    if (r.shrunk) bits.push(`缩小 ${nf.format(r.shrunk)} 张截图`);
+    $('#clBannerText').textContent = `已${bits.join('，')}，腾出约 ${fmtMB(r.freed)}。${r.removed ? '7 天内能在「最近清掉」整批放回。' : ''}`;
+    $('#clUndo').hidden = !r.removed;
+    clBanner.hidden = false;
+  }
+  function clPrefill(types) { cl = CL_DEFAULT(); cl.types = new Set(types); cl.time = 4; clBanner.hidden = true; clConfirm.hidden = true; clRender(); }
+  const hideNotes = () => { clConfirm.hidden = true; clBanner.hidden = true; };
+  clType.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; const t = b.dataset.t; if (cl.types.has(t)) cl.types.delete(t); else cl.types.add(t); hideNotes(); clRender(); });
+  clTime.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; cl.time = +b.dataset.i; hideNotes(); clRender(); });
+  clImg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.disabled) return; cl.img = b.dataset.m; hideNotes(); clRender(); });
+  clFav.addEventListener('change', () => { cl.fav = clFav.checked; hideNotes(); clRender(); });
+  $('#clCancel').addEventListener('click', () => { cl = CL_DEFAULT(); hideNotes(); clRender(); });
+  clGo.addEventListener('click', () => {
+    const r = clRender();
+    if (r.all && r.removed) {
+      $('#clConfirmText').textContent = `清空全部：会清掉 ${nf.format(r.removed)} 件历史${r.shrunk ? `，另把 ${nf.format(r.shrunk)} 张截图缩成缩略图（原图找不回）` : ''}${cl.fav ? '，包括收藏' : '，收藏的不动'}。清掉的 7 天内能在「最近清掉」整批放回。`;
+      clConfirm.hidden = false;
+      clBanner.hidden = true;
+      $('#clNo').focus();
+      return;
+    }
+    clDo(r);
+  });
+  $('#clNo').addEventListener('click', () => { clConfirm.hidden = true; clGo.focus(); });
+  $('#clYes').addEventListener('click', () => clDo(clRender()));
+  $('#clUndo').addEventListener('click', () => {
+    if (!clLast) return;
+    $('#clBannerText').textContent = `已放回 ${nf.format(clLast.removed)} 件。${clLast.shrunk ? `缩小的 ${nf.format(clLast.shrunk)} 张截图原图找不回，缩略图都在。` : ''}`;
+    $('#clUndo').hidden = true;
+  });
+
+  renderRetention();
+  clRender();
+  render();
+})();
+</script>
+</body>
+</html>
