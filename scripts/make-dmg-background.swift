@@ -1,4 +1,4 @@
-// Draws the background of the Tendedero disk image window.
+// Draws the background of the EnCopy disk image window.
 // Usage: swift scripts/make-dmg-background.swift out.png [scale]
 import AppKit
 
@@ -17,16 +17,16 @@ rep.size = NSSize(width: W, height: H)
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 
-// The same soft sky as the icon, kept light so Finder labels stay legible.
-NSGradient(colors: [color(232, 238, 255), color(242, 236, 252), color(255, 238, 236)],
-           atLocations: [0, 0.55, 1], colorSpace: .sRGB)!.draw(in: NSRect(x: 0, y: 0, width: W, height: H), angle: -35)
+// The same plain wall as the icon, kept light so Finder labels stay legible.
+NSGradient(colors: [color(238, 241, 244), color(227, 232, 237)],
+           atLocations: [0, 1], colorSpace: .sRGB)!.draw(in: NSRect(x: 0, y: 0, width: W, height: H), angle: -90)
 
 // A thin line hanging across the top, like the app.
 let line = NSBezierPath()
 line.move(to: NSPoint(x: -10, y: H - 34))
 line.curve(to: NSPoint(x: W + 10, y: H - 34), controlPoint1: NSPoint(x: W * 0.3, y: H - 70), controlPoint2: NSPoint(x: W * 0.7, y: H - 70))
 line.lineWidth = 1.4
-color(130, 134, 150, 0.7).setStroke()
+color(138, 109, 69, 0.7).setStroke()
 line.stroke()
 
 // Arrow from the app to Applications.
@@ -47,7 +47,7 @@ head.lineJoinStyle = .round
 head.stroke()
 
 let style = NSMutableParagraphStyle(); style.alignment = .center
-let text = NSAttributedString(string: "Drag Tendedero to Applications", attributes: [
+let text = NSAttributedString(string: "Drag EnCopy to Applications", attributes: [
     .font: NSFont.systemFont(ofSize: 13, weight: .medium),
     .foregroundColor: color(80, 84, 100),
     .paragraphStyle: style,

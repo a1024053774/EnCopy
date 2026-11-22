@@ -1,13 +1,7 @@
-## What and why
+## Summary
 
-<!-- What changes for someone using Tendedero, and why. If it fixes an issue: Closes #123 -->
+<!-- 这个 PR 让用的人多了什么、变了什么，为什么。对应工单：T-0xx -->
 
-## How you tested it
+#### Test plan
 
-<!-- What you did on a real Mac, and which macOS version. For anything visual, a short recording helps. -->
-
-<!--
-Before opening, read CONTRIBUTING.md. In short:
-- One change per pull request. Small ones get reviewed and merged sooner.
-- New text in the app goes in Sources/Tendedero/Resources/<language>.lproj. Run `swift scripts/check-strings.swift`.
--->
+<!-- 跑了什么、结果是什么：scripts/check.sh 的最后一行；真机走了哪几步，在哪个 macOS 版本上。 -->
