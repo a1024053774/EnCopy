@@ -18,7 +18,15 @@ v1 is still in progress. The current version has its new name, icon and bundle i
 
 Text, links and code you copy are recorded out of the box, and you can pause recording from the menu bar. When the line is full, the oldest text item falls into the basket instead of the Trash. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result. An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first; copying the same content again adds no new item, and the existing one goes back to the head as well. Everything is still there after you quit and reopen. Screenshots and copied images that EnCopy keeps also fall into the basket when the line is full, and the text read from them finds them.
 
-Images in the basket, expiry and cleanup will be added step by step according to the [spec](.project-map/specs/encopy-v1.md). Progress is in the [project map](.project-map/MAP.md) and design details are in the [design proposal](design/encopy-design.html); all three are in Chinese.
+Done on `main` but not yet released (coming in the next version):
+
+- One kind of paper per kind of thing: text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Pinned items hang left of the knot, and the newest hangs first right of the knot, older ones further right.
+- After ⌥C: Tab shows one kind (text, links, images, files), ↓ walks the basket by day (today, yesterday, this week, earlier), ⇧⏎ pastes words only, ⌘Y opens Quick Look, ⌘P pins. Double-clicking a card pastes it.
+- Files copied in Finder hang on the line too, and each card says which app it was copied from. Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes.
+- Retention: text is kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass 1 GB in total, the oldest shrink first. Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
+- Motion follows the design's table: papers swing by weight, ⌥C and sliding down past the top edge each have their own spring, and a breeze passes now and then; with Reduce motion on, only fades remain. A new icon, and a menu bar glyph of a rope with two pegs.
+
+What is left is in the [project map](.project-map/MAP.md) and design details are in the [design proposal](design/encopy-design.html); both are in Chinese.
 
 ## Build
 
@@ -62,7 +70,7 @@ Runs six checks in order: the upstream name does not appear in the code or scrip
 ## Contributors
 
 - [LuckyE](https://github.com/a1024053774): maintainer. Sets the direction, makes the decisions, ships the releases.
-- Claude (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0 release and the product page. Credited as `Co-Authored-By: Claude` in those commits.
+- Claude (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0 release and the product page, and the batch of v1 features listed above. Credited as `Co-Authored-By: Claude` in those commits.
 - Devin (an AI by Cognition): pair programming on code and docs. Worked with the maintainer on the rename and new icon, ⌥C summoning the line and pasting back into the front app, text going into the basket, the separate development copy and stable signing. Credited as `Co-Authored-By: Devin` in those commits.
 - Alejandro Buján and the [upstream contributors](https://github.com/alejandrobujan/tendedero/graphs/contributors) of [Tendedero](https://github.com/alejandrobujan/tendedero): EnCopy is built on their code.
 

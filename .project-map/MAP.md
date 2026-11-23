@@ -34,17 +34,13 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 
 ## Not yet specified
 
-- 截图和图片进篮子：原图、缩略图、图中文字索引，保留规则的自动清理和设置页预告。
-- 清理历史面板和「最近清掉」。
-- iCopy 的日常件：Tab 筛选、⌘1–⌘9、文件（路径和书签）、来源 App、App 三档规则、验证码。
-- 纸的五种画法、木夹、麻绳、号码贴纸；绳结右边放最新的。
-- 动画表逐项落地，按纸的轻重摆动，微风，减弱动态效果。
-- 下层绳（按天）、多选按顺序贴、⇧⏎ 纯文本贴、⌘Y 快速查看、⌘P 收藏。
-- 篮子里的东西现在只能搜出来用：一次最多挂一屏宽，只能复制、贴、取下。怎么翻篮子、怎么拖出和收藏，跟下层绳一起定。
-- 新图标。
+- 动画表余下的几行：麻绳回弹、滚动惯性、⏎ 飞向光标、取下的节奏、菜单栏小夹子晃一下（[T-038](tickets/T-038-motion-rest.md)）。
+- T-023 到 T-037 这一批还没在真机上走过（检查和编译都过了）。
+- 下一版发布：`main` 上的这批功能还没进发布出去的 DMG；产品页 `docs/index.html` 跟发布走，现在写的是 0.1.0，发下一版时按 `main` 改。
 
 ## Out of scope
 
+- ⌘1–⌘9 和号码贴纸、多选按顺序贴、验证码的附加功能：用户 2026-11-23 说 iCopy 的日常件只要 Tab 筛选、文件、来源 App、App 三档、验证码、⇧⏎、⌘Y、⌘P。
 - 快捷回复、完整剪切板堆栈、iCloud 同步、Excel 导入导出：v0.3「先不做」，用户没有要回来。
 - 从 iCopy 导入历史：格式没公开，要逆向，单独评估。
 - 原生、暗房样式，横向竖向面板：[T-003](tickets/T-003-paper-style.md) 选了纸。
@@ -54,8 +50,8 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 41725c9 |
-| [README.md](../README.md) | `scripts/**`, `Package.swift` | ebfd9d6 |
-| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | ebfd9d6 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**` | 41725c9 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 41725c9 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 5f22e54 |
+| [README.md](../README.md) | `scripts/**`, `Package.swift` | 5f22e54 |
+| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 5f22e54 |
+| [AGENTS.md](../AGENTS.md) | `scripts/**` | 5f22e54 |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 5f22e54 |
