@@ -389,6 +389,7 @@ final class Line: ObservableObject {
         Note.sourceOf = { [weak kept] url in kept?.app(of: url).flatMap(History.appName) }
         Note.clearsOf = { [weak kept] url in kept?.ttl(of: url).map(Line.clearsText) }
         restore()
+        try? FileManager.default.removeItem(at: Self.holding)
         // The words read from a kept picture go into the history, so the
         // basket finds it after it falls off the line.
         search.onRead = { [weak self] url, text in
@@ -544,6 +545,7 @@ final class Line: ObservableObject {
     /// Copies under an app's hourly rule, and verification codes, whose time ran
     /// out since their last use: deleted outright, not to the Trash and not kept anywhere.
     func clearExpired(now: Date = Date()) {
+        purgeHeld(now: now)
         let gone = history.expired(at: now)
         guard !gone.isEmpty else { return }
         for url in gone {
@@ -918,13 +920,28 @@ final class Line: ObservableObject {
     ///
     /// `step` is what Put back brings it back with. Nil when the line lets
     /// a photo go by itself, which is not undone.
+    ///
+    /// Something that clears by itself — a verification code, a copy from an
+    /// app set to clear in an hour — is not left in the Trash for good: it
+    /// waits in EnCopy's own folder for ⌘Z, and goes when its time is up
+    /// (review 2, on #5).
     @discardableResult
     func trash(_ id: UUID, quietly: Bool = false, step: UUID? = UUID()) -> Bool {
         guard let item = items.first(where: { $0.id == id }) else { return false }
         let index = liveIndex(of: id)
+        let ttl = history.ttl(of: item.url), expires = history.expiry(of: item.url)
         do {
             var trashed: NSURL?
-            try FileManager.default.trashItem(at: item.url, resultingItemURL: &trashed)
+            if ttl != nil, step != nil {
+                let held = uniqueURL(in: Self.holding, for: item.url.lastPathComponent)
+                try FileManager.default.createDirectory(at: Self.holding, withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: item.url, to: held)
+                trashed = held as NSURL
+            } else if ttl != nil {
+                try FileManager.default.removeItem(at: item.url)
+            } else {
+                try FileManager.default.trashItem(at: item.url, resultingItemURL: &trashed)
+            }
             if let trashed { clipboardFollows(item.url, to: trashed as URL) }
             log.notice("Trashed \(item.url.lastPathComponent, privacy: .public)")
             if soundOn && !quietly { Line.trashSound?.play() }
@@ -933,7 +950,8 @@ final class Line: ObservableObject {
             history.remove(item.url)
             drop(id, quietly: true)
             if let step, let index {
-                remember(TakenDown(url: item.url, index: index, trashed: trashed as URL?, kept: item.kept, byHand: item.byHand), in: step)
+                remember(TakenDown(url: item.url, index: index, trashed: trashed as URL?, kept: item.kept, byHand: item.byHand,
+                                   ttl: ttl, expires: expires), in: step)
             }
             return true
         } catch {
@@ -941,6 +959,22 @@ final class Line: ObservableObject {
             if !quietly { NSSound.beep() }
             return false
         }
+    }
+
+    /// Where a discarded item that clears by itself waits for ⌘Z. Undo
+    /// lives only while the app runs, so a launch empties it.
+    static var holding: URL { DataFolder.url.appendingPathComponent("Discarded", isDirectory: true) }
+
+    /// Held items whose time is up, or whose undo step is gone, go for good.
+    private func purgeHeld(now: Date = Date()) {
+        for s in steps.indices {
+            steps[s].photos.removeAll { photo in
+                guard photo.ttl != nil, let held = photo.trashed, let expires = photo.expires, expires <= now else { return false }
+                try? FileManager.default.removeItem(at: held)
+                return true
+            }
+        }
+        steps.removeAll { $0.photos.isEmpty }
     }
 
     private static let trashSound = NSSound(
@@ -1228,6 +1262,9 @@ final class Line: ObservableObject {
         var copied: URL?
         var copyIdentity: DesktopSave?
         var pinChange = false
+        /// Its own time, when it clears by itself, and when that runs out.
+        var ttl: TimeInterval?
+        var expires: Date?
     }
 
     /// What was taken down, the latest last. A step holds everything one
@@ -1245,7 +1282,12 @@ final class Line: ObservableObject {
             steps[i].photos.append(photo)
         } else {
             steps.append((step, [photo]))
-            if steps.count > Self.maxSteps { steps.removeFirst() }
+            if steps.count > Self.maxSteps {
+                // A held item cannot come back any more: it goes for good.
+                for photo in steps.removeFirst().photos where photo.ttl != nil {
+                    if let held = photo.trashed { try? FileManager.default.removeItem(at: held) }
+                }
+            }
             onUndoableAction?()
         }
     }
@@ -1288,6 +1330,11 @@ final class Line: ObservableObject {
                 insert(item, atLiveIndex: photo.index)
             }
             keep(url)
+            // Back with the time it had left, not kept for good.
+            if let ttl = photo.ttl {
+                history.setTTL(url, ttl)
+                if let expires = photo.expires { history.setUsed(url, expires.addingTimeInterval(-ttl)) }
+            }
             back.insert(item.id)
         }
         guard !back.isEmpty else {

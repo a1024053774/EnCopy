@@ -435,6 +435,7 @@ struct CheckFailed: Error { let message: String }
         try checkGroupDragOperations()
         try checkEditOnlyOwnPictures()
         try checkSearchBeforeLimit()
+        try checkDiscardedCodesNotInTrash()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1947,6 +1948,30 @@ struct CheckFailed: Error { let message: String }
                   "Tab to images finds the picture behind a thousand matching notes")
         deep.kindFilter = .text
         try check(deep.matchCount == 1006 && deep.basketCards.count == 8, "Tab to text counts every matching note, and shows a screenful")
+    }
+
+    /// Review 2, on #5: a code thrown away before its time is not left in
+    /// the Trash. It waits for ⌘Z in EnCopy's folder, comes back with its
+    /// time, and goes for good when the time is up.
+    func checkDiscardedCodesNotInTrash() throws {
+        let held = line()
+        let code = try adoptedNote("held-code", "Your code is 482913")
+        _ = held.hang(code, quietly: true)
+        held.history.setTTL(code, 600)
+        func id() -> UUID? { held.items.first { $0.url == code && !$0.falling }?.id }
+        held.discard(id()!)
+        let waiting = (try? FileManager.default.contentsOfDirectory(at: Line.holding, includingPropertiesForKeys: nil)) ?? []
+        try check(!FileManager.default.fileExists(atPath: code.path) && waiting.count == 1,
+                  "A code thrown away waits in EnCopy's folder, not the Trash")
+        held.putBack()
+        try check(FileManager.default.fileExists(atPath: code.path) && id() != nil && held.history.ttl(of: code) == 600,
+                  "⌘Z brings it back, still clearing by itself")
+        held.discard(id()!)
+        held.clearExpired(now: Date().addingTimeInterval(700))
+        let left = (try? FileManager.default.contentsOfDirectory(at: Line.holding, includingPropertiesForKeys: nil)) ?? []
+        held.putBack()
+        try check(left.isEmpty && !FileManager.default.fileExists(atPath: code.path) && id() == nil,
+                  "When its time is up it is gone for good, and ⌘Z cannot bring it back")
     }
 
     func checkShelves() throws {
