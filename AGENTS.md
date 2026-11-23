@@ -19,6 +19,8 @@ python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 | 给本机构建一个固定的签名，每台机器跑一次 | `scripts/make-signing-identity.sh` |
 | 打磁盘映像 | `scripts/make-dmg.sh` |
 
+本地检查会在屏幕上开一个窗口挂绳子。环境变量 `ENCOPY_CHECKS_SCREEN` 设成一块屏的名字，窗口就开在那块屏上。用户在用电脑时，检查和渲染都放到虚拟屏上做：用 `evidence/tools/vdisplay` 开一块虚拟屏，它叫 `EnCopy walk screen`，然后 `ENCOPY_CHECKS_SCREEN="EnCopy walk screen" scripts/check.sh`。
+
 本地检查在一个临时的 home 目录里跑，不读写真实的 `~/Library/Application Support/EnCopy`；绕过 `scripts/check.sh` 直接运行检查程序会报错退出。
 
 构建和检查都不需要 Xcode。只有 macOS 27 的 Command Line Tools 时，`scripts/swift-sdk.sh` 会让两个脚本改用 macOS 26 的 SDK。
