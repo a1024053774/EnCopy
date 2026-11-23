@@ -157,3 +157,9 @@
 "Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires." = "Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires.";
 "Originals may use up to" = "Originals may use up to";
 "Next run: %d expire, %d originals shrink." = "Next run: %d expire, %d originals shrink.";
+
+/* Basket shelves (T-033) */
+"Today" = "Today";
+"Yesterday" = "Yesterday";
+"This week" = "This week";
+"Earlier" = "Earlier";

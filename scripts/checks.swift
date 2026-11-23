@@ -361,6 +361,7 @@ struct CheckFailed: Error { let message: String }
         try checkImagesInBasket()
         try checkRetention()
         try checkCleanup()
+        try checkShelves()
         try checkDataFolder()
         try checkHistory()
     }
@@ -945,6 +946,10 @@ struct CheckFailed: Error { let message: String }
         try check(result.shrunk == [shot] && after < before && pixels <= Retention.thumbnailPixels,
                   "A 40-day-old screenshot shrinks to a thumbnail at the same place")
         try check(history.search(SearchIndex.words("receipt"), onLine: [], limit: 5).basket == [shot], "Its words are still found after shrinking")
+        keep.search.onRead(shot, "blurry thumbnail text")
+        keep.search.onRead(shot, "")
+        try check(history.words(of: shot)?.contains("receipt") == true,
+                  "Reading the thumbnail again does not replace the words read from the original")
         try check(keep.runRetention(now: now).shrunk.isEmpty, "A shrunk picture is not shrunk again")
         let batches = cleared.batches()
         try check(batches.count == 1 && batches[0].reason == "expired" && batches[0].entries.map(\.path) == [history.relative(old)!],
@@ -1000,6 +1005,58 @@ struct CheckFailed: Error { let message: String }
         try check(Line.originalsCap == 2 << 30, "The originals cap is kept as set")
         UserDefaults.standard.removeObject(forKey: "originalsCap")
         try check(Line.originalsCap == Retention.defaultCap, "Unset, the cap is 1 GB")
+    }
+
+    /// T-033: ↓ while summoned walks the basket by last use — today,
+    /// yesterday, this week, earlier — and what is used comes back.
+    func checkShelves() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("shelves.sqlite"))
+        let shelves = Line(pasteboard: pasteboard, desktop: root, history: history)
+        shelves.maxItems = 1; shelves.visibleCount = 8; shelves.revealed = true
+        let now = Date(), day: TimeInterval = 86400
+        let start = Calendar.current.startOfDay(for: now)
+        let ages: [(String, Date)] = [("today", now.addingTimeInterval(-60)), ("yesterday", start.addingTimeInterval(-day / 2)),
+                                      ("week", start.addingTimeInterval(-3 * day)), ("earlier", start.addingTimeInterval(-30 * day))]
+        var urls: [String: URL] = [:]
+        for (name, _) in ages { urls[name] = try adoptedNote("shelf-\(name)", "shelf words \(name)"); _ = shelves.hang(urls[name]!, quietly: true) }
+        let hanging = try adoptedNote("shelf-hanging", "shelf words hanging")
+        _ = shelves.hang(hanging, quietly: true)
+        pump(0.7); shelves.closeGaps()
+        for (name, date) in ages { history.setUsed(urls[name]!, date) }
+        let bar = SearchBar(line: shelves)
+        bar.onShelf = { shelves.moveShelf($0); shelves.pickNewest() }
+        func arrow(_ code: Int) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
+        }
+        func shownURLs() -> [URL] { shelves.shown.filter { !$0.falling }.map(\.url) }
+        try check(shownURLs() == [hanging], "The line shows only what hangs")
+        try check(bar.takes(arrow(kVK_DownArrow), composing: false) && shelves.shelf == .today && shownURLs() == [urls["today"]!],
+                  "↓ shows today's shelf of the basket")
+        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
+        try check(shownURLs() == [urls["yesterday"]!], "↓ again shows yesterday")
+        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
+        try check(shownURLs() == [urls["week"]!], "↓ again shows the rest of this week")
+        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
+        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
+        try check(shelves.shelf == .earlier && shownURLs() == [urls["earlier"]!], "↓ stops at earlier")
+        try check(shelves.picked?.url == urls["earlier"], "The shelf's newest is picked")
+        var sent = 0
+        let paster = Paster(line: shelves, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.pastePicked()
+        shelves.shelf = .line
+        try check(sent == 1 && shelves.items.filter { !$0.falling }.last?.url == urls["earlier"], "Pasted from a shelf, it comes back to the head of the line")
+        shelves.shelf = .week
+        let weekCard = shelves.basketCards.first!.id
+        shelves.togglePin(weekCard)
+        try check(shelves.items.first { $0.url == urls["week"] }?.kept == true, "⌘P on a shelf card brings it back pinned")
+        shelves.shelf = .yesterday
+        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
+        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
+        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
+        try check(shelves.shelf == .line, "↑ comes back to the line and stops there")
     }
 
     func checkDesktopCopies() throws {
@@ -1490,18 +1547,18 @@ struct CheckFailed: Error { let message: String }
         peek.closeGaps()
         peek.query = "alpha"
         show(peek)
-        // A basket card's view has no url: it is the only card without one.
+        // The basket card is the one whose file is the basket's match.
         func basketCard() throws -> GrabView {
             func all(_ sub: NSView) -> [GrabView] {
                 (sub as? GrabView).map { [$0] } ?? sub.subviews.flatMap(all)
             }
-            guard let card = all(window.contentView!).first(where: { $0.url == nil }) else {
+            guard let card = all(window.contentView!).first(where: { $0.url == peek.basketCards.first?.url }) else {
                 throw CheckFailed(message: "No basket card on screen")
             }
             return card
         }
         let card = try basketCard()
-        try check(card.url == nil, "A basket card does not drag")
+        try check(card.url == peekSaved[0], "A basket card drags its file, like any card (T-033)")
         try check(card.menuProvider().items.map(\.title) == ["Copy", "Discard"],
                   "A basket card's menu is only Copy and Discard")
         click(card)

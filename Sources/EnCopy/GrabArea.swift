@@ -29,11 +29,11 @@ struct GrabArea: NSViewRepresentable {
         let id = item.id
         let line = line
         if line.isInBasket(id) {
-            // A basket card only comes back: the rest waits until the
-            // basket has ropes of its own. The view is reused, so every
-            // handler a line card would get is reset here.
-            view.url = nil
-            view.dragImage = nil
+            // A basket card comes back when used, and can be dragged out
+            // like any card (T-033). The view is reused, so every handler a
+            // line card would get is reset here.
+            view.url = item.url
+            view.dragImage = item.thumb
             view.isHeld = false
             view.toolTip = nil
             view.onSelect = {}
