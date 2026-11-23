@@ -2,7 +2,7 @@
 id: T-045
 title: 篮子列表的一行换成一小条纸，跟主题走
 type: build
-status: open
+status: closed
 blocked_by: [T-044]
 claimed_by:
 supersedes:
@@ -14,8 +14,14 @@ supersedes:
 
 ## Acceptance
 
-- [ ] 五种东西各是各的纸条；换主题后列表跟着换。
-- [ ] 图片行有缩略图和图里的字；文件行有文件名；来源 App 图标照设置显示或不显示。
-- [ ] 自动检查覆盖：一行的种类和纸对应；图片行取到图里的字。
+- [x] 五种东西各是各的纸条；换主题后列表跟着换。
+- [x] 图片行有缩略图和图里的字；文件行有文件名；来源 App 图标照设置显示或不显示。
+- [x] 自动检查覆盖：一行的种类和纸对应；图片行取到图里的字。
 
 ## Resolution
+
+完成，2026-11-23。每行是 `PaperStrip`：纸主题照绳上各画各的（小票、打孔纸带孔、吊牌切角、拍立得缩略图、文件夹），别的主题用 `ThemeCardBackground`；字体、颜色用主题的。种类和一行说什么在 `Line.paperCard` / `Line.basketSummary`。来源 App 图标照 `Line.showsSourceApp`。提交 `751d946`，走查后修了选中的样子 `afbc551`。
+
+检查：`checkBasketPapers` 5 项（四种纸对上；笔记第一、二行；链接站点和路径；图里的字）。改成「链接当小票」时「每行是自己的纸」那项报错。`scripts/check.sh`：428 项通过。
+
+真机（2026-11-23 09:03–09:11，开发版，MacBook 内建屏，纸主题和霓虹主题；证据在本地 `evidence/T-044/`，不进 git）：纸主题下小票、吊牌、打孔纸各是各的（`04-list-open.png`）；选中的那条往外拉、粗边、带阴影（`08-pick-3.png`、`09-pick-jump.png`）；换霓虹主题后列表跟着换，选中的粉边分得清（`24-neon.png`）。图片行和文件行这次真机没有素材，由检查覆盖。
