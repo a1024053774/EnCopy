@@ -151,11 +151,12 @@ struct PeggedView: View {
 
     private var card: some View {
         paper
-            // What it is, in the top corner (T-047).
+            // What it is, sitting on the paper's top edge left of the peg, so
+            // it covers none of the words (T-047; on the paper it hid them).
             .overlay(alignment: .topLeading) {
                 KindTag(tag: line.tag(of: item.url))
                     .scaleEffect(0.9, anchor: .topLeading)
-                    .padding(.top, 5).padding(.leading, 5)
+                    .offset(x: 6, y: -8)
                     .allowsHitTesting(false)
             }
             // Where it was copied from, in the corner (T-042).
