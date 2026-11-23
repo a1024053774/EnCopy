@@ -381,6 +381,7 @@ struct CheckFailed: Error { let message: String }
         try checkPutBackKeepsBatch()
         try checkDragOperations()
         try checkMarkupOnlyPictures()
+        try checkPutBackNotNew()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1350,6 +1351,27 @@ struct CheckFailed: Error { let message: String }
         try check(edit.editAction(for: id(picture)) == .markup, "Holding a picture still opens Markup")
         try check(edit.editAction(for: id(note)) == .open, "Holding a note still opens it to edit")
         try check(!edit.canMarkUp(id(pdf)) && edit.canMarkUp(id(picture)), "The Markup menu item is only for pictures")
+    }
+
+    /// Review #7: a screenshot put back from Recently Cleared is known to the
+    /// history again, so the screenshot watcher does not take it for a new one.
+    func checkPutBackNotNew() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("PutBack shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("putback-new.sqlite"))
+        let shots = Line(pasteboard: pasteboard, desktop: root, history: history)
+        shots.clearing = Clearing(folder: root.appendingPathComponent("cleared-new", isDirectory: true))
+        let old = try png("Old shot.png", in: Inbox.folder)
+        history.recordImage(old, text: "")
+        guard let batch = shots.clearing.clear([old], reason: "manual", history: history) else { throw CheckFailed(message: "Nothing was cleared") }
+        try check(!shots.isKnown(old), "Cleared, it is no longer in the history")
+        shots.putBack(batch: batch.id)
+        try check(FileManager.default.fileExists(atPath: old.path) && shots.isKnown(old), "Put back, it is known again: not a new screenshot")
+        let fresh = try png("Fresh shot.png", in: Inbox.folder)
+        try check(!shots.isKnown(fresh), "A screenshot just taken is new")
     }
 
     func checkShelves() throws {

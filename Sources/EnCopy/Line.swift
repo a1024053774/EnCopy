@@ -516,6 +516,10 @@ final class Line: ObservableObject {
     }
 
     /// A batch from 「最近清掉」 goes back into the basket.
+    /// Already in the history: a file put back from Recently Cleared, not a
+    /// screenshot just taken (review #7).
+    func isKnown(_ url: URL) -> Bool { history.contains(url) }
+
     func putBack(batch id: String) {
         clearing.putBack(id, history: history)
         if isSearching { recomputeSearch() }
