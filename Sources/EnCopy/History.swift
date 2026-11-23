@@ -116,7 +116,18 @@ final class History {
         guard isText(url), let path = relativePath(url),
               FileManager.default.fileExists(atPath: url.path),
               let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
-        if let existing = row(path: path), existing.modified == modified { return }
+        if let existing = row(path: path), existing.modified == modified {
+            // Unchanged words; an app learned since is still worth keeping.
+            if let app {
+                attempt("fill app") {
+                    try run("UPDATE item SET app = ? WHERE path = ? AND app IS NULL", bind: { stmt in
+                        bind(stmt, 1, app)
+                        bind(stmt, 2, path)
+                    })
+                }
+            }
+            return
+        }
         guard let plain = text ?? readText(url) else { return }
         let hash = Data(SHA256.hash(data: Data(plain.utf8)))
         let used = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate)?

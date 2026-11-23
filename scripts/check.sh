@@ -1,7 +1,7 @@
 #!/bin/bash
-# EnCopy's local checks, run after every change; five steps: the name
-# guard, the one-key guard, the data-folder guard, the strings check, and
-# the native checks.
+# EnCopy's local checks, run after every change; six steps: the name
+# guard, the one-key guard, the data-folder guard, the strings check, a
+# type check of the whole app, and the native checks.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/swift-sdk.sh
@@ -34,7 +34,11 @@ fi
 #    keeps an entry the code no longer uses.
 swift scripts/check-strings.swift
 
-# 5. The native checks, without XCTest or the system clipboard. Watchers use
+# 5. The whole app type-checks. The native checks below compile only part of
+#    it, with a stand-in Inbox, so app-only code could break unseen (T-030 did).
+swiftc -typecheck -module-name EnCopy -target "$(uname -m)-apple-macosx14.0" Sources/EnCopy/*.swift
+
+# 6. The native checks, without XCTest or the system clipboard. Watchers use
 #    only generated files in private test folders, inside a home folder of
 #    their own so the user's Application Support stays untouched.
 CHECK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/encopy-checks.XXXXXX")"

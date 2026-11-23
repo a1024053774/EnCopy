@@ -1035,6 +1035,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pause.toolTip = L("Nothing you copy is kept while this is on")
         menu.addItem(pause)
         menu.addItem(appRulesItem())
+        menu.addItem(ClosureMenuItem(L("Clean Up History…")) { [weak self] in
+            guard let self else { return }
+            CleanupPanel.shared.show(line: self.line)
+        })
         let kinds: [(String, String, ReferenceWritableKeyPath<ClipboardWatcher.Type, Bool>)] = [
             (L("Images"), L("Images you copy hang on the line too"), \.imagesEnabled),
             (L("Text"), L("Text you copy hangs on the line too"), \.textEnabled),

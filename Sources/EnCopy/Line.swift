@@ -202,7 +202,9 @@ final class Line: ObservableObject {
     /// image — goes into the history like a note, and into the basket when
     /// it falls off a full line (T-030).
     func isKeptImage(_ url: URL) -> Bool {
-        guard !isText(url), !isRecording(url), !isFile(url), let folder = Inbox.folder else { return false }
+        // Optional on purpose: the checks stand in an Inbox whose folder may be unset.
+        let folder: URL? = Inbox.folder
+        guard !isText(url), !isRecording(url), !isFile(url), let folder else { return false }
         return url.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/")
     }
 
@@ -402,9 +404,37 @@ final class Line: ObservableObject {
     /// 「最近清掉」, where expired and cleaned-up items wait seven days.
     lazy var clearing = Clearing()
 
+    /// The paths of what hangs now: the retention rules and the cleanup panel leave them alone.
+    var onLinePaths: Set<String> { Set(items.filter { !$0.falling }.map { $0.url.standardizedFileURL.path }) }
+
+    /// What the cleanup panel would clear with this filter.
+    func cleanupCandidates(_ filter: CleanupFilter, now: Date = Date()) -> [URL] {
+        filter.candidates(history: history, onLine: onLinePaths, isKeptImage: isKeptImage, now: now)
+    }
+
+    /// Clears them into 「最近清掉」 as one batch.
+    @discardableResult
+    func cleanUp(_ urls: [URL], now: Date = Date()) -> Clearing.Batch? {
+        let batch = clearing.clear(urls, reason: "manual", history: history, now: now)
+        if isSearching { recomputeSearch() }
+        return batch
+    }
+
+    /// A batch from 「最近清掉」 goes back into the basket.
+    func putBack(batch id: String) {
+        clearing.putBack(id, history: history)
+        if isSearching { recomputeSearch() }
+    }
+
+    /// The originals cap from the cleanup panel's retention settings.
+    nonisolated static var originalsCap: Int64 {
+        get { let v = UserDefaults.standard.object(forKey: "originalsCap") as? Int64 ?? 0; return v > 0 ? v : Retention.defaultCap }
+        set { UserDefaults.standard.set(newValue, forKey: "originalsCap") }
+    }
+
     /// T-004's daily rules: see `Retention`. Nothing on the line is touched.
     @discardableResult
-    func runRetention(now: Date = Date(), cap: Int64 = Retention.defaultCap) -> Retention.Result {
+    func runRetention(now: Date = Date(), cap: Int64 = Line.originalsCap) -> Retention.Result {
         let onLine = Set(items.filter { !$0.falling }.map { $0.url.standardizedFileURL.path })
         let result = Retention.run(history: history, clearing: clearing, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
         if isSearching { recomputeSearch() }

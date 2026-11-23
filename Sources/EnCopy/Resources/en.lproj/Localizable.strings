@@ -127,3 +127,33 @@
 /* Files (T-029) */
 "Files" = "Files";
 "Files you copy in Finder hang on the line, where they are" = "Files you copy in Finder hang on the line, where they are";
+
+/* Cleanup panel (T-032) */
+"Clean Up History…" = "Clean Up History…";
+"Clean Up History" = "Clean Up History";
+"Clean up history" = "Clean up history";
+"Kind" = "Kind";
+"Everything" = "Everything";
+"Last used" = "Last used";
+"Any time" = "Any time";
+"Over a day ago" = "Over a day ago";
+"Over a week ago" = "Over a week ago";
+"Over a month ago" = "Over a month ago";
+"Over three months ago" = "Over three months ago";
+"Over a year ago" = "Over a year ago";
+"Copied from" = "Copied from";
+"Any app" = "Any app";
+"Containing" = "Containing";
+"%d items will go to Recently Cleared, where they stay 7 days." = "%d items will go to Recently Cleared, where they stay 7 days.";
+"Cancel" = "Cancel";
+"Clear %d" = "Clear %d";
+"Clear %d…" = "Clear %d…";
+"Recently Cleared" = "Recently Cleared";
+"Nothing cleared in the last 7 days." = "Nothing cleared in the last 7 days.";
+"%d expired" = "%d expired";
+"%d cleared by you" = "%d cleared by you";
+"Put Back" = "Put Back";
+"Keeping" = "Keeping";
+"Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires." = "Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires.";
+"Originals may use up to" = "Originals may use up to";
+"Next run: %d expire, %d originals shrink." = "Next run: %d expire, %d originals shrink.";
