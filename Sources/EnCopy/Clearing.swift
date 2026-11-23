@@ -96,7 +96,12 @@ final class Clearing {
                 log.error("Could not put back \(entry.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 continue
             }
-            if isText(to) { history.record(to, app: entry.app) } else { history.recordImage(to, text: entry.words ?? "") }
+            if isText(to) {
+                history.record(to, app: entry.app)
+            } else {
+                history.recordImage(to, text: entry.words ?? "")
+                history.setApp(to, entry.app)
+            }
             history.setUsed(to, Date(timeIntervalSince1970: entry.used))
             if entry.shrunk { history.setShrunk(to, true) }
             back.append(to)
