@@ -82,6 +82,25 @@ final class History {
     }
 
     /// The note already kept for exactly these words, if any.
+    /// A copied picture's hash: of its bytes, kept apart from notes' hashes.
+    static func pictureHash(_ contents: Data) -> Data {
+        Data(SHA256.hash(data: Data("picture:".utf8) + contents))
+    }
+
+    /// The picture copied before with exactly these bytes, if its file is
+    /// still the original. A shrunk one is a thumbnail now: a new copy keeps
+    /// the full picture.
+    func picture(holding contents: Data) -> URL? {
+        let paths = (try? strings("SELECT path FROM item WHERE hash = ? AND shrunk = 0",
+                                  bind: { bind($0, 1, Self.pictureHash(contents)) })) ?? []
+        for path in paths {
+            let url = absoluteURL(path)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+            remove(path: path)
+        }
+        return nil
+    }
+
     func note(holding text: String) -> URL? {
         let hash = Data(SHA256.hash(data: Data(text.utf8)))
         let paths: [String]
@@ -287,10 +306,12 @@ final class History {
 
     /// A picture EnCopy keeps (T-030): a row of its own, with the words read
     /// from it once they are ready. Nil text keeps whatever words it has.
-    func recordImage(_ url: URL, text: String?) {
+    /// `contents` is a copied picture's bytes, kept as its hash so the same
+    /// picture copied again finds this row (review 2, on #11).
+    func recordImage(_ url: URL, text: String?, contents: Data? = nil) {
         guard !isText(url), let path = relativePath(url), FileManager.default.fileExists(atPath: url.path),
               let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
-        let hash = Data(SHA256.hash(data: Data(("image:" + path).utf8)))
+        let hash = contents.map(Self.pictureHash) ?? Data(SHA256.hash(data: Data(("image:" + path).utf8)))
         let used = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate)?
             .timeIntervalSince1970 ?? Date().timeIntervalSince1970
         attempt("record image") {

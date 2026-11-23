@@ -20,9 +20,6 @@ final class ClipboardWatcher {
     private let onAgain: (URL) -> Void
     private var timer: Timer?
     private var lastCount: Int
-    /// The last image saved. Some apps put the same image on the clipboard
-    /// again; it hangs once, unless it has been taken down since.
-    private var last: (png: Data, url: URL)?
 
     private static let enabledKey = "clipboardEnabled"
 
@@ -312,12 +309,13 @@ final class ClipboardWatcher {
     /// `app` and `ttl` are as when it was copied: the picture is cleared by
     /// its app's rule like text, and cleanup by app finds it (review #3).
     private func save(_ png: Data, app: String?, ttl: TimeInterval?) {
-        // The picture copied last, copied again: it comes back to the head,
-        // from the basket if it fell there (review #11).
-        if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) {
-            history.setApp(last.url, app)
-            history.renewTTL(last.url, ttl)
-            onAgain(last.url)
+        // A picture copied before, copied again — the last one or any earlier
+        // one: it comes back to the head, from the basket if it fell there,
+        // instead of being saved twice (review #11; review 2, on #11).
+        if let earlier = history.picture(holding: png) {
+            history.setApp(earlier, app)
+            history.renewTTL(earlier, ttl)
+            onAgain(earlier)
             return
         }
         let fm = FileManager.default
@@ -332,8 +330,7 @@ final class ClipboardWatcher {
             try png.write(to: url, options: .atomic)
             // What people copy can be private: only they can read it.
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            last = (png, url)
-            history.recordImage(url, text: nil)
+            history.recordImage(url, text: nil, contents: png)
             history.setApp(url, app)
             history.setTTL(url, ttl)
             onNew(url)
