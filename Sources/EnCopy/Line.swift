@@ -1166,9 +1166,10 @@ final class Line: ObservableObject {
     /// basket cards and Tab's narrowing included, left to right as it hangs,
     /// so ← and → in Quick Look go the way they do on the line (review #12).
     func quickLookItems(for id: UUID) -> (urls: [URL], index: Int)? {
-        let all = shown.filter { !$0.falling }
-        let pinned = layoutPinned
-        let onScreen = Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()
+        // In screen order first, then without what is falling: the pinned
+        // count includes a falling card that still holds its place (review 2 #9).
+        let all = shown, pinned = layoutPinned
+        let onScreen = (Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()).filter { !$0.falling }
         guard let index = onScreen.firstIndex(where: { $0.id == id }) else { return nil }
         return (onScreen.map(\.url), index)
     }
