@@ -387,6 +387,7 @@ struct CheckFailed: Error { let message: String }
         try checkFilesRespectImages()
         try checkRecopyComesBack()
         try checkShelfSearch()
+        try checkKindBeforeLimit()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1515,6 +1516,38 @@ struct CheckFailed: Error { let message: String }
         shelves.moveShelf(1)
         try check(shownURLs() == [yesterdayA], "↓ while searching moves the search to yesterday")
         shelves.query = ""; shelves.shelf = .line
+    }
+
+    /// Review #14: Tab narrows by kind before the line's width cuts the
+    /// basket, so a picture behind eight notes still shows under Images.
+    func checkKindBeforeLimit() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Kind shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("kind-limit.sqlite"))
+        let kinds = Line(pasteboard: pasteboard, desktop: root, history: history)
+        kinds.maxItems = 1; kinds.visibleCount = 8; kinds.revealed = true
+        let now = Date()
+        let picture = try png("Kind picture.png", in: Inbox.folder)
+        history.recordImage(picture, text: "kindword picture")
+        history.setUsed(picture, now.addingTimeInterval(-3000))
+        var notes: [URL] = []
+        for i in 0..<9 {
+            let note = try adoptedNote("kind-note-\(i)", "kindword note \(i)")
+            history.record(note, text: "kindword note \(i)")
+            history.setUsed(note, now.addingTimeInterval(-Double(100 + i)))
+            notes.append(note)
+        }
+        kinds.moveShelf(1)
+        kinds.kindFilter = .image
+        try check(kinds.shown.map(\.url) == [picture], "Today under Images shows the picture behind nine notes")
+        kinds.shelf = .line; kinds.kindFilter = nil
+        kinds.query = "kindword"
+        kinds.kindFilter = .image
+        try check(kinds.shown.map(\.url) == [picture] && kinds.matchCount == 1, "A search under Images finds the picture and counts one")
+        kinds.query = ""; kinds.kindFilter = nil
     }
 
     func checkShelves() throws {
