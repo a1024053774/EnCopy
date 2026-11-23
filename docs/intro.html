@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>EnCopy in 40 seconds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+SC:wght@500;700;900&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* EnCopy in 40 seconds: a 1920×1080 stage scaled to the window. render(t) sets every style from the time alone,
+   so the same t always draws the same frame: the product page plays it live in an iframe, and promo/render.js
+   screenshots it frame by frame into the MP4. Sound is synthesized with Web Audio on a context the page hands in.
+   URL: ?lang=zh|en  ?theme=light|dark  ?t=12.5 (one still frame)  ?embed (wait for the page to drive it). */
+:root {
+  --sky: #1f45d8; --navy: #0f1638; --sun: #ffd33d; --cream: #fbf7ec; --kraft: #d6b184; --pick: #2f7cf6;
+  --f-head: "Space Grotesk", "Noto Sans SC", Inter, sans-serif; --f-body: Inter, "Noto Sans SC", sans-serif; --f-mono: "JetBrains Mono", "Noto Sans SC", monospace;
+}
+:root[data-theme="dark"] { --sky: #0e1a4a; --navy: #08102e; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--navy); }
+#stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0; background: var(--navy); font-family: var(--f-body); color: var(--cream); }
+.abs { position: absolute; }
+.grain { position: absolute; inset: 0; pointer-events: none; opacity: .07; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+.s1-line { font: 700 92px/1.05 var(--f-head); letter-spacing: -.02em; white-space: nowrap; }
+.s1-line span { display: inline-block; }
+.clip { width: 980px; height: 150px; left: 470px; top: 520px; border-radius: 22px; background: var(--cream); color: #0f1638; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.clip-label { left: 470px; top: 474px; font: 700 20px/1 var(--f-mono); letter-spacing: .2em; color: #8f96b8; }
+.clip-item { left: 44px; top: 0; height: 150px; display: flex; align-items: center; font: 600 46px/1 var(--f-body); white-space: nowrap; }
+.clip-item.mono { font: 700 42px/1 var(--f-mono); }
+.curtain { left: 0; top: 0; width: 1920px; height: 1080px; background: var(--sky); }
+
+.key { display: inline-grid; place-items: center; min-width: 96px; height: 96px; padding: 0 26px; border-radius: 20px;
+  background: var(--cream); color: #0f1638; font: 700 52px/1 var(--f-mono); box-shadow: 0 8px 0 #9aa3c9, 0 16px 30px rgba(0,0,0,.3); }
+.key.sm { min-width: 64px; height: 64px; padding: 0 16px; border-radius: 14px; font-size: 32px; box-shadow: 0 5px 0 #9aa3c9, 0 10px 20px rgba(0,0,0,.25); }
+.keyrow { display: flex; gap: 18px; }
+
+#rope { left: 0; top: 0; width: 1920px; height: 400px; overflow: visible; }
+.hang { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.hang .pivot { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.peg { position: absolute; left: -9px; top: -26px; width: 18px; height: 50px; border-radius: 4px; z-index: 3;
+  background: linear-gradient(90deg, #b07b45 0 46%, #8a5a2e 46% 54%, #d2a067 54%); box-shadow: 0 3px 4px rgba(0,0,0,.3); }
+.peg::after { content: ""; position: absolute; left: -3px; right: -3px; top: 20px; height: 6px; border-radius: 2px; background: #6d6f75; }
+.paper { position: absolute; top: 4px; transform: translateX(-50%); color: #1d1f22; font-family: var(--f-body); box-shadow: 0 14px 26px rgba(5, 10, 40, .32); }
+.pick-ring { position: absolute; inset: -10px; border: 6px solid var(--pick); border-radius: 16px; opacity: 0; }
+
+.receipt { width: 250px; height: 168px; background: #fff; border: 3px solid #e08a1e; border-radius: 8px; padding: 16px 18px; }
+.receipt h4 { margin: 0 0 8px; font: 700 21px/1.25 var(--f-body); }
+.receipt p { margin: 8px 0 0; padding-top: 8px; border-top: 2px dashed #d8d2c4; font: 500 15px/1.4 var(--f-body); color: #6b6f77; }
+.foot { position: absolute; left: 18px; bottom: 12px; font: 500 12px/1 var(--f-mono); color: #8a8e95; }
+.badge { position: absolute; right: 12px; bottom: 10px; width: 22px; height: 22px; border-radius: 6px; }
+.code { width: 250px; height: 172px; border-radius: 4px; padding: 16px 26px; font: 700 15px/1.75 var(--f-mono); color: #2e6b2a; white-space: pre;
+  background: repeating-linear-gradient(#eef4e2 0 27px, #fbfdf6 27px 54px); }
+.code::before, .code::after { content: ""; position: absolute; top: 8px; bottom: 8px; width: 8px;
+  background: radial-gradient(circle, rgba(15,22,56,.35) 3.5px, transparent 4px) 0 0 / 8px 22px; }
+.code::before { left: 6px; } .code::after { right: 6px; }
+.link { width: 250px; height: 150px; background: var(--kraft); border-radius: 8px; padding: 30px 20px 16px; clip-path: polygon(0 18px, 18px 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%); }
+.link::before { content: ""; position: absolute; left: 50%; top: 10px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #8a6a3d; }
+.link h4 { margin: 6px 0 6px; font: 700 26px/1.1 var(--f-mono); color: #2a1f10; }
+.link p { margin: 0; font: 500 15px/1.35 var(--f-mono); color: #5c4528; }
+.shot { width: 250px; height: 190px; background: #fff; padding: 12px 12px 34px; border-radius: 3px; }
+.shot .img { width: 100%; height: 100%; background: #3f6fd8; position: relative; overflow: hidden; }
+.shot .img i { position: absolute; left: 22%; top: 24%; width: 56%; height: 50%; background: var(--sun); }
+.file { width: 230px; height: 168px; background: #e9c48f; border-radius: 4px 10px 8px 8px; padding: 34px 18px 14px; text-align: center; }
+.file::before { content: ""; position: absolute; left: 0; top: -14px; width: 90px; height: 18px; background: #e9c48f; border-radius: 8px 8px 0 0; }
+.pdf { width: 46px; height: 56px; margin: 0 auto 10px; background: #fff; border-radius: 4px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,.15); }
+.pdf::after { content: "PDF"; position: absolute; left: 4px; right: 4px; bottom: 6px; background: #e0352b; color: #fff; font: 700 11px/16px var(--f-body); border-radius: 2px; }
+.file b { font: 700 18px/1.2 var(--f-body); color: #3b2a14; }
+.letter { width: 150px; height: 172px; display: grid; place-items: center; font: 700 116px/1 var(--f-head); color: #0f1638; border-radius: 6px; }
+.big { width: 430px; height: 230px; padding: 28px 30px; border-radius: 10px; color: #0f1638; }
+.big h4 { margin: 0 0 14px; font: 700 38px/1.1 var(--f-head); }
+.big p { margin: 0; font: 500 22px/1.4 var(--f-body); }
+
+.win { left: 430px; top: 470px; width: 1060px; height: 400px; border-radius: 18px; background: #fffdf7; color: #24262b; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(5,10,40,.45), 0 0 0 1px rgba(15,22,56,.08); }
+.bar { height: 48px; background: #efe9da; display: flex; align-items: center; padding: 0 18px; gap: 9px; font: 600 17px/1 var(--f-body); color: #6a6e78; }
+.bar i { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.bar span { margin-left: 22px; }
+.doc { position: absolute; left: 0; top: 48px; right: 0; bottom: 0; padding: 30px 46px; }
+.doc .row { position: relative; margin-bottom: 22px; font: 500 27px/1.4 var(--f-body); }
+.doc .row.sub { color: #7b7f86; font-size: 22px; }
+.doc .row.code-row { font: 600 23px/1.5 var(--f-mono); color: #2e6b2a; white-space: pre; }
+.doc .row.url { font: 500 25px/1.4 var(--f-mono); color: #1f5fd6; text-decoration: underline; }
+.sel { position: absolute; left: -8px; top: -2px; bottom: -2px; background: rgba(47,124,246,.25); border-radius: 6px; width: 0; }
+.caret { display: inline-block; width: 3px; height: 32px; background: #0f1638; vertical-align: -5px; margin-left: 2px; }
+.desk-file { left: 150px; top: 640px; width: 150px; text-align: center; font: 600 19px/1.3 var(--f-body); color: var(--cream); }
+.desk-file .ico { width: 92px; height: 112px; margin: 0 auto 10px; background: #fff; border-radius: 6px; position: relative; }
+.desk-file .ico::after { content: "PDF"; position: absolute; left: 10px; right: 10px; bottom: 14px; background: #e0352b; color: #fff; font: 700 18px/26px var(--f-body); border-radius: 3px; }
+.desk-file .hl { position: absolute; inset: -10px; border-radius: 14px; background: rgba(255,255,255,.22); opacity: 0; }
+.flash { left: 0; top: 0; width: 1920px; height: 1080px; background: #fff; opacity: 0; }
+.marquee { border: 3px dashed #fff; background: rgba(255,255,255,.1); }
+
+.caption { left: 0; width: 1920px; text-align: center; font: 700 58px/1.1 var(--f-head); letter-spacing: -.01em; color: var(--cream); white-space: nowrap; }
+.caption em { font-style: normal; color: var(--sun); }
+.kinds { left: 0; width: 1920px; top: 950px; text-align: center; font: 700 50px/1 var(--f-head); }
+.kinds span { margin: 0 14px; }
+
+.search { z-index: 2; left: 560px; top: 530px; width: 800px; height: 96px; border-radius: 48px; background: var(--cream); color: #0f1638;
+  display: flex; align-items: center; padding: 0 38px; gap: 22px; font: 600 44px/1 var(--f-body); box-shadow: 0 20px 50px rgba(5,10,40,.35); }
+.mag { width: 34px; height: 34px; border: 6px solid #0f1638; border-radius: 50%; position: relative; flex: none; }
+.mag::after { content: ""; position: absolute; width: 6px; height: 18px; background: #0f1638; right: -10px; bottom: -14px; transform: rotate(-45deg); border-radius: 3px; }
+.basket { left: 790px; top: 690px; width: 340px; height: 170px; }
+.basket-label { left: 0; width: 1920px; top: 872px; text-align: center; font: 600 22px/1 var(--f-mono); color: rgba(251,247,236,.7); letter-spacing: .08em; }
+.ocr-doc { width: 100%; height: 100%; background: #fff; padding: 14px 16px; font: 800 22px/1 var(--f-head); color: #1d1f22; }
+.ocr-doc .mark { background: rgba(255,211,61,.85); padding: 0 4px; }
+.ocr-doc i { display: block; height: 8px; background: #e3e5ea; border-radius: 4px; margin-top: 12px; width: 80%; }
+
+.theme-panel { left: 260px; top: 470px; width: 1400px; height: 330px; border-radius: 26px; background: #fff; overflow: hidden; box-shadow: 0 30px 80px rgba(5,10,40,.45); }
+.theme-img { position: absolute; left: 40px; top: 45px; width: 1320px; height: 240px; }
+.theme-title { left: 260px; top: 250px; font: 700 110px/1 var(--f-head); letter-spacing: -.03em; }
+.theme-name { left: 260px; top: 850px; font: 700 54px/1 var(--f-head); color: var(--sun); white-space: nowrap; }
+.theme-dots { left: 1300px; top: 870px; display: flex; gap: 14px; }
+.theme-dots i { width: 18px; height: 18px; border-radius: 50%; background: rgba(251,247,236,.3); }
+
+.end-url { left: 0; width: 1920px; top: 900px; text-align: center; }
+.end-url span { display: inline-block; padding: 18px 34px; border-radius: 40px; background: var(--sun); color: #0f1638; font: 700 38px/1 var(--f-mono); }
+.end-sub { left: 0; width: 1920px; top: 800px; text-align: center; font: 600 36px/1 var(--f-body); color: rgba(251,247,236,.85); }
+</style>
+</head>
+<body>
+<div id="stage" aria-hidden="true">
+  <div id="s1" class="abs" style="inset:0">
+    <div id="s1a" class="abs s1-line" style="left:0;width:1920px;text-align:center;top:290px"></div>
+    <div id="clipLabel" class="abs clip-label" data-k="clipboard"></div>
+    <div id="clip" class="abs clip"></div>
+    <div id="s1key" class="abs" style="left:1490px;top:546px"><span class="key sm">⌘C</span></div>
+    <div id="s1b" class="abs caption" style="top:760px" data-k="lastOne"></div>
+  </div>
+  <div id="curtain" class="abs curtain"></div>
+  <div class="grain"></div>
+
+  <div id="desk" class="abs desk-file"><div class="hl"></div><div class="ico"></div><span data-k="pdf"></span></div>
+  <div id="win" class="abs win">
+    <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span id="winTitle"></span></div>
+    <div id="docA" class="doc">
+      <div class="row" id="rA"><div class="sel"></div><span data-k="noteLine"></span></div>
+      <div class="row code-row" id="rB"><div class="sel"></div>func paste(_ id: UUID) {
+    line.copy(id)
+}</div>
+      <div class="row url" id="rC"><div class="sel"></div>github.com/a1024053774/EnCopy</div>
+    </div>
+    <div id="docB" class="doc">
+      <div class="row sub" data-k="to"></div>
+      <div class="row sub" data-k="subject"></div>
+      <div class="row"><span data-k="repo"></span><span id="pasted" style="font-family:var(--f-mono);color:#1f5fd6;border-radius:6px"></span><span id="caret" class="caret"></span></div>
+    </div>
+  </div>
+  <div id="marquee" class="abs marquee"></div>
+
+  <svg id="basket" class="abs basket" viewBox="0 0 400 200">
+    <path d="M20 40 H380 L340 196 H60 Z" fill="#b5834c"/>
+    <g stroke="#8a5e2f" stroke-width="5" fill="none">
+      <path d="M28 76 H372 M37 112 H363 M46 148 H354 M55 182 H345"/>
+      <path d="M80 40 L96 196 M140 40 L148 196 M200 40 V196 M260 40 L252 196 M320 40 L304 196"/>
+    </g>
+    <rect x="8" y="28" width="384" height="22" rx="11" fill="#9b6c3a"/>
+  </svg>
+  <div id="basketLabel" class="abs basket-label" data-k="basket"></div>
+
+  <div id="search" class="abs search"><div class="mag"></div><span id="q"></span><span class="caret" style="height:46px;vertical-align:-8px"></span></div>
+
+  <div id="themeTitle" class="abs theme-title" data-k="sixLooks"></div>
+  <div id="themePanel" class="abs theme-panel"></div>
+  <div id="themeName" class="abs theme-name"></div>
+  <div id="themeDots" class="abs theme-dots"></div>
+
+  <svg id="rope" class="abs"><g id="ropeG">
+    <path id="ropeA" fill="none" stroke="#8a6a3d" stroke-width="10" stroke-linecap="round"/>
+    <path id="ropeB" fill="none" stroke="#e6c995" stroke-width="5" stroke-linecap="round" stroke-dasharray="13 10"/>
+    <g id="knot"><circle r="10" fill="#b48a52"/><path d="M-6 8 L-14 26 M6 8 L12 28" stroke="#8a6a3d" stroke-width="4" stroke-linecap="round"/></g>
+  </g></svg>
+  <div id="cards" class="abs" style="left:0;top:0"></div>
+
+  <div id="flash" class="abs flash"></div>
+  <div id="keys" class="abs keyrow" style="top:250px;left:0;width:1920px;justify-content:center"><span class="key">⌥</span><span class="key">C</span></div>
+  <div id="kinds" class="abs kinds"></div>
+  <div id="cap" class="abs caption" style="top:930px"></div>
+  <div id="chip" class="abs" style="left:1560px;top:940px"></div>
+
+  <div id="endSub" class="abs end-sub" data-k="endSub"></div>
+  <div id="endUrl" class="abs end-url"><span>a1024053774.github.io/EnCopy</span></div>
+</div>
+
+<script>
+(() => {
+const DURATION = 39, FPS = 30;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = (p) => 1 - Math.pow(1 - p, 3);
+const eIn = (p) => p * p * p;
+const eInOut = (p) => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eBack = (p) => { const c = 1.6; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+// A pendulum kicked once at t0: how a card swings after it is pegged.
+const swing = (t, t0, amp, f = 1.5, k = 2.4) => t < t0 ? 0 : amp * Math.exp(-k * (t - t0)) * Math.sin(2 * Math.PI * f * (t - t0));
+// Settle from `from` to 0 with one overshoot: the line dropping in.
+const spring = (t, t0, from, f = 1.4, k = 5) => t < t0 ? from : from * Math.exp(-k * (t - t0)) * Math.cos(2 * Math.PI * f * (t - t0));
+// A slow breeze, so nothing on the line is ever perfectly still.
+const breeze = (t, phase) => 0.9 * Math.sin(t * 1.3 + phase) + 0.5 * Math.sin(t * 2.1 + phase * 1.7);
+
+/* ---------- words ---------- */
+const STR = {
+  en: {
+    s1: "You copy hundreds of things a day.", clipboard: "CLIPBOARD", lastOne: "Your Mac keeps only <em>the last one.</em>",
+    clips: ["Meeting moved to Thursday 3 pm", "func paste(_ id: UUID)", "github.com/a1024053774/EnCopy", "Invoice #2041 — $1,280"],
+    tagline: "Clipboard history for Mac, <em>hung on a line.</em>",
+    notes: "Notes — launch.md", mail: "Mail — Re: launch", noteLine: "Meeting moved to Thursday 3 pm, room 4B.",
+    to: "To: Sam", subject: "Subject: Re: launch", repo: "Here's the repo: ", pdf: "Q4 budget.pdf",
+    kinds: ["Text", "Code", "Links", "Screenshots", "Files"],
+    today: "Today, 9:41 AM", today2: "Today, 9:42 AM", today3: "Today, 9:43 AM", mon: "Mon, 4:12 PM", lastWeek: "Last week",
+    textH: "Meeting moved to Thursday 3 pm", textP: "Room 4B. Bring last week's review notes.",
+    invH: "Invoice #2041 — $1,280", invP: "Due Friday. Paid by bank transfer.", ocr: "INVOICE", query: "invoice",
+    needBack: "Need one back?", pressC: "Press <em>⌥C</em>. The line drops in.", pick: "Pick with <em>← →</em>", paste: "<em>⏎</em> pastes it where you're typing.",
+    type: "Just start typing to search.", everything: "Searches everything, <em>even text in screenshots.</em>",
+    basket: "THE BASKET · EVERYTHING OLDER", sixLooks: "Six looks.",
+    themes: ["Paper", "Pixel", "Skeuomorphic", "Minimal", "Neon", "Journal"],
+    big: [["Stays on your Mac", "No account. No network. Your history lives in one local folder."],
+          ["Skips passwords", "Passwords and Keychain Access are never recorded."],
+          ["Codes expire", "Verification codes are cleared after 10 minutes."]],
+    private: "Private by default.", endPress: 'Press <span class="kc">⌥C</span> and pick.', endSub: "Free &amp; open source · macOS 14+",
+  },
+  zh: {
+    s1: "你一天要复制几百次。", clipboard: "剪贴板", lastOne: "可 Mac 只记得<em>最后一次。</em>",
+    clips: ["周会改到周四下午三点", "func paste(_ id: UUID)", "github.com/a1024053774/EnCopy", "发票 #2041：¥1,280"],
+    tagline: "Mac 上的剪贴板历史，<em>挂在一根绳上。</em>",
+    notes: "笔记 — 发布计划", mail: "邮件 — 回复：发布", noteLine: "周会改到周四下午三点，地点 4B。",
+    to: "收件人：Sam", subject: "主题：回复：发布", repo: "仓库在这里：", pdf: "四季度预算.pdf",
+    kinds: ["文字", "代码", "链接", "截图", "文件"],
+    today: "今天 9:41", today2: "今天 9:42", today3: "今天 9:43", mon: "周一 16:12", lastWeek: "上周",
+    textH: "周会改到周四三点", textP: "地点 4B，记得带上周的评审意见。",
+    invH: "发票 #2041：¥1,280", invP: "周五前付清，走银行转账。", ocr: "发票", query: "发票",
+    needBack: "要找回一件？", pressC: "按 <em>⌥C</em>，绳子落下来。", pick: "<em>← →</em> 挑一件", paste: "<em>⏎</em> 贴回正在打字的地方。",
+    type: "直接打字就是搜索。", everything: "全部历史都搜，<em>连截图里的字也搜得到。</em>",
+    basket: "篮子 · 更早的都在这里", sixLooks: "六套主题。",
+    themes: ["纸", "像素", "拟物", "极简", "霓虹", "手账"],
+    big: [["只在这台 Mac 上", "不用账号，不联网。记下的东西存在本机的一个文件夹里。"],
+          ["不记密码", "「密码」和「钥匙串访问」里复制的，默认不记。"],
+          ["验证码会过期", "复制的验证码 10 分钟后清掉。"]],
+    private: "默认就不外传。", endPress: '按 <span class="kc">⌥C</span>，挑一件。', endSub: "免费开源 · macOS 14 及以上",
+  },
+};
+let S = STR.en;
+
+/* ---------- the line ---------- */
+const ROPE_Y = 150, SAG = 150;
+const ropeY = (x) => { const u = (x + 20) / 1960; return ROPE_Y + 2 * SAG * u * (1 - u); };
+const ropePath = `M -20 ${ROPE_Y} Q 960 ${ROPE_Y + SAG} 1940 ${ROPE_Y}`;
+$("ropeA").setAttribute("d", ropePath); $("ropeB").setAttribute("d", ropePath);
+const KNOT_X = 250;
+$("knot").setAttribute("transform", `translate(${KNOT_X} ${ropeY(KNOT_X)})`);
+const SLOT = (i) => 440 + i * 290;
+const HIDE = -480; // how far the line tucks up out of view
+
+/* ---------- timeline ---------- */
+const CLIP_T = [1.5, 2.1, 2.7, 3.3];
+const LET_X = (i) => 960 + (i - 2.5) * 190;
+const LET_T = (i) => 5.35 + i * 0.09;
+const COPY = [
+  { t: 9.1, card: "text", key: "⌘C", row: "rA" },
+  { t: 10.3, card: "code", key: "⌘C", row: "rB", w: 360 },
+  { t: 11.5, card: "link", key: "⌘C", row: "rC", w: 470 },
+  { t: 12.7, card: "shot", key: "⌘⇧4" },
+  { t: 13.9, card: "file", key: "⌘C" },
+];
+const SRC = { text: [700, 560], code: [640, 640], link: [700, 740], shot: [960, 620], file: [225, 650] };
+const S4 = { hide: 15.3, keys: 16.0, press: 16.25, drop: 16.6, r1: 17.7, r2: 18.15, enter: 18.7, up: 18.95 };
+const S5 = { drop: 22.4, pill: 22.9, type: 23.1, step: 0.085, fall: 24.0, rise: 24.35 };
+const THEME_FILES = ["paper", "pixel", "skeuo", "minimal", "neon", "washi"];
+const TH_T0 = 26.9, TH_STEP = 0.62;
+const S7 = { drop: 30.75 };
+const S8 = { lift: 34.2, drop: 34.6 };
+
+/* Sound effects land on these times; the soundtrack reads them too. */
+function buildEvents() {
+  const E = [];
+  const ev = (t, type) => E.push({ t: +t.toFixed(3), type });
+  CLIP_T.forEach((t) => ev(t, "key"));
+  ev(4.35, "whoosh");
+  for (let i = 0; i < 6; i++) ev(LET_T(i) + 0.32, "peg");
+  COPY.forEach((c) => { ev(c.t + 0.3, "key"); if (c.card === "shot") ev(c.t + 0.42, "shutter"); ev(c.t + 0.9, "peg"); });
+  ev(S4.hide, "whoosh"); ev(S4.press, "key"); ev(S4.press + 0.05, "key"); ev(S4.drop, "drop");
+  ev(S4.r1, "tick"); ev(S4.r2, "tick"); ev(S4.enter, "key"); ev(S4.up, "whoosh"); ev(S4.up + 0.1, "paste");
+  ev(S5.drop, "drop");
+  Array.from(S.query).forEach((_, i) => ev(S5.type + i * S5.step, "type"));
+  ev(S5.fall, "whoosh"); ev(S5.rise + 0.55, "peg"); ev(S5.rise + 0.7, "peg");
+  ev(26.55, "whoosh");
+  for (let i = 1; i < 6; i++) ev(TH_T0 + i * TH_STEP, "tick");
+  for (let i = 0; i < 3; i++) ev(S7.drop + i * 0.16 + 0.35, "peg");
+  ev(S8.lift, "whoosh"); ev(S8.drop + 0.35, "drop");
+  return E.sort((a, b) => a.t - b.t);
+}
+
+/* ---------- cards ---------- */
+let C = {}, LETTERS = [], BIG = [], END = null;
+function makeCard(html, cls, style) {
+  const hang = document.createElement("div"); hang.className = "hang";
+  hang.innerHTML = `<div class="pivot"><div class="paper ${cls}"${style ? ` style="${style}"` : ""}>${html}<div class="pick-ring"></div></div><i class="peg"></i></div>`;
+  $("cards").appendChild(hang);
+  return { el: hang, pivot: hang.firstChild, ring: hang.querySelector(".pick-ring") };
+}
+const ICON_SVG = `<svg viewBox="0 0 64 64" width="150" height="150"><rect width="64" height="64" rx="14" fill="#1f45d8"/><path d="M4 18 Q32 30 60 18" fill="none" stroke="#d9b77e" stroke-width="3" stroke-linecap="round"/><rect x="17" y="24" width="30" height="32" rx="3" fill="#ffd33d" transform="rotate(-4 32 24)"/><rect x="29" y="14" width="6" height="16" rx="2" fill="#c8935a"/></svg>`;
+
+function build(lang) {
+  S = STR[lang] || STR.en;
+  document.documentElement.lang = lang === "zh" ? "zh-Hans" : "en";
+  document.querySelectorAll("[data-k]").forEach((el) => { el.innerHTML = S[el.dataset.k]; });
+  const words = lang === "zh" ? Array.from(S.s1) : S.s1.split(" ");
+  $("s1a").innerHTML = words.map((w) => `<span>${w}</span>`).join(lang === "zh" ? "" : " ");
+  $("clip").innerHTML = S.clips.map((s, i) => `<div class="abs clip-item ${i === 1 || i === 2 ? "mono" : ""}">${s}</div>`).join("");
+  $("kinds").innerHTML = S.kinds.map((k) => `<span>${k}</span>`).join("<span>·</span>");
+  $("themePanel").innerHTML = THEME_FILES.map((f) => `<img class="theme-img" src="themes/${f}.png" alt="">`).join("");
+  $("themeDots").innerHTML = THEME_FILES.map(() => "<i></i>").join("");
+
+  $("cards").innerHTML = "";
+  C = {
+    text: makeCard(`<h4>${S.textH}</h4><p>${S.textP}</p><div class="foot">${S.today}</div><div class="badge" style="background:#28c840"></div>`, "receipt"),
+    code: makeCard(`func paste(_ id: UUID) {\n    line.copy(id)\n}\n<div class="foot" style="left:26px">${S.today}</div><div class="badge" style="background:#1d1f22"></div>`, "code"),
+    link: makeCard(`<h4>github.com</h4><p>/a1024053774/EnCopy</p><div class="foot" style="color:#6b5232">${S.today2}</div><div class="badge" style="background:#f4b400;border-radius:50%"></div>`, "link"),
+    shot: makeCard(`<div class="img"><i></i></div><div class="foot" style="left:14px;bottom:10px">${S.today2}</div>`, "shot"),
+    file: makeCard(`<div class="pdf"></div><b>${S.pdf}</b><div class="foot" style="left:0;right:0;color:#6b5232">${S.today3}</div>`, "file"),
+    inv: makeCard(`<h4>${S.invH}</h4><p>${S.invP}</p><div class="foot">${S.mon}</div><div class="badge" style="background:#2f7cf6"></div>`, "receipt"),
+    ocr: makeCard(`<div class="img"><div class="ocr-doc"><span class="mark">${S.ocr}</span> #2038<i></i><i style="width:60%"></i><i style="width:70%"></i></div></div><div class="foot" style="left:14px;bottom:10px">${S.lastWeek}</div>`, "shot"),
+  };
+  const bgs = ["var(--cream)", "var(--sun)", "#fff", "var(--kraft)", "var(--cream)", "var(--sun)"];
+  LETTERS = ["E", "n", "C", "o", "p", "y"].map((ch, i) => makeCard(ch, "letter", `background:${bgs[i]};${i === 2 ? "border:3px solid #e08a1e" : ""}`));
+  BIG = S.big.map(([h, p], i) => makeCard(`<h4>${h}</h4><p>${p}</p>`, "big", `background:${["var(--cream)", "var(--sun)", "var(--kraft)"][i]}`));
+  END = makeCard(`<div style="display:flex;align-items:center;gap:40px">${ICON_SVG}<div><div style="font:700 150px/1 var(--f-head);letter-spacing:-.04em;color:#0f1638">EnCopy</div><div style="font:600 40px/1.2 var(--f-body);color:#4a5170;margin-top:14px">${S.endPress.replace('class="kc"', 'style="font-family:var(--f-mono);background:#0f1638;color:#ffd33d;padding:2px 14px;border-radius:10px"')}</div></div></div>`,
+    "big", "width:1000px;height:330px;padding:70px 80px;background:var(--cream);border-radius:16px");
+  // the selection width follows the first note line, which changes with the language
+  // (measured on a canvas: the window is hidden when this runs)
+  const cx = document.createElement("canvas").getContext("2d");
+  cx.font = '500 27px Inter, "Noto Sans SC", sans-serif';
+  COPY[0].w = Math.ceil(cx.measureText(S.noteLine).width);
+  window.EVENTS = buildEvents();
+  lastCap = null;
+}
+
+/* ---------- render ---------- */
+function place(card, x, dy, deg, op = 1, scale = 1) {
+  if (op <= 0.001) { card.el.style.display = "none"; return; }
+  card.el.style.display = "block";
+  card.el.style.transform = `translate(${x}px, ${ropeY(x) + dy}px) scale(${scale})`;
+  card.pivot.style.transform = `rotate(${deg}deg)`;
+  card.el.style.opacity = op;
+}
+const hideAll = () => { for (const c of $("cards").children) c.style.display = "none"; };
+function show(el, op) { el.style.opacity = op; el.style.display = op <= 0.001 ? "none" : ""; }
+let lastCap = null;
+function caption(t, list) {
+  let html = "", op = 0, dy = 0;
+  for (const [a, b, h] of list) if (t >= a - 0.01 && t < b) { html = h; const pin = seg(t, a, a + 0.3), pout = seg(t, b - 0.25, b); op = eOut(pin) * (1 - pout); dy = (1 - eOut(pin)) * 24; }
+  const c = $("cap"); if (lastCap !== html) { c.innerHTML = html; lastCap = html; }
+  c.style.opacity = op; c.style.transform = `translateY(${dy}px)`;
+}
+function chip(t, label, a, b) {
+  const c = $("chip");
+  if (t < a || t > b || !label) { c.style.opacity = 0; return; }
+  if (c.dataset.l !== label) { c.innerHTML = `<span class="key sm">${label}</span>`; c.dataset.l = label; }
+  c.style.opacity = 1 - seg(t, b - 0.15, b); c.style.transform = `scale(${0.6 + 0.4 * eBack(seg(t, a, a + 0.18))})`;
+}
+
+function render(t) {
+  hideAll();
+  // scene 1: the clipboard slot, overwritten
+  const s1on = t < 5;
+  show($("s1"), s1on ? 1 : 0);
+  if (s1on) {
+    [...$("s1a").children].forEach((sp, i) => { const p = eOut(seg(t, 0.2 + i * 0.07, 0.7 + i * 0.07)); sp.style.opacity = p; sp.style.transform = `translateY(${(1 - p) * 60}px)`; });
+    const cp = eOut(seg(t, 1.1, 1.5));
+    $("clip").style.opacity = cp; $("clipLabel").style.opacity = cp; $("clip").style.transform = `translateY(${(1 - cp) * 30}px)`;
+    [...$("clip").children].forEach((el, i) => {
+      const a = CLIP_T[i], next = CLIP_T[i + 1] ?? 99;
+      const pin = eOut(seg(t, a, a + 0.22)), pout = eIn(seg(t, next, next + 0.2));
+      el.style.transform = `translateY(${(1 - pin) * 150 - pout * 150}px)`; el.style.opacity = t < a ? 0 : 1 - pout;
+    });
+    const lastKey = CLIP_T.filter((x) => x <= t).pop();
+    const kp = lastKey === undefined ? 0 : Math.exp(-5 * (t - lastKey));
+    $("s1key").style.opacity = lastKey === undefined ? 0 : 0.35 + 0.65 * kp; $("s1key").style.transform = `scale(${1 + 0.15 * kp})`;
+    const bp = eOut(seg(t, 3.5, 3.9)); $("s1b").style.opacity = bp; $("s1b").style.transform = `translateY(${(1 - bp) * 24}px)`;
+  }
+  const cu = eInOut(seg(t, 4.35, 4.95));
+  $("curtain").style.transform = `translateY(${(cu - 1) * 1080}px)`;
+  $("curtain").style.display = t < 4.35 ? "none" : "";
+
+  // the line: drawn in, tucked up, dropped in
+  const ropeDraw = eInOut(seg(t, 4.9, 5.7));
+  let ropeDy = 0;
+  if (t >= S4.hide && t < S4.drop) ropeDy = HIDE * eInOut(seg(t, S4.hide, S4.hide + 0.5));
+  else if (t >= S4.drop && t < S4.up) ropeDy = spring(t, S4.drop, HIDE, 1.3, 5.5);
+  else if (t >= S4.up && t < S5.drop) ropeDy = HIDE * eInOut(seg(t, S4.up, S4.up + 0.45));
+  else if (t >= S5.drop && t < 26.4) ropeDy = spring(t, S5.drop, HIDE, 1.3, 5.5);
+  else if (t >= 26.4 && t < S7.drop) ropeDy = HIDE * eInOut(seg(t, 26.4, 26.8));
+  else if (t >= S7.drop) ropeDy = spring(t, S7.drop, HIDE, 1.2, 5);
+  const ropeLen = 2100;
+  $("ropeA").style.strokeDasharray = `${ropeLen}`; $("ropeA").style.strokeDashoffset = `${ropeLen * (1 - ropeDraw)}`;
+  $("ropeB").style.opacity = ropeDraw >= 1 ? 1 : 0;
+  $("knot").style.opacity = t > 8.6 && t < 34.3 && !(t > 26.4 && t < S7.drop) ? eOut(seg(t, 8.6, 9.0)) : 0;
+  $("ropeG").style.transform = `translateY(${ropeDy}px)`;
+  $("rope").style.display = t < 4.9 ? "none" : "";
+
+  // scene 2: the name on pegs
+  if (t >= 5.2 && t < 8.7) {
+    const lift = eIn(seg(t, 8.15, 8.65));
+    LETTERS.forEach((c, i) => {
+      const t0 = LET_T(i), p = seg(t, t0, t0 + 0.32);
+      const dy = t < t0 + 0.32 ? lerp(-420, 0, eIn(p)) : 0;
+      place(c, LET_X(i), dy - lift * 600 + ropeDy, swing(t, t0 + 0.32, 9 * (i % 2 ? -1 : 1)) + breeze(t, i) * 0.6, t < t0 ? 0 : 1);
+    });
+  }
+
+  // scenes 3–4: the window
+  const winIn = eOut(seg(t, 8.65, 9.05)), winOut = seg(t, 21.8, 22.2);
+  show($("win"), t < 8.65 || t > 22.2 ? 0 : winIn * (1 - winOut));
+  $("win").style.transform = `translateY(${(1 - winIn) * 40}px) scale(${0.97 + 0.03 * winIn})`;
+  const toB = seg(t, 15.25, 15.6);
+  show($("docA"), 1 - toB); show($("docB"), toB);
+  const title = t < 15.42 ? S.notes : S.mail;
+  if ($("winTitle").textContent !== title) $("winTitle").textContent = title;
+  show($("desk"), t < 8.65 || t > 15.3 ? 0 : winIn * (1 - seg(t, 15.0, 15.3)));
+  for (const c of COPY) {
+    if (!c.row) continue;
+    $(c.row).querySelector(".sel").style.width = t < c.t || t > c.t + 1.1 ? "0px" : `${c.w * eOut(seg(t, c.t, c.t + 0.28)) + 16}px`;
+  }
+  $("desk").querySelector(".hl").style.opacity = t > 13.9 && t < 15 ? eOut(seg(t, 13.9, 14.1)) : 0;
+  const shotT = COPY[3].t, mq = $("marquee");
+  if (t > shotT && t < shotT + 0.5) {
+    const p = eOut(seg(t, shotT, shotT + 0.35));
+    Object.assign(mq.style, { display: "", left: "520px", top: "520px", width: `${880 * p}px`, height: `${300 * p}px` });
+  } else mq.style.display = "none";
+  $("flash").style.opacity = t > shotT + 0.42 && t < shotT + 1.2 ? 0.85 * Math.exp(-9 * (t - shotT - 0.42)) : 0;
+
+  const kindsOn = t > 9.0 && t < 15.2;
+  show($("kinds"), kindsOn ? seg(t, 9.0, 9.3) * (1 - seg(t, 14.95, 15.2)) : 0);
+  if (kindsOn) [...$("kinds").children].forEach((sp, i) => { const k = Math.floor(i / 2), lit = i % 2 === 0 ? t > COPY[k].t + 0.9 : t > COPY[k + 1].t + 0.9; sp.style.color = lit ? "var(--cream)" : "rgba(251,247,236,.3)"; });
+
+  // the five cards on the line through scenes 3–5
+  if (t >= 9 && t < 26.5) {
+    const names = [];
+    for (const c of COPY) if (t >= c.t + 0.45) names.unshift(c.card);
+    // after ⏎ the pasted link goes back to the head of the line
+    if (t >= S4.up + 0.3) { names.splice(names.indexOf("link"), 1); names.unshift("link"); }
+    const pickSlot = t < S4.r1 ? 0 : t < S4.r2 ? 1 : 2;
+    names.forEach((name, slot) => {
+      const card = C[name], copy = COPY.find((c) => c.card === name);
+      const flyStart = copy.t + 0.45, flyEnd = copy.t + 0.9;
+      let x = SLOT(slot);
+      const newer = COPY.filter((c) => c.t > copy.t && t >= c.t + 0.45).map((c) => c.t + 0.45);
+      const lastShift = newer.length ? Math.max(...newer) : null;
+      if (lastShift !== null && t < lastShift + 0.4 && t < S4.hide) x = lerp(SLOT(slot - 1), SLOT(slot), eInOut(seg(t, lastShift, lastShift + 0.4)));
+      let dy = 0, ang = breeze(t, slot * 1.3) * 0.8, op = 1, sc = 1;
+      if (t < flyEnd) {
+        const p = eInOut(seg(t, flyStart, flyEnd)), [sx, sy] = SRC[name];
+        x = lerp(sx, SLOT(0), p);
+        dy = lerp(sy - ropeY(sx), 0, p) - Math.sin(p * Math.PI) * 140;
+        ang = (1 - p) * -8; sc = lerp(0.6, 1, p); op = seg(t, flyStart, flyStart + 0.08);
+      } else ang += swing(t, flyEnd, 10);
+      if (lastShift !== null && t < S4.hide) ang += swing(t, lastShift + 0.4, -4);
+      if (t >= S4.drop) ang += swing(t, S4.drop + 0.2, slot % 2 ? 6 : -6);
+      if (t >= S5.drop) ang += swing(t, S5.drop + 0.2, slot % 2 ? 5 : -5);
+      if (t >= S5.fall) {
+        const a = S5.fall + slot * 0.06, p = eIn(seg(t, a, a + 0.5));
+        dy += p * 900; ang += p * (slot % 2 ? 25 : -25); op *= 1 - seg(t, a + 0.35, a + 0.5);
+      }
+      place(card, x, dy + ropeDy, ang, op, sc);
+      card.ring.style.opacity = t > S4.drop + 0.45 && t < S4.up && slot === pickSlot ? 1 : 0;
+    });
+  }
+  // scene 5: the matches come up out of the basket
+  if (t >= S5.rise && t < 26.6) {
+    [["inv", 0], ["ocr", 1]].forEach(([name, slot], i) => {
+      const a = S5.rise + i * 0.15, p = eOut(seg(t, a, a + 0.55));
+      const ang = t < a + 0.55 ? (1 - p) * 12 : swing(t, a + 0.55, 8) + breeze(t, i);
+      place(C[name], lerp(960, SLOT(slot), p), lerp(780, 0, p) + ropeDy, ang, seg(t, a, a + 0.1) * (1 - seg(t, 26.2, 26.5)), lerp(0.5, 1, p));
+    });
+  }
+  const bk = eOut(seg(t, 22.9, 23.3)) * (1 - seg(t, 26.1, 26.4));
+  show($("basket"), t > 22.9 && t < 26.4 ? bk : 0); show($("basketLabel"), t > 22.9 && t < 26.4 ? bk : 0);
+  $("basket").style.transform = `translateY(${(1 - bk) * 120}px)`;
+  const sp = eBack(seg(t, S5.pill, S5.pill + 0.35)) * (1 - seg(t, 26.1, 26.4));
+  show($("search"), t > S5.pill && t < 26.4 ? clamp(sp) : 0);
+  $("search").style.transform = `scale(${0.8 + 0.2 * sp})`;
+  const qChars = Array.from(S.query);
+  const nq = t < S5.type ? 0 : clamp(Math.floor((t - S5.type) / S5.step) + 1, 0, qChars.length);
+  const qText = qChars.slice(0, nq).join("");
+  if ($("q").textContent !== qText) $("q").textContent = qText;
+
+  const pasted = t >= S4.up + 0.1;
+  const pText = pasted ? "github.com/a1024053774/EnCopy" : "";
+  if ($("pasted").textContent !== pText) $("pasted").textContent = pText;
+  $("pasted").style.background = pasted ? `rgba(255,211,61,${0.8 * Math.exp(-2.2 * (t - S4.up - 0.1))})` : "";
+  $("caret").style.opacity = Math.floor(t * 2.2) % 2 === 0 ? 1 : 0;
+
+  // keycaps
+  if (t < 15) {
+    const active = COPY.filter((c) => t >= c.t + 0.28 && t < c.t + 1.05).pop();
+    chip(t, active && active.key, active ? active.t + 0.28 : 0, active ? active.t + 1.05 : 0);
+  } else if (t < S4.up + 0.6) {
+    const k = t >= S4.enter ? ["⏎", S4.enter] : t >= S4.r2 ? ["→", S4.r2] : t >= S4.r1 ? ["→", S4.r1] : null;
+    chip(t, k && k[0], k ? k[1] : 0, S4.up + 0.6);
+  } else chip(t, null, 0, 0);
+  const keys = $("keys");
+  if (t < S4.keys || t > S4.drop + 0.1) keys.style.opacity = 0;
+  else {
+    const pin = eBack(seg(t, S4.keys, S4.keys + 0.3)), pout = seg(t, S4.drop - 0.1, S4.drop + 0.1);
+    const press = t > S4.press ? 1 - 0.1 * Math.exp(-14 * (t - S4.press)) * Math.sin(Math.min(Math.PI, (t - S4.press) * 18)) : 1;
+    keys.style.opacity = 1 - pout; keys.style.transform = `translateY(${(1 - pin) * 60}px) scale(${press})`;
+  }
+
+  caption(t, [
+    [6.55, 8.35, S.tagline],
+    [15.35, 16.05, S.needBack],
+    [16.1, 17.55, S.pressC],
+    [17.6, 18.65, S.pick],
+    [18.7, 22.0, S.paste],
+    [23.0, 24.85, S.type],
+    [24.9, 26.35, S.everything],
+    [31.0, 34.1, S.private],
+  ]);
+
+  // scene 6: themes
+  const thIn = eOut(seg(t, 26.6, 27.0)), thOut = seg(t, 30.3, 30.65);
+  const thOp = t < 26.6 || t > 30.65 ? 0 : thIn * (1 - thOut);
+  ["themePanel", "themeTitle", "themeName", "themeDots"].forEach((id) => show($(id), thOp));
+  if (thOp > 0) {
+    $("themePanel").style.transform = `translateY(${(1 - thIn) * 50}px)`;
+    $("themeTitle").style.transform = `translateY(${(1 - thIn) * 30}px)`;
+    const idx = clamp(Math.floor((t - TH_T0) / TH_STEP), 0, THEME_FILES.length - 1);
+    [...$("themePanel").children].forEach((img, i) => {
+      const a = TH_T0 + i * TH_STEP;
+      const pin = i === 0 ? 1 : eOut(seg(t, a, a + 0.28));
+      const pout = i === THEME_FILES.length - 1 ? 0 : eIn(seg(t, a + TH_STEP, a + TH_STEP + 0.28));
+      img.style.transform = `translateY(${(1 - pin) * 330 - pout * 330}px)`;
+      img.style.opacity = i === 0 || t >= a ? 1 : 0;
+    });
+    if ($("themeName").textContent !== S.themes[idx]) $("themeName").textContent = S.themes[idx];
+    [...$("themeDots").children].forEach((d, i) => { d.style.background = i === idx ? "var(--sun)" : "rgba(251,247,236,.3)"; });
+  }
+
+  // scene 7: privacy
+  if (t >= S7.drop && t < 34.9) {
+    BIG.forEach((c, i) => {
+      const a = S7.drop + i * 0.16, p = seg(t, a, a + 0.35);
+      const dy = t < a + 0.35 ? lerp(-500, 0, eIn(p)) : 0;
+      const lift = eIn(seg(t, S8.lift + i * 0.05, S8.lift + i * 0.05 + 0.45)) * -700;
+      place(c, 520 + i * 440, dy + lift, swing(t, a + 0.35, i === 1 ? -7 : 7) + breeze(t, i) * 0.6, t < a ? 0 : 1);
+    });
+  }
+  // scene 8: the end card
+  if (t >= S8.drop) {
+    const p = seg(t, S8.drop, S8.drop + 0.4);
+    place(END, 960, (t < S8.drop + 0.4 ? lerp(-700, 0, eIn(p)) : 0) + 40, swing(t, S8.drop + 0.4, 4, 1.1, 1.8) + breeze(t, 2) * 0.4, 1);
+  }
+  const e1 = eOut(seg(t, 35.4, 35.8)), e2 = eOut(seg(t, 35.7, 36.1));
+  show($("endSub"), t > 35.4 ? e1 : 0); $("endSub").style.transform = `translateY(${(1 - e1) * 20}px)`;
+  show($("endUrl"), t > 35.7 ? e2 : 0); $("endUrl").style.transform = `translateY(${(1 - e2) * 20}px)`;
+}
+
+/* ---------- sound: a mallet groove and effects, synthesized on a context the host hands in ---------- */
+function soundPlan() {
+  const N = [];
+  const bpm = 108, half = 60 / bpm / 2, start = 4.9, end = 34.4;
+  const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  // F, Dm, Bb, C: chord tones (MIDI) and a bass root
+  const chords = [[[65, 69, 72, 77], 41], [[62, 65, 69, 74], 38], [[58, 62, 65, 70], 34], [[60, 64, 67, 72], 36]];
+  const arp = [0, 2, 1, 3, 2, 1, 3, 2];
+  for (let i = 0, t = start; t < end - 0.01; i++, t = start + i * half) {
+    const [tones, root] = chords[Math.floor(i / 8) % 4], step = i % 8, light = t >= 26.6 && t < 30.6;
+    N.push({ t, v: "mallet", f: hz(tones[arp[step]]), g: step % 2 ? 0.4 : 0.55 });
+    N.push({ t, v: "shaker", g: 0.18 });
+    if (step % 2 === 0) N.push({ t: t + half / 2, v: "shaker", g: 0.25 });
+    if (step === 0 || step === 4) { if (!light) N.push({ t, v: "kick" }); N.push({ t, v: "bass", f: hz(root) }); }
+    if ((step === 2 || step === 6) && !light) N.push({ t, v: "clap" });
+  }
+  [53, 57, 60, 65, 69].forEach((m) => N.push({ t: end, v: "mallet", f: hz(m), g: 0.8, long: true }));
+  N.push({ t: end, v: "bass", f: hz(41), long: true });
+  for (const e of window.EVENTS) N.push({ t: e.t, v: e.type });
+  return N.sort((a, b) => a.t - b.t);
+}
+function Sound(ctx) {
+  const out = ctx.createGain(); out.gain.value = 0.8;
+  const comp = ctx.createDynamicsCompressor(); out.connect(comp); comp.connect(ctx.destination);
+  const noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  { const d = noise.getChannelData(0); let s = 7; for (let i = 0; i < d.length; i++) { s = (s * 1103515245 + 12345) % 2147483648; d[i] = s / 1073741824 - 1; } }
+  let bus = null, base = 0;
+  const env = (g, t, peak, a, tau) => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.setTargetAtTime(0, t + a, tau); };
+  function tone(t, f, type, peak, a, tau) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f; env(g, t, peak, a, tau);
+    o.connect(g); g.connect(bus); o.start(t); o.stop(t + a + tau * 7); return o;
+  }
+  function hiss(t, type, f, q, peak, a, tau, dur) {
+    const s = ctx.createBufferSource(), bq = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = noise; s.loop = true; bq.type = type; bq.frequency.value = f; bq.Q.value = q;
+    if (dur) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + dur / 2); g.gain.linearRampToValueAtTime(0, t + dur); }
+    else env(g, t, peak, a, tau);
+    s.connect(bq); bq.connect(g); g.connect(bus); s.start(t, (t * 7.3) % 0.9); s.stop(t + (dur || a + tau * 7));
+  }
+  const V = {
+    mallet: (t, n) => { const tau = n.long ? 1.1 : 0.32; tone(t, n.f, "sine", n.g * 0.42, 0.003, tau); tone(t, n.f * 4, "sine", n.g * 0.1, 0.002, 0.05); },
+    bass: (t, n) => tone(t, n.f, "triangle", 0.4, 0.006, n.long ? 0.9 : 0.28),
+    kick: (t) => { const o = tone(t, 130, "sine", 0.7, 0.001, 0.12); o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.15); },
+    clap: (t) => hiss(t, "bandpass", 2000, 0.7, 0.3, 0.001, 0.05),
+    shaker: (t, n) => hiss(t, "highpass", 7000, 0.7, n.g * 0.6, 0.004, 0.018),
+    key: (t) => { hiss(t, "bandpass", 3500, 0.8, 0.5, 0.0005, 0.008); tone(t, 180, "sine", 0.3, 0.001, 0.015); },
+    type: (t) => { hiss(t, "bandpass", 3500, 0.8, 0.22, 0.0005, 0.008); tone(t, 180, "sine", 0.13, 0.001, 0.015); },
+    tick: (t) => hiss(t, "bandpass", 6000, 1, 0.35, 0.0005, 0.006),
+    peg: (t) => { tone(t, 820, "sine", 0.45, 0.0005, 0.03); tone(t, 1730, "sine", 0.22, 0.0005, 0.015); hiss(t, "bandpass", 4000, 1, 0.12, 0.0005, 0.006); },
+    shutter: (t) => { hiss(t, "bandpass", 3000, 0.6, 0.6, 0.0005, 0.01); hiss(t + 0.07, "bandpass", 3000, 0.6, 0.48, 0.0005, 0.01); },
+    whoosh: (t) => hiss(t, "bandpass", 1200, 0.6, 0.3, 0, 0, 0.55),
+    drop: (t) => { const o = tone(t, 180, "sine", 0.6, 0.001, 0.09); o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.2); hiss(t, "bandpass", 1200, 0.6, 0.15, 0, 0, 0.45); },
+    paste: (t) => { tone(t, 1046.5, "sine", 0.25, 0.003, 0.2); tone(t + 0.07, 1568, "sine", 0.25, 0.003, 0.2); },
+  };
+  return {
+    ctx,
+    // Schedule everything from timeline time `from` onward, starting a moment from now.
+    start(from) {
+      this.stop();
+      bus = ctx.createGain(); bus.connect(out);
+      base = ctx.currentTime + 0.06 - from;
+      if (from < 4.9) { // the soft pad under the first scene
+        const t0 = base + Math.max(from, 0), t1 = base + 4.9;
+        [146.83, 220, 349.23].forEach((f) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f;
+          g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.06, Math.min(t1, base + 1.2)); g.gain.setValueAtTime(0.06, t1 - 0.4); g.gain.linearRampToValueAtTime(0, t1);
+          o.connect(g); g.connect(bus); o.start(t0); o.stop(t1); });
+      }
+      for (const n of soundPlan()) if (n.t >= from - 0.005 && V[n.v]) V[n.v](base + n.t, n);
+    },
+    stop() { if (bus) { bus.gain.setValueAtTime(0, ctx.currentTime); bus.disconnect(); bus = null; } },
+    now() { return ctx.currentTime - base; },
+  };
+}
+
+/* ---------- playback ---------- */
+const listeners = [];
+const state = { t: 0, playing: false, sound: false, ended: false, duration: DURATION };
+let perfStart = 0, sound = null, raf = 0, lastEmit = 0;
+const emit = () => listeners.forEach((fn) => fn({ ...state }));
+const clock = () => state.sound && sound ? sound.now() : (performance.now() - perfStart) / 1000;
+function frame() {
+  raf = 0;
+  if (!state.playing) return;
+  let t = clock();
+  if (t >= DURATION) {
+    if (state.sound) { state.t = DURATION - 0.001; render(state.t); pause(); state.ended = true; emit(); return; }
+    t %= DURATION; perfStart = performance.now() - t * 1000;
+  }
+  state.t = t; render(t);
+  if (performance.now() - lastEmit > 100) { lastEmit = performance.now(); emit(); }
+  raf = requestAnimationFrame(frame);
+}
+function play() {
+  if (state.playing) return;
+  if (state.ended || state.t >= DURATION - 0.01) state.t = 0;
+  state.ended = false; state.playing = true;
+  perfStart = performance.now() - state.t * 1000;
+  if (state.sound && sound) { sound.ctx.resume(); sound.start(state.t); }
+  if (!raf) raf = requestAnimationFrame(frame);
+  emit();
+}
+function pause() {
+  if (!state.playing) return;
+  state.t = Math.min(clock(), DURATION); state.playing = false;
+  if (sound) sound.stop();
+  emit();
+}
+function seek(t) {
+  state.t = clamp(t, 0, DURATION - 0.001); state.ended = false;
+  perfStart = performance.now() - state.t * 1000;
+  if (state.playing && state.sound && sound) sound.start(state.t);
+  render(state.t); emit();
+}
+// Sound needs an AudioContext made during a click; the host page makes it and passes it in.
+function setSound(on, ctx) {
+  const t = state.playing ? clock() : state.t;
+  if (on && ctx && (!sound || sound.ctx !== ctx)) { if (sound) sound.stop(); sound = Sound(ctx); }
+  state.sound = !!(on && sound);
+  state.t = t; perfStart = performance.now() - t * 1000;
+  if (sound) { if (state.sound && state.playing) { sound.ctx.resume(); sound.start(t); } else sound.stop(); }
+  emit();
+}
+function setTheme(theme) { document.documentElement.dataset.theme = theme === "dark" ? "dark" : "light"; }
+function setLang(lang) { build(lang === "zh" ? "zh" : "en"); render(state.t); }
+function fit() { $("stage").style.transform = `scale(${innerWidth / 1920})`; }
+addEventListener("resize", fit);
+
+const qs = new URLSearchParams(location.search);
+window.render = render; window.DURATION = DURATION; window.FPS = FPS;
+window.Intro = { play, pause, seek, setSound, setLang, setTheme, state: () => ({ ...state }), on: (fn) => listeners.push(fn), soundPlan, Sound };
+setTheme(qs.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+build(qs.get("lang") === "zh" ? "zh" : "en");
+fit();
+render(qs.has("t") ? +qs.get("t") : 0);
+document.fonts.ready.then(() => {
+  build(document.documentElement.lang === "zh-Hans" ? "zh" : "en"); // widths measured with the real fonts
+  const t = qs.has("t") ? +qs.get("t") : state.t;
+  render(t);
+  window.ready = true;
+  // Opened on its own: loop muted, click anywhere for sound.
+  if (!qs.has("t") && !qs.has("embed") && !navigator.webdriver) {
+    play();
+    addEventListener("click", () => { const AC = window.AudioContext || window.webkitAudioContext; setSound(!state.sound, sound ? sound.ctx : new AC()); });
+  }
+  dispatchEvent(new Event("intro-ready"));
+});
+})();
+</script>
+</body>
+</html>
