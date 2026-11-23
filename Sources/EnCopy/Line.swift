@@ -228,7 +228,11 @@ final class Line: ObservableObject {
     /// Whether a line item matches the words being searched: a note through
     /// the history's answer, anything else through the index, as before.
     private func matches(_ item: Pegged) -> Bool {
-        if isText(item.url) { return searchFound.onLine.contains(item.url) }
+        // EnCopy's own pictures too: the history keeps the words read from the
+        // original, which a shrunk thumbnail can no longer show (review #8).
+        if isText(item.url) || isKeptImage(item.url) {
+            return searchFound.onLine.contains(item.url) || search.matches(item.url, SearchIndex.words(query))
+        }
         return search.matches(item.url, SearchIndex.words(query))
     }
 
