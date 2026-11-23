@@ -40,3 +40,5 @@ supersedes:
 ↓ 新绳「从上一根下面落下」没有单做：换一格时纸本来就从上方落下（原有的过渡），加上麻绳弹一下。
 
 新加 `checkMotionRest`（13 条）。两个变异版本都被抓到：按住连发也荡（「A held arrow slides without swinging」）、麻绳不弹（「Coming down, the rope starts pulled almost straight」）。`scripts/check.sh`：`307 checks passed`；`scripts/build-app.sh` 通过。手感在下一次真机验收时看。
+
+真机第二次（2026-11-23 02:10–02:20，用户离开电脑，开发版在虚拟屏上；证据在本地 `evidence/walk-v1b/`）：麻绳回弹见 T-036 一行。⏎ 飞向指针那一帧没有截到纸（0.12 秒时已经飞完或还没出现，`09-return-flight.png`）；菜单栏小夹子晃一下在 1 倍录像里看不出来：这两项没有确认。

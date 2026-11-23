@@ -29,3 +29,5 @@ supersedes:
 新加 `checkMotion`（17 条），数值以设计方案的表为准。三个变异版本都被抓到：风的安静时间改成 0（「No breeze until 4 s after the last key」）、⌥C 用滑下的弹簧（「⌥C drops the panel on the quick spring」）、挑选不算按键（「Picking counts as a key: the breeze waits」）。`scripts/check.sh`：`291 checks passed`；`scripts/build-app.sh` 通过。手感要真机看，跟这一批一起走。
 
 真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：动画手感。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。
+
+真机第二次（2026-11-23 02:10–02:20，用户离开电脑，开发版在虚拟屏上；证据在本地 `evidence/walk-v1b/`）：⌥C 后连拍 5 帧：第一帧绳子几乎拉直、纸偏高，之后弹到下垂，木夹一直在绳上（`12-summon-frames.png`）。

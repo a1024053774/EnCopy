@@ -22,3 +22,5 @@ supersedes:
 ## Resolution
 
 完成，2026-11-23。新文件 `SettingsWindow.swift`（`SettingsWindow`、`SettingsModel`、`SettingsView`）；需要 App 配合的动作（换截图监视、改大小、改快捷键……）由 `AppDelegate.showSettings()` 以 `SettingsActions` 传进去，原来的 `appRulesItem()` 删掉。原来菜单项的悬停说明现在写在设置里每个开关下面。四个标签页的渲染：`evidence/T-039/tabs.png`（重画：`evidence/T-039/run.sh evidence/T-039`，不启动 App）。设置窗口和 `AppDelegate` 不在检查程序编译的范围里，这一单没有新的自动检查，证据是渲染图和整个 App 的类型检查。真机点一遍菜单和设置窗口，和下一次真机验收一起走。
+
+真机第二次（2026-11-23 02:10–02:20，用户离开电脑，开发版在虚拟屏上；证据在本地 `evidence/walk-v1b/`）：菜单只有：显示晾衣绳、挂回去、全部取下、暂停记录、清理历史…、设置…、退出 EnCopy（`menu-items.txt`）。设置窗口四个标签页都能切换，开关显示的是真实状态，「按 App 记录」第一个是当时在前台的 PasteTarget，下面是预设不记的「密码」「钥匙串访问」（`11-settings-row.png`）。
