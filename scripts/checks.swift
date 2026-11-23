@@ -434,6 +434,7 @@ struct CheckFailed: Error { let message: String }
         try checkQuickLookWithFallingPin()
         try checkGroupDragOperations()
         try checkEditOnlyOwnPictures()
+        try checkSearchBeforeLimit()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1915,6 +1916,37 @@ struct CheckFailed: Error { let message: String }
         try check(edit.editAction(for: id(elsewhere)) == .quickLook, "A picture from Finder is shown, never rewritten")
         try check(edit.editAction(for: id(movie)) == .quickLook, "A video from Finder is shown, never trimmed in place")
         try check(edit.editAction(for: id(ownMovie)) == .trim, "EnCopy's own recording is still trimmed")
+    }
+
+    /// Review 2, finding 7: a shelf's span and Tab's kind narrow the search
+    /// itself, so answers behind a thousand newer matches still show.
+    func checkSearchBeforeLimit() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("limit.sqlite"))
+        let deep = Line(pasteboard: pasteboard, desktop: root, history: history)
+        deep.maxItems = 1; deep.visibleCount = 8
+        let now = Date(), day: TimeInterval = 86400
+        for i in 0..<1005 { history.record(try adoptedNote("limit-\(i)", "zeta newer \(i)")) }
+        let old = try adoptedNote("limit-old", "zeta from long ago")
+        history.record(old); history.setUsed(old, now.addingTimeInterval(-30 * day))
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Limit check shots", isDirectory: true)
+        let picture = try png("Limit receipt.png", in: Inbox.folder)   // the history keeps EnCopy's own pictures
+        history.recordImage(picture, text: "zeta receipt"); history.setUsed(picture, now.addingTimeInterval(-20 * day))
+        func paths(_ urls: [URL]) -> Set<String> { Set(urls.map(\.standardizedFileURL.path)) }
+
+        deep.shelf = .earlier
+        deep.query = "zeta"
+        try check(deep.matchCount == 2 && paths(deep.basketCards.map(\.url)) == paths([old, picture]),
+                  "On 「更早」 the old matches show, behind a thousand newer ones")
+        deep.shelf = .line
+        deep.kindFilter = .image
+        try check(deep.matchCount == 1 && paths(deep.basketCards.map(\.url)) == paths([picture]),
+                  "Tab to images finds the picture behind a thousand matching notes")
+        deep.kindFilter = .text
+        try check(deep.matchCount == 1006 && deep.basketCards.count == 8, "Tab to text counts every matching note, and shows a screenful")
     }
 
     func checkShelves() throws {

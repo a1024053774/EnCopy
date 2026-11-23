@@ -250,6 +250,15 @@ final class Line: ObservableObject {
         return Note.cached(url)?.link != nil ? .link : .text
     }
 
+    /// The same, for a search answer: a note not read yet is told from the
+    /// words the history keeps for it, so a keystroke reads no files.
+    private func kind(of url: URL, words: String) -> Kind {
+        if isFile(url) { return .file }
+        guard isText(url) else { return .image }
+        if let note = Note.peek(url) { return note.link != nil ? .link : .text }
+        return Note.webAddress(words.trimmingCharacters(in: .whitespacesAndNewlines)) != nil ? .link : .text
+    }
+
     /// Tab: all → text → links → images → all; ⇧Tab goes the other way.
     func cycleKind(_ step: Int) {
         lastKeyAt = Date()
@@ -286,22 +295,11 @@ final class Line: ObservableObject {
             searchFound = History.Found()
             lineMatches = liveCount
         } else {
-            let byKind = kindFilter != nil
-            var found = history.search(words, onLine: liveText, limit: onShelf || byKind ? 1000 : visibleCount)
-            if onShelf {
-                // Only what was last used in the shelf's span, and nothing from the line.
-                let (from, to) = span(of: shelf)
-                let used = Dictionary(history.kept().map { ($0.url.standardizedFileURL.path, $0.used) }, uniquingKeysWith: { a, _ in a })
-                found.basket = found.basket.filter { url in
-                    guard let date = used[url.standardizedFileURL.path] else { return false }
-                    return from.map { date >= $0 } ?? true && to.map { date < $0 } ?? true
-                }
-                found.basketTotal = found.basket.count
-            }
-            if byKind {
-                found.basket = found.basket.filter(fitsKind)
-                found.basketTotal = found.basket.count
-            }
+            // The shelf's span and Tab's kind narrow the search itself, not
+            // its first thousand answers (review 2, #7).
+            let found = history.search(words, onLine: liveText, limit: visibleCount,
+                                       used: onShelf ? span(of: shelf) : nil,
+                                       accept: kindFilter.map { want in { self.kind(of: $0, words: $1) == want } })
             searchFound = found
             lineMatches = onShelf ? 0 : items.filter { !$0.falling && matches($0) && fitsKind($0.url) }.count
             let room = max(0, visibleCount - lineMatches)

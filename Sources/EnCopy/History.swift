@@ -342,7 +342,14 @@ final class History {
     /// The words already folded. Words of three characters or more go to the
     /// trigram index as quoted phrases; shorter ones — two Chinese
     /// characters are common — are substring checks on the folded text.
-    func search(_ words: [String], onLine: [URL], limit: Int) -> Found {
+    ///
+    /// `used` narrows the basket to a shelf's span of last use (kept items
+    /// only, as the shelf shows them); `accept` sees each basket match with
+    /// its indexed words. Both apply before `limit`, so the basket and its
+    /// total are of what passes, however far back it is (review 2, #7).
+    func search(_ words: [String], onLine: [URL], limit: Int,
+                used: (from: Date?, to: Date?)? = nil,
+                accept: ((URL, String) -> Bool)? = nil) -> Found {
         var found = Found()
         let long = words.filter { $0.unicodeScalars.count >= 3 }
         let short = words.filter { $0.unicodeScalars.count < 3 }
@@ -359,8 +366,14 @@ final class History {
             conditions.append("instr(item_text.text, ?) > 0")
             params.append(word)
         }
+        var times: [Double] = []
+        if let used {
+            conditions.append("item.ttl IS NULL")
+            if let from = used.from { conditions.append("item.used >= ?"); times.append(from.timeIntervalSince1970) }
+            if let to = used.to { conditions.append("item.used < ?"); times.append(to.timeIntervalSince1970) }
+        }
         let sql = """
-            SELECT item.path FROM item_text JOIN item ON item.id = item_text.rowid
+            SELECT item.path, item_text.text FROM item_text JOIN item ON item.id = item_text.rowid
             WHERE \(conditions.joined(separator: " AND "))
             ORDER BY item.used DESC, item.id DESC
             """
@@ -372,6 +385,7 @@ final class History {
             let stmt = try prepare(sql)
             defer { sqlite3_finalize(stmt) }
             for (index, param) in params.enumerated() { bind(stmt, Int32(index + 1), param) }
+            for (index, time) in times.enumerated() { bind(stmt, Int32(params.count + index + 1), time) }
             var step = sqlite3_step(stmt)
             while step == SQLITE_ROW {
                 if let cString = sqlite3_column_text(stmt, 0) {
@@ -379,6 +393,9 @@ final class History {
                     let url = absoluteURL(path)
                     if let passed = onLineByPath[url.standardizedFileURL.path] {
                         found.onLine.insert(passed)
+                    } else if let accept,
+                              !accept(url, sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "") {
+                        // Not of the kind asked for: neither shown nor counted.
                     } else if found.basket.count < limit {
                         // Only a row about to be appended is checked: its
                         // file may be gone. The rest are counted as they are.
