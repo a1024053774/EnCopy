@@ -592,13 +592,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// ⌥C, or the menu's first item: the line comes down on the screen under
     /// the pointer, takes the keyboard without activating EnCopy, and the
     /// newest item is picked. ⌥C again, Escape or a click elsewhere tucks
-    /// the line away.
+    /// the line away. Already down on that screen, it stays where it is;
+    /// down on another one — showing something new, say — it comes over.
     private func summon() {
         if searchBar?.isShown == true {
             endSearch(tuckAway: true)
             return
         }
-        if isRevealed {
+        if isRevealed && panel.screen == LinePanel.screenUnderPointer() {
             keepOpen = true
             pinned = true
         } else {
