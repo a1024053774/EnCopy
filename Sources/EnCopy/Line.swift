@@ -91,7 +91,20 @@ final class Line: ObservableObject {
     let search = SearchIndex()
     /// What is typed in the search field under the line.
     @Published var query = "" {
-        didSet { recomputeSearch() }
+        didSet { lastKeyAt = Date(); recomputeSearch() }
+    }
+
+    /// When a key last acted on the line: typing, picking, Tab, ↓. The
+    /// breeze waits until the keyboard has been quiet a while.
+    var lastKeyAt = Date.distantPast
+
+    /// How the line came down this time: ⌥C or sliding past the top edge.
+    @Published var cameBySummon = false
+    /// Bumped each time the line comes down: the papers sway as it lands.
+    @Published private(set) var landing = 0
+    func landed(bySummon: Bool) {
+        cameBySummon = bySummon
+        landing += 1
     }
     var isSearching: Bool { !SearchIndex.words(query).isEmpty }
 
@@ -126,6 +139,7 @@ final class Line: ObservableObject {
 
     /// ↓ goes one shelf further back, ↑ one nearer; stops at either end.
     func moveShelf(_ step: Int) {
+        lastKeyAt = Date()
         shelf = Shelf(rawValue: min(Shelf.allCases.count - 1, max(0, shelf.rawValue + step))) ?? .line
     }
 
@@ -173,6 +187,7 @@ final class Line: ObservableObject {
 
     /// Tab: all → text → links → images → all; ⇧Tab goes the other way.
     func cycleKind(_ step: Int) {
+        lastKeyAt = Date()
         let order: [Kind?] = [nil, .text, .link, .image, .file]
         let i = order.firstIndex(of: kindFilter) ?? 0
         kindFilter = order[(i + step + order.count) % order.count]
@@ -547,6 +562,7 @@ final class Line: ObservableObject {
     /// -1 is ←, +1 is →, as they hang on screen; stops at either end, no wrap.
     /// ← is -1 and → is +1: the pick moves the way the arrow points on screen.
     func movePick(_ step: Int) {
+        lastKeyAt = Date()
         let pool = pickableInPlace
         guard let current = picked, let i = pool.firstIndex(where: { $0.id == current.id }) else { return }
         pickedID = pool[min(pool.count - 1, max(0, i + step))].id
@@ -565,7 +581,8 @@ final class Line: ObservableObject {
         let place = CGFloat(Layout.slot(index, count: all.count, pinned: pinned))
         let low = max(0, place - CGFloat(visibleCount - 1)) * Layout.spacing
         let high = (place - CGFloat(anchored)) * Layout.spacing
-        scroll = min(max(scroll, low), high)
+        let next = min(max(scroll, low), high)
+        if next != scroll { withAnimation(Motion.slide) { scroll = next } }
     }
 
     // MARK: Actions on photos
@@ -1257,11 +1274,12 @@ final class Line: ObservableObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.revealed else { return }
             self.gustWork = nil
-            if !self.items.isEmpty && self.draggingID == nil { self.gust += 1 }
+            if !self.items.isEmpty && self.draggingID == nil
+                && Motion.breezes(now: Date(), lastKey: self.lastKeyAt) { self.gust += 1 }
             self.scheduleGust()
         }
         gustWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + .random(in: 7...16), execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .random(in: Motion.breezeEvery), execute: work)
     }
 
     // MARK: Persistence

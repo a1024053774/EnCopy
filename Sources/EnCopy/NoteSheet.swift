@@ -214,7 +214,8 @@ struct NoteSheet: View {
     private let sub = Color(red: 0.463, green: 0.412, blue: 0.353)
 
     enum Paper { case receipt, tractor, tag }
-    private var paper: Paper { note.link != nil ? .tag : note.code ? .tractor : .receipt }
+    private var paper: Paper { Self.paper(of: note) }
+    static func paper(of note: Note) -> Paper { note.link != nil ? .tag : note.code ? .tractor : .receipt }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3 * u) {

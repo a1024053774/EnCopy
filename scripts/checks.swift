@@ -363,6 +363,7 @@ struct CheckFailed: Error { let message: String }
         try checkCleanup()
         try checkShelves()
         try checkNewestByKnot()
+        try checkMotion()
         try checkDataFolder()
         try checkHistory()
     }
@@ -1058,6 +1059,62 @@ struct CheckFailed: Error { let message: String }
         let oldX = Layout.x(index: 0, count: lc, width: width, visible: 4, scroll: Layout.spacing)
         let oldX0 = Layout.x(index: 0, count: lc, width: width, visible: 4, scroll: 0)
         try check(oldX < oldX0, "Scrolling brings older ones in from the right")
+    }
+
+    /// T-036: the motion table. Values from the design's table: paper
+    /// weights, the panel's springs, the sweep, the breeze's quiet time.
+    func checkMotion() throws {
+        let expected: [Motion.Paper: (Double, Double)] = [.receipt: (38, 2.4), .tag: (42, 2.6), .polaroid: (46, 2.8),
+                                                          .tractor: (50, 3.0), .folder: (58, 3.4)]
+        try check(Motion.Paper.allCases.allSatisfy { Motion.weight($0) == Motion.Weight(stiffness: expected[$0]!.0, damping: expected[$0]!.1) },
+                  "Each paper swings with the weight in the design's table")
+        let settle = [Motion.Paper.receipt, .tag, .polaroid, .tractor, .folder].map { Motion.weight($0).settling }
+        try check(zip(settle, settle.dropFirst()).allSatisfy { $0 < $1 }, "Receipt swings longest, the folder settles first")
+
+        try check(Motion.panel(revealed: true, bySummon: true, reduced: false) == .spring(response: 0.28, dampingFraction: 0.86),
+                  "⌥C drops the panel on the quick spring")
+        try check(Motion.panel(revealed: true, bySummon: false, reduced: false) == .spring(response: 0.42, dampingFraction: 0.82),
+                  "Sliding down past the edge keeps the slower upstream spring")
+        try check(Motion.panel(revealed: false, bySummon: true, reduced: false) == .timingCurve(0.23, 1, 0.32, 1, duration: 0.16),
+                  "Tucking away is 0.16 s ease-out with no bounce")
+        try check(Motion.panel(revealed: true, bySummon: true, reduced: true) == .easeInOut(duration: 0.12)
+                  && Motion.panel(revealed: false, bySummon: false, reduced: true) == .easeInOut(duration: 0.12),
+                  "With Reduce motion the panel only fades")
+
+        try check(Motion.sweepDelay(x: 0, width: 1000) == 0 && abs(Motion.sweepDelay(x: 1000, width: 1000) - 0.26) < 1e-9
+                  && Motion.sweepDelay(x: 300, width: 1000) < Motion.sweepDelay(x: 700, width: 1000)
+                  && Motion.sweepDelay(x: -50, width: 1000) == 0 && abs(Motion.sweepDelay(x: 1300, width: 1000) - 0.26) < 1e-9,
+                  "The sweep runs left to right, the rightmost 0.26 s late")
+        try check(Motion.summonSway == 1.5...3 && Motion.sweepSway == 5...9, "⌥C sways 1.5–3°, sliding down sweeps 5–9°")
+
+        let t0 = Date()
+        try check(!Motion.breezes(now: t0.addingTimeInterval(3.9), lastKey: t0, reduced: false)
+                  && Motion.breezes(now: t0.addingTimeInterval(4), lastKey: t0, reduced: false),
+                  "No breeze until 4 s after the last key")
+        try check(!Motion.breezes(now: t0.addingTimeInterval(60), lastKey: t0, reduced: true), "No breeze with Reduce motion")
+        let calm = Motion.gust(summoned: true), free = Motion.gust(summoned: false)
+        try check(free == 1.6...3.4 && abs(calm.lowerBound * 2 - free.lowerBound) < 1e-9 && abs(calm.upperBound * 2 - free.upperBound) < 1e-9,
+                  "The breeze is half as strong while summoned")
+
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let keys = line()
+        _ = keys.hang(try png("Motion A.png"), quietly: true)
+        _ = keys.hang(try png("Motion B.png", red: 0.8), quietly: true)
+        try check(keys.lastKeyAt == .distantPast, "A fresh line has heard no key")
+        keys.pickNewest(); keys.movePick(1)
+        try check(Date().timeIntervalSince(keys.lastKeyAt) < 1, "Picking counts as a key: the breeze waits")
+        keys.lastKeyAt = .distantPast
+        keys.query = "x"
+        try check(Date().timeIntervalSince(keys.lastKeyAt) < 1, "Typing counts as a key")
+        keys.lastKeyAt = .distantPast
+        keys.cycleKind(1)
+        try check(Date().timeIntervalSince(keys.lastKeyAt) < 1, "Tab counts as a key")
+        let before = keys.landing
+        keys.landed(bySummon: true)
+        try check(keys.cameBySummon && keys.landing == before + 1, "Coming down by ⌥C is told to the papers")
+        keys.landed(bySummon: false)
+        try check(!keys.cameBySummon && keys.landing == before + 2, "Sliding down is told too")
     }
 
     func checkShelves() throws {

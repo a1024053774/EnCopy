@@ -5,8 +5,11 @@ import SwiftUI
 struct PeggedView: View {
     let item: Pegged
     @ObservedObject var line: Line
+    /// In a gust sweeping the line from the left, how long this paper waits.
+    var sweepDelay: Double = 0
 
     @State private var swing: Double = 0
+    @State private var hop: CGFloat = 0
     @State private var arrived = false
     @State private var hovering = false
 
@@ -34,7 +37,7 @@ struct PeggedView: View {
                 .animation(.easeOut(duration: 0.25), value: item.held)
         }
         .rotationEffect(.degrees(swing + item.tilt), anchor: .top)
-        .offset(y: arrived ? 0 : -46)
+        .offset(y: (arrived || Motion.reduced ? 0 : -46) - hop)
         // The fall itself is drawn over the whole screen by CaptureFlight, so
         // the card here just steps aside at once.
         .opacity(item.falling || item.flying ? 0 : (arrived ? 1 : 0))
@@ -43,7 +46,8 @@ struct PeggedView: View {
         .onAppear(perform: arrive)
         .onChange(of: item.flying) { was, now in if was && !now { land() } }
         .onChange(of: line.gust) { _, _ in breeze() }
-        .onChange(of: copied) { _, isCopied in if isCopied { nudge(3) } }
+        .onChange(of: line.landing) { _, _ in sway() }
+        .onChange(of: copied) { _, isCopied in if isCopied { jump() } }
     }
 
     /// The photo fits inside the card area keeping its proportions, so the
@@ -132,9 +136,10 @@ struct PeggedView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .scaleEffect(selected && line.picked?.id == item.id ? 1.06 : 1, anchor: .top)
-            .offset(y: selected && line.picked?.id == item.id ? 4 : 0)
-            .animation(.easeOut(duration: 0.11), value: selected)
+            // With Reduce motion only the edge changes.
+            .scaleEffect(selected && line.picked?.id == item.id && !Motion.reduced ? 1.06 : 1, anchor: .top)
+            .offset(y: selected && line.picked?.id == item.id && !Motion.reduced ? 4 : 0)
+            .animation(Motion.pick, value: selected)
             .shadow(color: .black.opacity(hovering ? 0.26 : 0.18), radius: hovering ? 14 : 10, y: hovering ? 8 : 5)
             // Holding presses the photo in slowly, so a long press feels like
             // it is building up to something.
@@ -182,15 +187,27 @@ struct PeggedView: View {
             )
     }
 
+    /// How heavy this paper hangs, for how it swings.
+    private var paperKind: Motion.Paper {
+        if isText(item.url), let note = Note.cached(item.url) {
+            switch NoteSheet.paper(of: note) {
+            case .receipt: return .receipt
+            case .tag: return .tag
+            case .tractor: return .tractor
+            }
+        }
+        return isFile(item.url) ? .folder : .polaroid
+    }
+
     private func arrive() {
         // A capture that flew in is already in place; the flight did the arriving.
-        if item.flying {
-            arrived = true
+        if item.flying || Motion.reduced {
+            withAnimation(Motion.reduced ? Motion.fade : nil) { arrived = true }
             return
         }
         swing = 16
         withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) { arrived = true }
-        withAnimation(.interpolatingSpring(stiffness: 46, damping: 2.6)) { swing = 0 }
+        withAnimation(Motion.swing(paperKind)) { swing = 0 }
     }
 
     /// Landing after the flight: no jump, just a small sway from rest.
@@ -200,17 +217,39 @@ struct PeggedView: View {
 
     private func breeze() {
         let delay = Double.random(in: 0...0.35)
+        let reach = Motion.gust(summoned: line.picked != nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard line.revealed else { return }
-            nudge(Double.random(in: 1.6...3.4))
+            nudge(Double.random(in: reach))
+        }
+    }
+
+    /// The line just came down: with ⌥C each paper sways a little; sliding
+    /// down, a gust sweeps along from the left.
+    private func sway() {
+        if line.cameBySummon {
+            nudge(Double.random(in: Motion.summonSway))
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + sweepDelay) {
+                nudge(Double.random(in: Motion.sweepSway))
+            }
+        }
+    }
+
+    /// A single click copied it: the paper hops up and drops back.
+    private func jump() {
+        guard !Motion.reduced else { return }
+        withAnimation(.easeOut(duration: 0.08)) { hop = Motion.hopHeight }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            withAnimation(Motion.hop) { hop = 0 }
         }
     }
 
     private func nudge(_ degrees: Double) {
-        guard line.revealed else { return }
+        guard line.revealed, !Motion.reduced else { return }
         withAnimation(.easeOut(duration: 0.3)) { swing = degrees }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.interpolatingSpring(stiffness: 38, damping: 2.4)) { swing = 0 }
+            withAnimation(Motion.swing(paperKind)) { swing = 0 }
         }
     }
 }
