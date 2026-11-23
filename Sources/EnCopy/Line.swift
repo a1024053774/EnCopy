@@ -145,8 +145,9 @@ final class Line: ObservableObject {
     var shown: [Pegged] {
         let words = SearchIndex.words(query)
         let fits = { (p: Pegged) in self.kindFilter == nil || self.kind(of: p.url) == self.kindFilter }
-        // On a shelf of the basket (↓), its cards stand in for the line's.
-        if words.isEmpty, shelf != .line { return basketCards.filter(fits) }
+        // On a shelf of the basket (↓), its cards stand in for the line's,
+        // searched or not: a search on a shelf searches that shelf (review #9).
+        if shelf != .line { return basketCards.filter(fits) }
         guard !words.isEmpty else { return kindFilter == nil ? items : items.filter { $0.falling || fits($0) } }
         return basketCards.filter(fits) + items.filter { $0.falling || (matches($0) && fits($0)) }
     }
@@ -184,6 +185,8 @@ final class Line: ObservableObject {
     /// many as fit across the screen.
     private func loadShelf(now: Date = Date()) {
         guard shelf != .line else { basketCards = []; recomputeSearch(); return }
+        // Searching: the search moves to this shelf.
+        if isSearching { recomputeSearch(); return }
         let (from, to) = span(of: shelf, now: now)
         let onLine = onLinePaths
         let picked = history.kept().filter { item in
@@ -229,8 +232,9 @@ final class Line: ObservableObject {
     /// the basket fills the room left across the screen.
     private func recomputeSearch() {
         let words = SearchIndex.words(query)
-        // A shelf keeps its own cards until something is typed.
-        if words.isEmpty, shelf != .line { return }
+        // On a shelf with nothing typed, the shelf's own cards (review #9).
+        if words.isEmpty, shelf != .line { loadShelf(); return }
+        let onShelf = shelf != .line
         // Everything on the line that the history also keeps: notes and EnCopy's own pictures.
         let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url)) }.map(\.url)
         var lineMatches = 0
@@ -239,9 +243,19 @@ final class Line: ObservableObject {
             searchFound = History.Found()
             lineMatches = liveCount
         } else {
-            let found = history.search(words, onLine: liveText, limit: visibleCount)
+            var found = history.search(words, onLine: liveText, limit: onShelf ? 1000 : visibleCount)
+            if onShelf {
+                // Only what was last used in the shelf's span, and nothing from the line.
+                let (from, to) = span(of: shelf)
+                let used = Dictionary(history.kept().map { ($0.url.standardizedFileURL.path, $0.used) }, uniquingKeysWith: { a, _ in a })
+                found.basket = found.basket.filter { url in
+                    guard let date = used[url.standardizedFileURL.path] else { return false }
+                    return from.map { date >= $0 } ?? true && to.map { date < $0 } ?? true
+                }
+                found.basketTotal = found.basket.count
+            }
             searchFound = found
-            lineMatches = items.filter { !$0.falling && matches($0) }.count
+            lineMatches = onShelf ? 0 : items.filter { !$0.falling && matches($0) }.count
             let room = max(0, visibleCount - lineMatches)
             var cards: [Pegged] = []
             // Found.basket is newest first; the cards hang oldest of them

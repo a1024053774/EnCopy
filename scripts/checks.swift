@@ -386,6 +386,7 @@ struct CheckFailed: Error { let message: String }
         try checkCopiedImageApp()
         try checkFilesRespectImages()
         try checkRecopyComesBack()
+        try checkShelfSearch()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1483,6 +1484,37 @@ struct CheckFailed: Error { let message: String }
         pasteboard.clearContents(); pasteboard.setString("more words", forType: .string); watcher.check()
         pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
         try check(again.last == picture, "The same picture copied again comes back from the basket")
+    }
+
+    /// Review #9: on a shelf, typing searches that shelf only, and clearing
+    /// the words brings the shelf back; ↓ while searching does the same.
+    func checkShelfSearch() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("shelf-search.sqlite"))
+        let shelves = Line(pasteboard: pasteboard, desktop: root, history: history)
+        shelves.maxItems = 1; shelves.visibleCount = 8; shelves.revealed = true
+        let now = Date(), start = Calendar.current.startOfDay(for: now)
+        let todayA = try adoptedNote("ss-today-a", "alphaword from today")
+        let todayB = try adoptedNote("ss-today-b", "betaword from today")
+        let yesterdayA = try adoptedNote("ss-yesterday-a", "alphaword from yesterday")
+        let hanging = try adoptedNote("ss-hanging", "alphaword hanging on the line")
+        for url in [yesterdayA, todayB, todayA, hanging] { _ = shelves.hang(url, quietly: true) }
+        pump(0.7); shelves.closeGaps()
+        history.setUsed(yesterdayA, start.addingTimeInterval(-43200))
+        history.setUsed(todayB, now.addingTimeInterval(-120)); history.setUsed(todayA, now.addingTimeInterval(-60))
+        func shownURLs() -> Set<URL> { Set(shelves.shown.filter { !$0.falling }.map(\.url)) }
+        shelves.moveShelf(1)
+        try check(shownURLs() == [todayA, todayB], "Today's shelf shows today's two")
+        shelves.query = "zzzznothing"
+        try check(shownURLs().isEmpty, "Nothing matches")
+        shelves.query = ""
+        try check(shownURLs() == [todayA, todayB], "Clearing the words brings today's shelf back")
+        shelves.query = "alphaword"
+        try check(shownURLs() == [todayA], "Searching on today's shelf finds only today's match, not yesterday's or the line's")
+        shelves.moveShelf(1)
+        try check(shownURLs() == [yesterdayA], "↓ while searching moves the search to yesterday")
+        shelves.query = ""; shelves.shelf = .line
     }
 
     func checkShelves() throws {
