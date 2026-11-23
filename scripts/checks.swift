@@ -401,6 +401,7 @@ struct CheckFailed: Error { let message: String }
         try checkCleanup()
         try checkShelves()
         try checkBasketList()
+        try checkBasketPapers()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -2198,6 +2199,43 @@ struct CheckFailed: Error { let message: String }
         try check(sent == 1 && basket.items.filter { !$0.falling }.last?.url == urls["m1"]
                   && pasteboard.string(forType: .string)?.contains("list words m1") == true,
                   "⏎ pastes the list's pick, and it comes back to the head of the line")
+    }
+
+    /// T-045: each row of the list is the paper it would hang on, and says
+    /// what it is: a note's lines, a link's site and path, a picture's words.
+    func checkBasketPapers() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Basket paper shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("basket-papers.sqlite"))
+        let papers = Line(pasteboard: pasteboard, desktop: root, history: history)
+        papers.maxItems = 1; papers.visibleCount = 8; papers.revealed = true
+        let text = try adoptedNote("paper-text", "Meeting moved to Thursday\nRoom 4B, bring the review notes")
+        let code = try adoptedNote("paper-code", "func paste(_ id: UUID) {\n    line.copy(id)\n}")
+        let link = try adoptedNote("paper-link", "https://github.com/a1024053774/EnCopy")
+        let shot = try png("Paper shot.png", in: Inbox.folder)
+        for url in [text, code, link] { _ = papers.hang(url, quietly: true) }
+        _ = papers.hang(shot, quietly: true)
+        papers.search.onRead(shot, "INVOICE 2038 due Friday")
+        let last = try adoptedNote("paper-last", "the one left hanging")
+        _ = papers.hang(last, quietly: true)
+        pump(0.7); papers.closeGaps()
+        papers.openBasket()
+        let rows = Set(papers.basketRows.map(\.url))
+        try check(rows == [text, code, link, shot], "The four are in the basket list")
+        try check(papers.paperCard(of: text) == .text && papers.paperCard(of: code) == .code
+                  && papers.paperCard(of: link) == .link && papers.paperCard(of: shot) == .image,
+                  "Each row is its own paper: receipt, tractor-feed code, a link's tag, a polaroid")
+        let t = papers.basketSummary(text)
+        try check(t.title == "Meeting moved to Thursday" && t.detail == "Room 4B, bring the review notes",
+                  "A note's row shows its first line and the next")
+        let l = papers.basketSummary(link)
+        try check(l.title == "github.com" && l.detail == "/a1024053774/EnCopy", "A link's row shows its site and path")
+        let s = papers.basketSummary(shot)
+        try check(s.title.lowercased().contains("invoice 2038"), "A picture's row shows the words read from it")
+        papers.closeBasket()
     }
 
     func checkDesktopCopies() throws {
