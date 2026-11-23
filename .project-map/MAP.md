@@ -31,6 +31,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - [T-017 开发版要不要用单独的数据位置](tickets/T-017-dev-copy-own-data.md): 单独放，开发完后删掉
 - [T-016 给本机构建一个固定的签名](tickets/T-016-stable-signing.md): 自签名证书放在单独的钥匙串里，构建时用它签；不动登录钥匙串
 - [T-019 绳上的一件贴出去后要不要挪到绳头](tickets/T-019-paste-moves-to-head.md): 挪；复制出去也挪，收藏的和拿在手上的不动
+- [T-043 篮子里的东西怎么不靠搜索一件件看](tickets/T-043-basket-list.md): ↓ 展开按天分组的整只篮子列表，取代每格 8 件的翻页；一行一条纸，跟主题走；绳右端挂「篮子 N 件 ↓」，⌥C 和路过都露
 
 ## Not yet specified
 
