@@ -269,17 +269,25 @@ struct CleanupFilter: Equatable {
         // The words through the full-text index, once, not row by row (review #15).
         let matching: Set<String>? = words.isEmpty ? nil
             : Set(history.search(words, onLine: [], limit: max(1, history.count)).basket.map { $0.standardizedFileURL.path })
-        return history.kept().filter { item in
+        let picked = history.kept().filter { item in
             guard !onLine.contains(item.url.standardizedFileURL.path) else { return false }
             if let days = olderThanDays, now.timeIntervalSince(item.used) <= days * 86400 { return false }
             if let app, item.app != app { return false }
             if let kind {
-                let actual: Line.Kind = isText(item.url) ? (Note.cached(item.url)?.link != nil ? .link : .text)
+                // Text or link from the words kept, not by reading each note (review 2, on #15).
+                let actual: Line.Kind = isText(item.url) ? (Note.isLink(item.url, words: history.words(of: item.url)) ? .link : .text)
                     : isKeptImage(item.url) ? .image : .file
                 if actual != kind { return false }
             }
             if let matching, !matching.contains(item.url.standardizedFileURL.path) { return false }
             return true
-        }.sorted { $0.used > $1.used }.map(\.url)
+        }
+        // What is gone from the disk is not listed as going to Recently
+        // Cleared; its row goes now (review 2, on #13).
+        var present: [History.Kept] = []
+        for item in picked {
+            if FileManager.default.fileExists(atPath: item.url.path) { present.append(item) } else { history.remove(item.url) }
+        }
+        return present.sorted { $0.used > $1.used }.map(\.url)
     }
 }

@@ -84,6 +84,14 @@ struct Note {
     /// What is cached, without reading the file.
     @MainActor static func peek(_ url: URL) -> Note? { cache[url] }
 
+    /// Whether a note is a link, without reading a file not read yet: the
+    /// words the history keeps for it tell. For searching and the cleanup
+    /// panel, which go through many notes at a keystroke.
+    @MainActor static func isLink(_ url: URL, words: String?) -> Bool {
+        if let note = peek(url) { return note.link != nil }
+        return webAddress((words ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+    }
+
     /// Read from the file system each time: URL resource values are cached.
     static func modificationDate(_ url: URL) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
