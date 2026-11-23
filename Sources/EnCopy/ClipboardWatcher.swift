@@ -79,6 +79,19 @@ final class ClipboardWatcher {
 
     /// How long copies under the hourly rule stay after their last use.
     static let hourly: TimeInterval = 3600
+    /// How long a verification code stays (T-028).
+    static let codeLife: TimeInterval = 600
+
+    /// A verification code: 4 to 8 digits on their own from Messages or Mail,
+    /// or a short text that says 验证码 or "code" next to 4 to 8 digits.
+    static func isCode(_ text: String, app: String?) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digitsOnly = trimmed.range(of: #"^[0-9]{4,8}$"#, options: .regularExpression) != nil
+        if digitsOnly, let app, ["com.apple.MobileSMS", "com.apple.mail"].contains(app) { return true }
+        guard trimmed.count <= 160,
+              trimmed.range(of: #"(?<![0-9])[0-9]{4,8}(?![0-9])"#, options: .regularExpression) != nil else { return false }
+        return trimmed.range(of: #"验证码|校验码|动态码|\bcode\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+    }
 
     /// The clipboard is watched while anything is on and recording is not paused.
     static var isEnabled: Bool { !isPaused && (imagesEnabled || textEnabled || linksEnabled) }
@@ -145,6 +158,8 @@ final class ClipboardWatcher {
         guard rule != .skip else { return }
         let ttl = rule == .hourly ? Self.hourly : nil
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
+            // A verification code is only good for minutes: it stays ten.
+            let ttl = Self.isCode(text, app: app) ? Self.codeLife : ttl
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if Note.webAddress(trimmed) != nil {
                 if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true, app: app, ttl: ttl) }

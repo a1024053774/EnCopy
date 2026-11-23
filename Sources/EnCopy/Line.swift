@@ -359,11 +359,11 @@ final class Line: ObservableObject {
 
     /// What a card says about clearing by itself.
     nonisolated static func clearsText(_ ttl: TimeInterval) -> String {
-        L("Clears in an hour")
+        ttl <= 600 ? L("Clears in 10 minutes") : L("Clears in an hour")
     }
 
-    /// Copies under an app's hourly rule whose time ran out since their last
-    /// use: deleted outright, not to the Trash and not kept anywhere.
+    /// Copies under an app's hourly rule, and verification codes, whose time ran
+    /// out since their last use: deleted outright, not to the Trash and not kept anywhere.
     func clearExpired(now: Date = Date()) {
         let gone = history.expired(at: now)
         guard !gone.isEmpty else { return }
