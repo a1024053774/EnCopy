@@ -198,7 +198,7 @@ final class ClipboardWatcher {
                 // counts. Turned off in the meantime: nothing hangs.
                 guard let png, self?.pasteboard.changeCount == count,
                       let self, self.timer != nil else { return }
-                self.save(png)
+                self.save(png, app: app, ttl: ttl)
             }
         }
     }
@@ -293,7 +293,9 @@ final class ClipboardWatcher {
         return type == .png ? data : rep.representation(using: .png, properties: [:])
     }
 
-    private func save(_ png: Data) {
+    /// `app` and `ttl` are as when it was copied: the picture is cleared by
+    /// its app's rule like text, and cleanup by app finds it (review #3).
+    private func save(_ png: Data, app: String?, ttl: TimeInterval?) {
         if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) { return }
         let fm = FileManager.default
         var url = Inbox.folder.appendingPathComponent("Clipboard \(Self.stamp()).png")
@@ -308,6 +310,9 @@ final class ClipboardWatcher {
             // What people copy can be private: only they can read it.
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             last = (png, url)
+            history.recordImage(url, text: nil)
+            history.setApp(url, app)
+            history.setTTL(url, ttl)
             onNew(url)
         } catch {
             try? fm.removeItem(at: url)
