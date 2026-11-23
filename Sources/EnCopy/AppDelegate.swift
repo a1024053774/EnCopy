@@ -487,7 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// A discarded card falls over the whole screen, from where it hangs.
     /// Reduce motion in Accessibility settings: photos land and leave
     /// without flying across the screen or falling down it.
-    private static var reducesMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    private static var reducesMotion: Bool { Motion.reduced }
 
     private func fall(_ item: Pegged) {
         guard isPresent, isRevealed, !item.flying, !Self.reducesMotion, let screen = panel.screen,
@@ -565,17 +565,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fresh.orderFrontRegardless()
     }
 
-    private func reveal(pinned: Bool = false, peekFor seconds: TimeInterval = 0) {
+    private func reveal(pinned: Bool = false, peekFor seconds: TimeInterval = 0, bySummon: Bool = false) {
         guard isPresent else { return }
         if pinned { self.pinned = true }
         if seconds > 0 { peekUntil = Date().addingTimeInterval(seconds) }
         awaySince = nil
-        setRevealed(true)
+        setRevealed(true, bySummon: bySummon)
     }
 
-    private func setRevealed(_ on: Bool) {
+    private func setRevealed(_ on: Bool, bySummon: Bool = false) {
         guard on != isRevealed else { return }
         isRevealed = on
+        // Set first, so the panel's spring is chosen in the same update.
+        if on { line.landed(bySummon: bySummon) }
         line.revealed = on
         // It always comes down showing the newest.
         if on { line.scroll = 0 }
@@ -636,7 +638,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             panel.placeOnScreen()
             updateCapacity()
             refresh()
-            reveal(pinned: true)
+            reveal(pinned: true, bySummon: true)
         }
         line.pickNewest()
         searchBar.show(below: panel.frame)

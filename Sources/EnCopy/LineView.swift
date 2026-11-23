@@ -94,6 +94,7 @@ struct LineView: View {
     private var shown: [Pegged] { line.shown }
     private var pinned: Int { line.layoutPinned }
     private var scroll: CGFloat { line.isSearching ? 0 : line.scroll }
+    private var narrowed: Bool { line.isSearching || line.kindFilter != nil || line.shelf != .line }
 
     var body: some View {
         GeometryReader { geo in
@@ -130,7 +131,7 @@ struct LineView: View {
                         return min(1, max(0, (cardLeft - gone) / max(1, rest - gone)))
                     } ?? 1
                     let ropeY = Layout.ropeY(x: x, width: width)
-                    PeggedView(item: item, line: line)
+                    PeggedView(item: item, line: line, sweepDelay: Motion.sweepDelay(x: x, width: width))
                         .frame(width: Layout.cardWidth, height: Layout.panelHeight - ropeY, alignment: .top)
                         // Photos scrolled towards an edge fade out before they reach it.
                         .opacity(min(1, max(0, min(x, width - x) / 90)) * fadeIn
@@ -144,14 +145,17 @@ struct LineView: View {
                         .position(x: x, y: ropeY - Layout.pinAbove + (Layout.panelHeight - ropeY) / 2)
                 }
             }
-            .animation(.spring(response: 0.55, dampingFraction: 0.78), value: shown.map(\.id))
+            // A search, Tab or ↓ leaving papers out closes the gaps without a
+            // bounce; a new paper hung makes the rest step aside.
+            .animation(narrowed ? Motion.slide : Motion.makeWay, value: shown.map(\.id))
             .animation(.easeInOut(duration: 0.3), value: line.items.isEmpty)
-            .animation(.spring(response: 0.55, dampingFraction: 0.78), value: line.items.map(\.kept))
+            .animation(Motion.makeWay, value: line.items.map(\.kept))
             // Tucked away, the whole line waits above the top edge and slides
             // out from under the menu bar, the way an auto-hiding Dock does.
-            .offset(y: line.revealed ? 0 : -(Layout.panelHeight + 12))
-            .animation(line.revealed ? .spring(response: 0.42, dampingFraction: 0.82)
-                                     : .easeIn(duration: 0.22), value: line.revealed)
+            // With Reduce motion it only fades.
+            .offset(y: line.revealed || Motion.reduced ? 0 : -(Layout.panelHeight + 12))
+            .opacity(line.revealed || !Motion.reduced ? 1 : 0)
+            .animation(Motion.panel(revealed: line.revealed, bySummon: line.cameBySummon), value: line.revealed)
         }
         .onPreferenceChange(HitRectsKey.self) { rects in
             line.hitRects = rects
