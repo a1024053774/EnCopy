@@ -350,6 +350,7 @@ struct CheckFailed: Error { let message: String }
         try checkDesktopCopies()
         try checkSummon()
         try checkUsedMovesToHead()
+        try checkDoubleClickPastes()
         try checkDataFolder()
         try checkHistory()
     }
@@ -572,6 +573,28 @@ struct CheckFailed: Error { let message: String }
                   && pasteboard.string(forType: .string) == "used words 1 headcheck1",
                   "A held note is copied and keeps its empty clip")
         use.setHeld(id(notes[1]), false)
+    }
+
+    /// T-007: a double click on a card pastes it into the front app through
+    /// the same paster as ⏎, and opens nothing.
+    func checkDoubleClickPastes() throws {
+        let dbl = line()
+        let notes = try (0..<3).map { try adoptedNote("dbl\($0)", "double click words \($0)") }
+        for note in notes { _ = dbl.hang(note, quietly: true) }
+        var sent: [PasteKey] = []
+        var tucks = 0
+        let paster = Paster(line: dbl, isTrusted: { true }, send: { sent.append($0) })
+        paster.tuckAway = { tucks += 1 }
+        dbl.onPaste = { paster.paste($0) }
+        show(dbl)
+        click(try grab(notes[0]))
+        click(try grab(notes[0]), count: 2)
+        pump(0.7)
+        try check(sent == [.commandV] && tucks == 1, "A double click sends exactly one ⌘V after tucking the line away")
+        try check(pasteboard.string(forType: .string) == "double click words 0",
+                  "A double click puts that card's words on the clipboard first")
+        try check(dbl.items.filter { !$0.falling }.last?.url == notes[0],
+                  "The double-clicked card goes to the head, like any paste")
     }
 
     func checkDesktopCopies() throws {

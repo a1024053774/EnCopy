@@ -9,7 +9,7 @@ import SwiftUI
 /// - The Trash discards it.
 /// - Nowhere that accepts it: the photo flies back to the line.
 ///
-/// Click copies, double click opens, press and hold opens Markup, the corner
+/// Click copies, double click pastes, press and hold opens Markup, the corner
 /// cross discards.
 struct GrabArea: NSViewRepresentable {
     let item: Pegged
@@ -41,7 +41,7 @@ struct GrabArea: NSViewRepresentable {
             view.onPlainClick = {}
             view.onHangBack = {}
             view.onClick = { line.copy(id) }
-            view.onDoubleClick = {}
+            view.onDoubleClick = { line.paste(id) }
             view.onDragStart = {}
             view.onDragEnd = {}
             view.dragGroup = { [] }
@@ -71,7 +71,7 @@ struct GrabArea: NSViewRepresentable {
         view.onPlainClick = { line.clearSelection() }
         view.onHangBack = { line.onHangBack?(id) }
         view.onClick = { line.copy(id) }
-        view.onDoubleClick = { line.open(id) }
+        view.onDoubleClick = { line.paste(id) }
         view.onDragStart = { line.draggingID = id }
         view.onDragEnd = {
             line.draggingID = nil
