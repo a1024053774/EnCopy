@@ -438,6 +438,7 @@ struct CheckFailed: Error { let message: String }
         try checkDiscardedCodesNotInTrash()
         try checkCopiedFilesClearToo()
         try checkCleanupPreviewOnDisk()
+        try checkFinderPicturesByName()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -2027,6 +2028,19 @@ struct CheckFailed: Error { let message: String }
         var links = CleanupFilter(); links.kind = .link
         try check(tidy.cleanupCandidates(links) == [link] && Note.peek(link) == nil && Note.peek(kept) == nil,
                   "Links are told from text by the words kept, without reading the notes")
+    }
+
+    /// Review 2, on #4: a picture copied in Finder is found by its name and
+    /// folder, as a file is; EnCopy's own screenshots only by what they show.
+    func checkFinderPicturesByName() throws {
+        let named = line()
+        let picture = try png("Taxi receipt.png", in: root.appendingPathComponent("Receipts 2027", isDirectory: true))
+        let own = try png("Own taxi shot.png", in: DataFolder.url.appendingPathComponent("Name check shots", isDirectory: true))
+        for url in [picture, own] { _ = named.hang(url, quietly: true) }      // what hangs is what is indexed
+        for _ in 0..<100 where !named.search.matches(picture, SearchIndex.words("taxi")) { pump(0.05) }
+        try check(named.search.matches(picture, SearchIndex.words("taxi receipt")) && named.search.matches(picture, SearchIndex.words("receipts 2027")),
+                  "A picture from Finder is found by its name and its folder")
+        try check(!named.search.matches(own, SearchIndex.words("taxi")), "EnCopy's own screenshot is not found by its file name")
     }
 
     func checkShelves() throws {

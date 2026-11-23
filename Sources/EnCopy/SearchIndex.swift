@@ -66,9 +66,14 @@ final class SearchIndex {
     /// The text in a picture, or in a recording's first frame.
     nonisolated private static func recognize(_ url: URL) -> String? {
         // A file is found by its name and its folder, not by reading a picture of it.
-        if isFile(url) { return url.lastPathComponent + " " + url.deletingLastPathComponent().lastPathComponent }
+        let name = url.lastPathComponent + " " + url.deletingLastPathComponent().lastPathComponent
+        if isFile(url) { return name }
+        // A picture or video copied in Finder is found by its name too, as
+        // in Finder; EnCopy's own screenshots only by what they show (review 2, on #4).
+        let own = url.standardizedFileURL.path.hasPrefix(DataFolder.url.standardizedFileURL.path + "/")
+        let named = own ? nil : name
         guard let image = makeThumbnail(url, maxPixels: 2400)?
-            .cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+            .cgImage(forProposedRect: nil, context: nil, hints: nil) else { return named }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -78,7 +83,8 @@ final class SearchIndex {
         } catch {
             return nil
         }
-        return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        let seen = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        return named.map { $0 + "\n" + seen } ?? seen
     }
 
     /// Whether an item has every word of the search, ignoring case, accents
