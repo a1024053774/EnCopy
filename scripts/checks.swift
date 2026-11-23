@@ -396,6 +396,7 @@ struct CheckFailed: Error { let message: String }
         try checkThemes()
         try checkWhatHangs()
         try checkRecopyNeverShortens()
+        try checkSearchStaysForQuickLook()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1720,6 +1721,27 @@ struct CheckFailed: Error { let message: String }
         app = "com.example.chat"
         pasteboard.clearContents(); pasteboard.setString("440912", forType: .string); watcher.check()
         try check(history.ttl(of: note) == nil, "Copied again in an hourly app, it is still kept for good")
+    }
+
+    /// Review 2, finding 3: while Quick Look borrows the keyboard, the search
+    /// stays; any other loss of the keyboard ends it as before.
+    func checkSearchStaysForQuickLook() throws {
+        let bar = SearchBar(line: line())
+        var ended = 0
+        bar.onEnd = { ended += 1 }
+        // On the named screen, out of the way, as the checks window is.
+        let named = ProcessInfo.processInfo.environment["ENCOPY_CHECKS_SCREEN"]
+        let screen = named.flatMap { name in NSScreen.screens.first { $0.localizedName == name } }
+        let base = screen?.frame.origin ?? .zero
+        bar.show(below: NSRect(x: base.x + 200, y: base.y + 600, width: 800, height: 200))
+        pump(0.3)
+        bar.keepsOpen = { true }
+        bar.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
+        try check(ended == 0, "Losing the keyboard to Quick Look does not end the search")
+        bar.keepsOpen = { false }
+        bar.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
+        try check(ended == 1, "Losing it to anything else ends the search, as before")
+        bar.hide()
     }
 
     func checkShelves() throws {

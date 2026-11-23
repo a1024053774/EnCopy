@@ -88,8 +88,12 @@ final class SearchBar: NSObject, NSWindowDelegate {
         return true
     }
 
+    /// True while something borrows the keyboard and gives it back, as
+    /// Quick Look does: the search waits instead of ending (review 2 #3).
+    var keepsOpen: () -> Bool = { false }
+
     func windowDidResignKey(_ notification: Notification) {
-        guard panel.isVisible else { return }
+        guard panel.isVisible, !keepsOpen() else { return }
         onEnd()
     }
 }

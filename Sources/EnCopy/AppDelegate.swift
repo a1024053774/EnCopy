@@ -126,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let id = self?.line.picked?.id { self?.line.quickLook(id) }
         }
         QuickLook.shared.onClosed = { [weak self] in self?.searchBar.refocus() }
+        searchBar.keepsOpen = { QuickLook.shared.isLending }
         searchBar.onEnd = { [weak self] in self?.endSearch(tuckAway: true) }
         paster = Paster(line: line)
         line.onPaste = { [weak self] id in self?.paster.paste(id) }
