@@ -34,7 +34,10 @@ final class CleanupModel: ObservableObject {
     let line: Line
     @Published var filter = CleanupFilter(olderThanDays: 30) {
         didSet {
-            // Typing waits for a pause before the list is worked out again.
+            // A changed filter is a new question: no confirming the old one
+            // (review 2 #4). Typing waits for a pause before the list is
+            // worked out again.
+            confirming = false
             pendingRefresh?.cancel()
             guard filter.text != oldValue.text else { refresh(); return }
             let work = DispatchWorkItem { [weak self] in self?.refresh() }
@@ -66,7 +69,9 @@ final class CleanupModel: ObservableObject {
     }
 
     func clear() {
-        line.cleanUp(candidates)
+        // As the filter is now, not as the list last showed it.
+        pendingRefresh?.cancel()
+        line.cleanUp(line.cleanupCandidates(filter))
         refresh()
     }
 
