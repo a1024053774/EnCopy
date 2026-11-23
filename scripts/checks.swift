@@ -394,6 +394,7 @@ struct CheckFailed: Error { let message: String }
         try checkPeekDuration()
         try checkSourceAppBadge()
         try checkThemes()
+        try checkWhatHangs()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1682,6 +1683,21 @@ struct CheckFailed: Error { let message: String }
         try check(Theme.current == .paper, "An unknown theme falls back to paper")
         try check(Set(Theme.allCases.map(\.title)).count == 6, "Each theme has its own name")
         UserDefaults.standard.removeObject(forKey: "theme")
+    }
+
+    /// Review 2, finding 1: what the clipboard brings always hangs, even
+    /// though it is written to the history first; only a file a folder
+    /// watcher reports that the history already knows (put back) does not.
+    func checkWhatHangs() throws {
+        let history = History(file: root.appendingPathComponent("what-hangs.sqlite"))
+        let hangs = Line(pasteboard: pasteboard, desktop: root, history: history)
+        let known = try adoptedNote("hangs-known", "known words")
+        history.record(known, text: "known words")
+        let fresh = try png("Hangs fresh.png")
+        try check(hangs.shouldHang(known, from: .clipboard), "A copy hangs, though the history already has it")
+        try check(!hangs.shouldHang(known, from: .screenshots) && !hangs.shouldHang(known, from: .folder),
+                  "A file put back is not a new screenshot or a new file in a watched folder")
+        try check(hangs.shouldHang(fresh, from: .screenshots) && hangs.shouldHang(fresh, from: .folder), "A new screenshot hangs")
     }
 
     func checkShelves() throws {

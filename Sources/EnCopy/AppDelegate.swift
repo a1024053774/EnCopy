@@ -84,9 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startWatcher()
         clipboardWatcher = ClipboardWatcher(history: line.history,
                                            onNew: { [weak self] url in
-                    guard let self, !self.line.isKnown(url) else { return }
-                    self.hangCapture(url)
-                },
+                                               guard let self, self.line.shouldHang(url, from: .clipboard) else { return }
+                                               self.hangCapture(url)
+                                           },
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
         clipboardWatcher.isOnLine = { [weak self] url in
             self?.line.items.contains { $0.url.standardizedFileURL == url.standardizedFileURL && !$0.falling } ?? false
@@ -231,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher = ScreenshotWatcher(
             // A file put back from Recently Cleared is not a new screenshot.
             onNew: { [weak self] url in
-                guard let self, !self.line.isKnown(url) else { return }
+                guard let self, self.line.shouldHang(url, from: .screenshots) else { return }
                 self.hangCapture(url, screenshot: true)
             },
             onChange: { [weak self] in self?.line.prune() })
@@ -243,7 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for folder in Self.extraFolders {
             let extra = ScreenshotWatcher(
                 folder: folder, anyImage: true,
-                onNew: { [weak self] url in self?.hangCapture(url) },
+                onNew: { [weak self] url in
+                    guard let self, self.line.shouldHang(url, from: .folder) else { return }
+                    self.hangCapture(url)
+                },
                 onChange: { [weak self] in self?.line.prune() })
             extra.start()
             folderWatchers.append(extra)

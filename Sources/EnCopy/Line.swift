@@ -585,6 +585,17 @@ final class Line: ObservableObject {
     /// screenshot just taken (review #7).
     func isKnown(_ url: URL) -> Bool { history.contains(url) }
 
+    /// Where a new file was reported from.
+    enum Arrival { case clipboard, screenshots, folder }
+
+    /// Whether a reported file hangs. The clipboard writes its copies to the
+    /// history before reporting them, so they always hang; a folder watcher
+    /// reporting a file the history already knows saw one put back from
+    /// Recently Cleared, which is not new (review #7, and review 2 #1).
+    func shouldHang(_ url: URL, from arrival: Arrival) -> Bool {
+        arrival == .clipboard || !isKnown(url)
+    }
+
     /// A batch from 「最近清掉」 goes back into the basket.
     func putBack(batch id: String) {
         clearing.putBack(id, history: history)
