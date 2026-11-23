@@ -268,6 +268,10 @@ final class Line: ObservableObject {
     /// places of pinned ones that just came down included.
     var pinnedLead: Int { items.prefix { $0.kept }.count }
 
+    /// How many of what is shown hang pinned left of the knot: none while
+    /// searching or on a shelf of the basket, where there is no knot.
+    var layoutPinned: Int { isSearching || shelf != .line ? 0 : shown.prefix { $0.kept }.count }
+
     /// The oldest photo that can fall: the first one past the knot.
     private var oldestLoose: Pegged? { items.first { !$0.falling && !$0.kept && !$0.held } }
 
@@ -528,6 +532,12 @@ final class Line: ObservableObject {
     /// What can be picked: what is shown, minus what is falling or held.
     private var pickable: [Pegged] { shown.filter { !$0.falling && !$0.held } }
 
+    /// What can be picked, left to right as it hangs, for the arrows.
+    private var pickableInPlace: [Pegged] {
+        let all = shown, pinned = layoutPinned
+        return (Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()).filter { !$0.falling && !$0.held }
+    }
+
     /// Summoned: the newest pickable is picked.
     func pickNewest() {
         pickedID = pickable.last?.id
@@ -535,8 +545,9 @@ final class Line: ObservableObject {
     }
 
     /// -1 is ←, +1 is →, as they hang on screen; stops at either end, no wrap.
+    /// ← is -1 and → is +1: the pick moves the way the arrow points on screen.
     func movePick(_ step: Int) {
-        let pool = pickable
+        let pool = pickableInPlace
         guard let current = picked, let i = pool.firstIndex(where: { $0.id == current.id }) else { return }
         pickedID = pool[min(pool.count - 1, max(0, i + step))].id
         followPick()
@@ -546,14 +557,14 @@ final class Line: ObservableObject {
 
     /// On a line that scrolls, the picked card is kept in view.
     private func followPick() {
-        guard Line.keepOnLine != nil, items.count > visibleCount, !isSearching,
-              let item = picked, let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-        let fromNewest = items.count - 1 - index
-        let anchored = Layout.anchorsPinned(pinnedLead, visible: visibleCount) ? pinnedLead : 0
+        let all = shown, pinned = layoutPinned
+        guard Line.keepOnLine != nil, all.count > visibleCount, !isSearching, shelf == .line,
+              let item = picked, let index = all.firstIndex(where: { $0.id == item.id }) else { return }
+        let anchored = Layout.anchorsPinned(pinned, visible: visibleCount) ? pinned : 0
         guard index >= anchored else { return }
-        let room = CGFloat(max(0, fromNewest - (visibleCount - 1 - anchored)))
-        let low = room * Layout.spacing
-        let high = CGFloat(fromNewest) * Layout.spacing
+        let place = CGFloat(Layout.slot(index, count: all.count, pinned: pinned))
+        let low = max(0, place - CGFloat(visibleCount - 1)) * Layout.spacing
+        let high = (place - CGFloat(anchored)) * Layout.spacing
         scroll = min(max(scroll, low), high)
     }
 

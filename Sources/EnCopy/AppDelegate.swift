@@ -140,7 +140,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Sideways on a trackpad, or the wheel of a mouse.
             let delta = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY)
                 ? event.scrollingDeltaX : event.scrollingDeltaY
-            self?.line.scroll(by: event.hasPreciseScrollingDeltas ? delta : delta * 12)
+            // Older items hang to the right: the line moves with the fingers.
+            self?.line.scroll(by: -(event.hasPreciseScrollingDeltas ? delta : delta * 12))
         }
         line.onFall = { [weak self] item in self?.fall(item) }
         line.onHold = { [weak self] id in self?.hold(id) }
