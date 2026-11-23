@@ -878,6 +878,15 @@ final class Line: ObservableObject {
             || NoteFolder.contains(item.url)
     }
 
+    /// What dragging this card out may do with its file (review #10). Only
+    /// EnCopy's own files on the line can be moved into a folder or dropped
+    /// on the Trash; a file from Finder, or a card from the basket, gives a
+    /// copy and the original stays where it is.
+    func dragOperations(for id: UUID) -> NSDragOperation {
+        if isInBasket(id) { return .copy }
+        return isInInbox(id) ? [.copy, .move, .delete] : .copy
+    }
+
     func isOnDesktop(_ id: UUID) -> Bool {
         guard let item = items.first(where: { $0.id == id }) else { return false }
         return item.url.deletingLastPathComponent().standardizedFileURL == desktop.standardizedFileURL

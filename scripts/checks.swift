@@ -371,6 +371,7 @@ struct CheckFailed: Error { let message: String }
         try checkTakeDownSides()
         try checkCodeScope()
         try checkPutBackKeepsBatch()
+        try checkDragOperations()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1295,6 +1296,31 @@ struct CheckFailed: Error { let message: String }
         let left = clearing.batches().first { $0.id == second.id }
         try check(some == [d] && left?.entries.count == 1 && left.map { fm.fileExists(atPath: clearing.folder.appendingPathComponent($0.id).appendingPathComponent($0.entries[0].path).path) } == true,
                   "What could not go back stays in the batch, file and all")
+    }
+
+    /// Review #10: dragging a card out never moves or trashes a file that is
+    /// not EnCopy's own, and a basket card only gives a copy.
+    func checkDragOperations() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("drag.sqlite"))
+        let drag = Line(pasteboard: pasteboard, desktop: root, history: history)
+        drag.maxItems = 2; drag.visibleCount = 8; drag.revealed = true
+        let outside = root.appendingPathComponent("Drag contract.pdf")
+        try Data("%PDF".utf8).write(to: outside)
+        let old = try adoptedNote("drag-old", "dragbasketword old note")
+        let note = try adoptedNote("drag-note", "drag note words")
+        for url in [old, outside, note] {
+            if isText(url) { history.record(url, text: try String(contentsOf: url, encoding: .utf8)) }
+            _ = drag.hang(url, quietly: true)
+        }
+        pump(0.7); drag.closeGaps()
+        func id(_ url: URL) -> UUID { drag.items.first { $0.url == url }!.id }
+        try check(drag.dragOperations(for: id(outside)) == .copy, "A file from Finder drags out as a copy only: the original stays")
+        try check(drag.dragOperations(for: id(note)) == [.copy, .move, .delete], "EnCopy's own note on the line can still be moved or trashed")
+        drag.query = "dragbasketword"
+        guard let card = drag.basketCards.first(where: { $0.url == old }) else { throw CheckFailed(message: "The old note is not in the basket") }
+        try check(drag.dragOperations(for: card.id) == .copy, "A basket card drags out as a copy: it stays in the history")
     }
 
     func checkShelves() throws {
