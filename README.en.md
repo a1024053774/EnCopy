@@ -8,21 +8,23 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 ## Download
 
-The latest version is [0.1.0](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+The latest version is [0.2.0](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. To paste directly with ⏎, turn on EnCopy in System Settings → Privacy & Security → Accessibility.
 
 ## Where it stands
 
-v1 is still in progress. The current version has its new name, icon and bundle id (`app.encopy.EnCopy`), and the interface keeps only Simplified Chinese and English. Press ⌥C and the line drops onto the screen the pointer is on and takes the keyboard; ← → picks an item, and ⏎ pastes it back into the front app. Pasting directly needs the Accessibility permission; without it, ⏎ only copies. ⌥C is the only global shortcut.
+v1 is still in progress. Since 0.1.0 it has its new name, icon and bundle id (`app.encopy.EnCopy`), and the interface keeps only Simplified Chinese and English. Press ⌥C and the line drops onto the screen the pointer is on and takes the keyboard; ← → picks an item, and ⏎ pastes it back into the front app. Pasting directly needs the Accessibility permission; without it, ⏎ only copies. ⌥C is the only global shortcut.
 
 Text, links and code you copy are recorded out of the box, and you can pause recording from the menu bar. When the line is full, the oldest text item falls into the basket instead of the Trash. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result. An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first; copying the same content again adds no new item, and the existing one goes back to the head as well. Everything is still there after you quit and reopen. Screenshots and copied images that EnCopy keeps also fall into the basket when the line is full, and the text read from them finds them.
 
-Done on `main` but not yet released (coming in the next version):
+New in 0.2.0:
 
 - One kind of paper per kind of thing: text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Pinned items hang left of the knot, and the newest hangs first right of the knot, older ones further right.
+- Six themes: Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one in Settings → The line. Each card shows the icon of the app it was copied from, which you can turn off.
+- When something new is copied, the line peeks out for 1.5 seconds; set it from 0.8 to 4 seconds in Settings → The line, or turn it off.
 - After ⌥C: Tab shows one kind (text, links, images, files), ↓ walks the basket by day (today, yesterday, this week, earlier), ⇧⏎ pastes words only, ⌘Y opens Quick Look, ⌘P pins. Double-clicking a card pastes it.
-- Files copied in Finder hang on the line too, and each card says which app it was copied from. Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes.
+- Files copied in Finder hang on the line too, and pictures and videos from Finder are found by their file names. Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes, and one thrown away early is not left in the Trash. Copying the same picture again brings the earlier one back to the head instead of saving it twice.
 - Retention: text is kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass 1 GB in total, the oldest shrink first. Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
 - Motion follows the design's table: papers swing by weight, ⌥C and sliding down past the top edge each have their own spring, and a breeze passes now and then; with Reduce motion on, only fades remain. A new icon, and a menu bar glyph of a rope with two pegs.
 
@@ -70,11 +72,11 @@ Runs seven checks in order: the upstream name does not appear in the code or scr
 ## Contributors
 
 - [LuckyE](https://github.com/a1024053774): maintainer. Sets the direction, makes the decisions, ships the releases.
-- Claude (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0 release and the product page, and the batch of v1 features listed above. Credited as `Co-Authored-By: Claude` in those commits.
+- [Claude](https://github.com/claude) (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0 and 0.2.0 releases and the product page, the batch of v1 features listed above, and the fixes from two rounds of review. Earlier commits credit it as `Co-Authored-By: Claude`; from 0.2.0 on, commits Claude writes have Claude as the author and the maintainer as co-author.
 - Devin (an AI by Cognition): pair programming on code and docs. Worked with the maintainer on the rename and new icon, ⌥C summoning the line and pasting back into the front app, text going into the basket, the separate development copy and stable signing. Credited as `Co-Authored-By: Devin` in those commits.
 - Alejandro Buján and the [upstream contributors](https://github.com/alejandrobujan/tendedero/graphs/contributors) of [Tendedero](https://github.com/alejandrobujan/tendedero): EnCopy is built on their code.
 
-GitHub's Contributors list counts commit authors only; co-authors are shown on each commit instead.
+GitHub's Contributors list counts commit authors only; co-authors are shown on each commit instead. So Claude's earlier co-authored commits are not counted there, and the ones it authors from 0.2.0 on are.
 
 ## License
 
