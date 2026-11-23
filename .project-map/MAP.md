@@ -53,5 +53,5 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | afbc551 |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 3babdea |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 3babdea |
-| [AGENTS.md](../AGENTS.md) | `scripts/**` | ed7392f |
+| [AGENTS.md](../AGENTS.md) | `scripts/**` | 60ed739 |
 | [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | afbc551 |
