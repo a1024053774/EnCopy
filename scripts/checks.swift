@@ -397,6 +397,7 @@ struct CheckFailed: Error { let message: String }
         try checkWhatHangs()
         try checkRecopyNeverShortens()
         try checkSearchStaysForQuickLook()
+        try checkCleanupConfirmFresh()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1742,6 +1743,26 @@ struct CheckFailed: Error { let message: String }
         bar.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification))
         try check(ended == 1, "Losing it to anything else ends the search, as before")
         bar.hide()
+    }
+
+    /// Review 2, finding 4: changing the filter cancels a confirmation, and
+    /// what is cleared is worked out from the filter as it is now.
+    func checkCleanupConfirmFresh() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("cleanup-confirm.sqlite"))
+        let tidy = Line(pasteboard: pasteboard, desktop: root, history: history)
+        tidy.clearing = Clearing(folder: root.appendingPathComponent("cleared-confirm", isDirectory: true))
+        let keep = try adoptedNote("confirm-keep", "words to keep")
+        let drop = try adoptedNote("confirm-drop", "tmpword to drop")
+        for url in [keep, drop] { history.record(url, text: try String(contentsOf: url, encoding: .utf8)) }
+        let model = CleanupModel(line: tidy)
+        model.filter = CleanupFilter()
+        model.confirming = true
+        model.filter.text = "tmpword"
+        try check(!model.confirming, "Changing the filter cancels the confirmation at once")
+        model.clear()
+        try check(history.contains(keep) && !history.contains(drop), "Clearing right away clears what the new filter picks, not the old list")
     }
 
     func checkShelves() throws {
