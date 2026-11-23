@@ -182,6 +182,12 @@ final class History {
         }
     }
 
+    /// Whether this file has a row.
+    func contains(_ url: URL) -> Bool {
+        guard let path = relativePath(url) else { return false }
+        return !((try? strings("SELECT path FROM item WHERE path = ?", bind: { bind($0, 1, path) })) ?? []).isEmpty
+    }
+
     func expired(at now: Date) -> [URL] {
         let paths = (try? strings("SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= ?", bind: { bind($0, 1, now.timeIntervalSince1970) })) ?? []
         return paths.map(absoluteURL)

@@ -83,7 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         restoreSettingsOnTermination()
         startWatcher()
         clipboardWatcher = ClipboardWatcher(history: line.history,
-                                           onNew: { [weak self] url in self?.hangCapture(url) },
+                                           onNew: { [weak self] url in
+                    guard let self, !self.line.isKnown(url) else { return }
+                    self.hangCapture(url)
+                },
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() }
         line.clearExpired()
@@ -218,7 +221,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startWatcher() {
         watcher?.stop()
         watcher = ScreenshotWatcher(
-            onNew: { [weak self] url in self?.hangCapture(url, screenshot: true) },
+            // A file put back from Recently Cleared is not a new screenshot.
+            onNew: { [weak self] url in
+                guard let self, !self.line.isKnown(url) else { return }
+                self.hangCapture(url, screenshot: true)
+            },
             onChange: { [weak self] in self?.line.prune() })
         watcher.start()
         folderWatchers.forEach { $0.stop() }
