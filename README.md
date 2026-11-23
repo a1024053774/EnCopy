@@ -10,7 +10,7 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 
 ## 下载
 
-最新版是 [0.2.0](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
+最新版是 [0.3.0](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
 
 这一版没有经过 Apple 公证，第一次打开会被 macOS 拦下：到「系统设置 → 隐私与安全性」，点「仍要打开」。想按 ⏎ 直接贴，在「系统设置 → 隐私与安全性 → 辅助功能」里打开 EnCopy。
 
@@ -113,7 +113,7 @@ scripts/check.sh
 ## 贡献者
 
 - [LuckyE](https://github.com/a1024053774)：维护者。定方向、拍板每个决定、发布版本。
-- [Claude](https://github.com/claude)（Anthropic 的 AI）：结对写代码和文档。和维护者一起做了 ⌥C 跟着指针换屏、用过的一件回到绳头、0.1.0 和 0.2.0 的发布和产品页，以及上面列的这批 v1 功能和两轮评审的修复。早先的提交里署名为 `Co-Authored-By: Claude`；从 0.2.0 起，Claude 写的提交以 Claude 为作者，维护者是共同作者。
+- [Claude](https://github.com/claude)（Anthropic 的 AI）：结对写代码和文档。和维护者一起做了 ⌥C 跟着指针换屏、用过的一件回到绳头、0.1.0、0.2.0 和 0.3.0 的发布和产品页、篮子列表，以及上面列的这批 v1 功能和两轮评审的修复。早先的提交里署名为 `Co-Authored-By: Claude`；从 0.2.0 起，Claude 写的提交以 Claude 为作者，维护者是共同作者。
 - Devin（Cognition 的 AI）：结对写代码和文档。和维护者一起做了改名换图标、⌥C 叫它来并贴回前台 App、文字进篮子、开发版独立、固定签名，这些提交里署名为 `Co-Authored-By: Devin`。
 - [Tendedero](https://github.com/alejandrobujan/tendedero) 的作者 Alejandro Buján 和[上游的贡献者们](https://github.com/alejandrobujan/tendedero/graphs/contributors)：EnCopy 在他们的代码上修改而来。
 

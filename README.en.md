@@ -10,7 +10,7 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 ## Download
 
-The latest version is [0.2.0](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+The latest version is [0.3.0](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. To paste directly with ⏎, turn on EnCopy in System Settings → Privacy & Security → Accessibility.
 
@@ -113,7 +113,7 @@ Runs seven checks in order: the upstream name does not appear in the code or scr
 ## Contributors
 
 - [LuckyE](https://github.com/a1024053774): maintainer. Sets the direction, makes the decisions, ships the releases.
-- [Claude](https://github.com/claude) (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0 and 0.2.0 releases and the product page, the batch of v1 features listed above, and the fixes from two rounds of review. Earlier commits credit it as `Co-Authored-By: Claude`; from 0.2.0 on, commits Claude writes have Claude as the author and the maintainer as co-author.
+- [Claude](https://github.com/claude) (an AI by Anthropic): pair programming on code and docs. Worked with the maintainer on ⌥C following the pointer to its screen, used items going back to the head of the line, the 0.1.0, 0.2.0 and 0.3.0 releases and the product page, the basket list, the batch of v1 features listed above, and the fixes from two rounds of review. Earlier commits credit it as `Co-Authored-By: Claude`; from 0.2.0 on, commits Claude writes have Claude as the author and the maintainer as co-author.
 - Devin (an AI by Cognition): pair programming on code and docs. Worked with the maintainer on the rename and new icon, ⌥C summoning the line and pasting back into the front app, text going into the basket, the separate development copy and stable signing. Credited as `Co-Authored-By: Devin` in those commits.
 - Alejandro Buján and the [upstream contributors](https://github.com/alejandrobujan/tendedero/graphs/contributors) of [Tendedero](https://github.com/alejandrobujan/tendedero): EnCopy is built on their code.
 
