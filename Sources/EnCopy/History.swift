@@ -171,6 +171,17 @@ final class History {
     }
 
     /// Items whose time ran out by `now`: their last use plus their ttl.
+    /// The app an item was copied from.
+    func setApp(_ url: URL, _ app: String?) {
+        guard let path = relativePath(url), let app else { return }
+        attempt("set app") {
+            try run("UPDATE item SET app = ? WHERE path = ?", bind: { stmt in
+                bind(stmt, 1, app)
+                bind(stmt, 2, path)
+            })
+        }
+    }
+
     /// How long an item stays, set afresh: nil keeps it.
     func setTTL(_ url: URL, _ ttl: TimeInterval?) {
         guard let path = relativePath(url) else { return }

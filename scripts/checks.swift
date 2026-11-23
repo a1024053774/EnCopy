@@ -383,6 +383,7 @@ struct CheckFailed: Error { let message: String }
         try checkMarkupOnlyPictures()
         try checkPutBackNotNew()
         try checkCleanupAtClearTime()
+        try checkCopiedImageApp()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1396,6 +1397,31 @@ struct CheckFailed: Error { let message: String }
                   "What came back to the line since the panel listed it is not cleared")
         try check(!history.contains(ghost) && tidy.cleanupCandidates(CleanupFilter()).isEmpty,
                   "A row whose file is already gone is cleared, not left behind")
+    }
+
+    /// Review #3: a copied picture keeps the app it came from and that app's
+    /// rule, so "clear after an hour" and cleanup by app reach pictures too.
+    func checkCopiedImageApp() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        ClipboardWatcher.imagesEnabled = true
+        ClipboardWatcher.appRules = ["com.example.chat": .hourly]
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved; ClipboardWatcher.appRules = [:] }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Copied app shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("image-app.sqlite"))
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.example.chat" },
+                                       onNew: { hung.append($0) }, onAgain: { _ in })
+        watcher.start()
+        defer { watcher.stop() }
+        let image = NSImage(contentsOf: try png("Chat picture.png", red: 0.4))!
+        pasteboard.clearContents(); pasteboard.writeObjects([image])
+        watcher.check()
+        pump(1.5)
+        guard let url = hung.first else { throw CheckFailed(message: "The copied picture did not hang") }
+        try check(history.app(of: url) == "com.example.chat", "A copied picture keeps the app it was copied from")
+        try check(history.ttl(of: url) == ClipboardWatcher.hourly, "A picture from an hourly app is cleared after an hour, like its text")
     }
 
     func checkShelves() throws {
