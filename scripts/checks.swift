@@ -392,6 +392,7 @@ struct CheckFailed: Error { let message: String }
         try checkQuickLookOrder()
         try checkShrinkOffMain()
         try checkPeekDuration()
+        try checkSourceAppBadge()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1636,6 +1637,34 @@ struct CheckFailed: Error { let message: String }
         UserDefaults.standard.set(7.0, forKey: "peekSeconds")
         try check(Line.peekSeconds == 1.5, "A time that is not one of the choices falls back to the default")
         UserDefaults.standard.removeObject(forKey: "peekSeconds")
+    }
+
+    /// T-042: every card can show the app it was copied from, as a small
+    /// icon; it is a setting, on unless turned off.
+    func checkSourceAppBadge() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        try check(Line.showsSourceApp, "Source app icons show out of the box")
+        let history = History(file: root.appendingPathComponent("badge.sqlite"))
+        let badge = Line(pasteboard: pasteboard, desktop: root, history: history)
+        badge.maxItems = 100; badge.visibleCount = 8
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Badge shots", isDirectory: true)
+        let note = try adoptedNote("badge-note", "badge words")
+        history.record(note, text: "badge words", app: "com.apple.finder")
+        let picture = try png("Badge picture.png", in: Inbox.folder)
+        history.recordImage(picture, text: nil); history.setApp(picture, "com.apple.Safari")
+        let unknown = try adoptedNote("badge-unknown", "no app")
+        history.record(unknown, text: "no app")
+        try check(badge.sourceApp(of: note) == "com.apple.finder" && badge.sourceApp(of: picture) == "com.apple.Safari",
+                  "A note and a picture each know the app they came from")
+        try check(badge.sourceApp(of: unknown) == nil, "Something with no app recorded shows no icon")
+        try check(AppIcons.icon(for: "com.apple.finder") != nil, "An installed app's icon is found")
+        try check(AppIcons.icon(for: "com.example.not-installed") == nil, "An app not on this Mac has no icon")
+        Line.showsSourceApp = false
+        try check(!Line.showsSourceApp, "The icons can be turned off")
+        Line.showsSourceApp = true
     }
 
     func checkShelves() throws {

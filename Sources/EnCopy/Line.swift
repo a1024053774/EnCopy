@@ -70,6 +70,23 @@ final class Line: ObservableObject {
     /// nil for as many as fit across the screen.
     nonisolated static let keepChoices = [25, 50, 100]
 
+    /// A small icon of the app each card came from (T-042). On unless turned off.
+    nonisolated static var showsSourceApp: Bool {
+        get { UserDefaults.standard.object(forKey: "showsSourceApp") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showsSourceApp") }
+    }
+
+    /// The app a card came from, as the history recorded it. Kept once found,
+    /// so a redraw does not ask the database.
+    func sourceApp(of url: URL) -> String? {
+        let key = url.standardizedFileURL.path
+        if let known = sourceApps[key] { return known }
+        guard let app = history.app(of: url) else { return nil }
+        sourceApps[key] = app
+        return app
+    }
+    private var sourceApps: [String: String] = [:]
+
     /// How long the line shows something new before tucking away (T-040).
     /// 2.5 seconds got in the way of work; 1.5 is the default now.
     nonisolated static let peekChoices: [Double] = [0.8, 1.5, 2.5, 4]
@@ -1633,5 +1650,25 @@ private struct FolderShape: Shape {
         p.addLine(to: CGPoint(x: 0, y: rect.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+/// Apps' icons by bundle id, looked up once each. Nil when the app is not on
+/// this Mac.
+@MainActor
+enum AppIcons {
+    private static var found: [String: NSImage] = [:]
+    private static var missing: Set<String> = []
+
+    static func icon(for bundleID: String) -> NSImage? {
+        if let icon = found[bundleID] { return icon }
+        if missing.contains(bundleID) { return nil }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            missing.insert(bundleID)
+            return nil
+        }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        found[bundleID] = icon
+        return icon
     }
 }

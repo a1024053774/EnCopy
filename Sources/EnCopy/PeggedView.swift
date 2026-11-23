@@ -146,6 +146,18 @@ struct PeggedView: View {
 
     private var card: some View {
         paper
+            // Where it was copied from, in the corner (T-042).
+            .overlay(alignment: .bottomTrailing) {
+                if Line.showsSourceApp, let app = line.sourceApp(of: item.url), let icon = AppIcons.icon(for: app) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 16, height: 16)
+                        .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay {
                 // Picked or selected: an amber edge, and the paper sinks and grows a little.
                 if selected {
