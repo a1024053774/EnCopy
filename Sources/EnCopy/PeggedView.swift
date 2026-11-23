@@ -68,56 +68,73 @@ struct PeggedView: View {
 
     /// A photo shows its picture. Copied text is drawn live as a sheet from
     /// Notes, so it follows the light or dark appearance.
-    @ViewBuilder private var content: some View {
+    private var cardSize: CGSize { Self.cardSize(for: item.thumb.size) }
+
+    /// Each kind on its own paper (T-034): notes draw their receipt, printout
+    /// or tag; a file is its folder; a picture sits in a polaroid. All fill
+    /// the same card size, so the line's layout and flights are unchanged.
+    @ViewBuilder private var paper: some View {
         if isText(item.url), let note = Note.cached(item.url) {
-            NoteSheet(note: note, width: photoSize.width, height: photoSize.height)
+            NoteSheet(note: note, width: cardSize.width, height: cardSize.height)
+        } else if isFile(item.url) {
+            Image(nsImage: item.thumb).resizable().interpolation(.high)
+                .frame(width: cardSize.width, height: cardSize.height)
         } else {
-            Image(nsImage: item.thumb)
-                .resizable()
-                .interpolation(.high)
+            VStack(spacing: 0) {
+                Image(nsImage: item.thumb)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: cardSize.width - 10, height: max(10, cardSize.height - 24))
+                    .clipped()
+                    .overlay {
+                        // A recording says so with a play button over its first frame.
+                        if item.isRecording {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 28, height: 28)
+                                .glassFrame(circle: true)
+                        }
+                    }
+                    .padding(.top, 5)
+                Spacer(minLength: 0)
+                Text(polaroidCaption)
+                    .font(.system(size: 7.5, design: .monospaced))
+                    .foregroundStyle(Color(red: 0.463, green: 0.412, blue: 0.353))
+                    .lineLimit(1)
+                    .padding(.bottom, 5)
+            }
+            .frame(width: cardSize.width, height: cardSize.height)
+            .background(Color(red: 0.992, green: 0.992, blue: 0.98))
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
         }
     }
 
+    /// Under a polaroid: when it was taken or copied.
+    private var polaroidCaption: String {
+        let date = (try? item.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+        let f = DateFormatter()
+        f.locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        f.dateStyle = .short
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = true
+        return f.string(from: date)
+    }
+
     private var card: some View {
-        content
-            .frame(width: photoSize.width, height: photoSize.height)
-            // Concentric corners: the photo's radius is the frame's minus the
-            // inset, the way macOS rounds nested shapes.
-            .clipShape(RoundedRectangle(cornerRadius: Frame.radius - Frame.inset, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Frame.radius - Frame.inset, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
-            )
+        paper
             .overlay {
-                // A recording says so with a play button over its first frame.
-                if item.isRecording {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 28, height: 28)
-                        .glassFrame(circle: true)
-                        .allowsHitTesting(false)
-                }
-            }
-            .padding(Frame.inset)
-            .glassFrame(cornerRadius: Frame.radius)
-            .overlay {
+                // Picked or selected: an amber edge, and the paper sinks and grows a little.
                 if selected {
-                    RoundedRectangle(cornerRadius: Frame.radius, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: 3)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .strokeBorder(Color(red: 0.827, green: 0.541, blue: 0.133), lineWidth: 2.5)
                         .allowsHitTesting(false)
                 }
             }
-            .overlay(alignment: .topTrailing) {
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, Color.accentColor)
-                        .font(.system(size: 17, weight: .semibold))
-                        .padding(5)
-                        .allowsHitTesting(false)
-                }
-            }
+            .scaleEffect(selected && line.picked?.id == item.id ? 1.06 : 1, anchor: .top)
+            .offset(y: selected && line.picked?.id == item.id ? 4 : 0)
+            .animation(.easeOut(duration: 0.11), value: selected)
             .shadow(color: .black.opacity(hovering ? 0.26 : 0.18), radius: hovering ? 14 : 10, y: hovering ? 8 : 5)
             // Holding presses the photo in slowly, so a long press feels like
             // it is building up to something.
@@ -222,19 +239,17 @@ extension View {
     }
 }
 
-/// A minimal aluminium clip: a brushed metal pill with a slot where it
-/// grips the line, and a soft shadow so it reads on any background.
+/// A wooden peg with a metal spring round its middle (T-034). What you
+/// pinned has a peg painted dark grey, so what stays reads at a glance.
 struct Clothespin: View {
-    /// Silver for what comes and goes, space grey for what you pinned, the
-    /// way Macs come in both: what stays on the line reads at a glance.
     var pinned = false
 
     private let metal = LinearGradient(
         stops: [
-            .init(color: Color(white: 0.70), location: 0),
-            .init(color: Color(white: 0.93), location: 0.35),
-            .init(color: Color(white: 0.82), location: 0.65),
-            .init(color: Color(white: 0.62), location: 1),
+            .init(color: Color(red: 0.725, green: 0.506, blue: 0.275), location: 0),
+            .init(color: Color(red: 0.914, green: 0.749, blue: 0.522), location: 0.46),
+            .init(color: Color(red: 0.784, green: 0.576, blue: 0.353), location: 0.54),
+            .init(color: Color(red: 0.612, green: 0.416, blue: 0.212), location: 1),
         ],
         startPoint: .leading, endPoint: .trailing)
 
@@ -248,9 +263,9 @@ struct Clothespin: View {
         startPoint: .leading, endPoint: .trailing)
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
             .fill(pinned ? spaceGrey : metal)
-            .frame(width: 9, height: 26)
+            .frame(width: 10, height: 28)
             .overlay(
                 RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                     .stroke(LinearGradient(colors: [Color.white.opacity(pinned ? 0.45 : 0.9), Color.black.opacity(0.18)],
@@ -258,11 +273,12 @@ struct Clothespin: View {
                             lineWidth: 0.6)
             )
             .overlay(alignment: .top) {
-                // The slot the line passes through.
+                // The spring that holds the two halves together.
                 Capsule()
-                    .fill(Color.black.opacity(pinned ? 0.55 : 0.32))
-                    .frame(width: 5, height: 1.4)
-                    .padding(.top, 8.5)
+                    .fill(LinearGradient(colors: [Color(white: 0.62), Color(white: 0.94), Color(white: 0.5)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 13, height: 3)
+                    .padding(.top, 10)
             }
             .shadow(color: .black.opacity(0.30), radius: 2, y: 1.5)
             .allowsHitTesting(false)
