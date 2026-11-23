@@ -50,6 +50,12 @@ final class ClipboardWatcher {
         set { UserDefaults.standard.set(newValue, forKey: linksKey) }
     }
 
+    /// Hang files copied in Finder, by their path. On unless turned off.
+    static var filesEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "clipboardFilesEnabled") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "clipboardFilesEnabled") }
+    }
+
     /// Nothing is recorded while paused.
     static var isPaused: Bool {
         get { UserDefaults.standard.bool(forKey: pausedKey) }
@@ -94,7 +100,7 @@ final class ClipboardWatcher {
     }
 
     /// The clipboard is watched while anything is on and recording is not paused.
-    static var isEnabled: Bool { !isPaused && (imagesEnabled || textEnabled || linksEnabled) }
+    static var isEnabled: Bool { !isPaused && (imagesEnabled || textEnabled || linksEnabled || filesEnabled) }
 
     /// Copies that carry a picture but are not one. Text from a spreadsheet
     /// or a document also comes as an image of itself. A file copied in
@@ -157,6 +163,11 @@ final class ClipboardWatcher {
         // An app you never want recorded leaves no trace, text or image.
         guard rule != .skip else { return }
         let ttl = rule == .hourly ? Self.hourly : nil
+        // Files copied in Finder hang where they are; nothing is copied.
+        if Self.filesEnabled, let files = copiedFiles(pb) {
+            for url in files { onNew(url) }
+            return
+        }
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
             // A verification code is only good for minutes: it stays ten.
             let ttl = Self.isCode(text, app: app) ? Self.codeLife : ttl
@@ -208,6 +219,20 @@ final class ClipboardWatcher {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.count <= Self.maxChars else { return nil }
         return (text, Self.richData(pb))
+    }
+
+    /// Files copied in Finder, at most twenty at a time: not EnCopy's own, not
+    /// private, not from another device.
+    private func copiedFiles(_ pb: NSPasteboard) -> [URL]? {
+        let refused: Set<NSPasteboard.PasteboardType> = [
+            selfCopyType, .init("org.nspasteboard.ConcealedType"), .init("org.nspasteboard.TransientType"),
+            .init("com.apple.is-remote-clipboard"),
+        ]
+        guard let items = pb.pasteboardItems, !items.isEmpty, !isSecureInput(),
+              items.allSatisfy({ refused.isDisjoint(with: $0.types) }),
+              let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else { return nil }
+        return Array(urls.prefix(20))
     }
 
     /// The styled version of what was copied, as RTF, when there is one.

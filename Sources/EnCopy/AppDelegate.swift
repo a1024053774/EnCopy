@@ -1037,6 +1037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             (L("Images"), L("Images you copy hang on the line too"), \.imagesEnabled),
             (L("Text"), L("Text you copy hangs on the line too"), \.textEnabled),
             (L("Links"), L("Links you copy hang on the line too"), \.linksEnabled),
+            (L("Files"), L("Files you copy in Finder hang on the line, where they are"), \.filesEnabled),
         ]
         for (title, tip, key) in kinds {
             let item = ClosureMenuItem(title) { [weak self] in

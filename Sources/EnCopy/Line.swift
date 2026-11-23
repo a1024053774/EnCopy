@@ -1,5 +1,7 @@
 import AppKit
 import AVFoundation
+import SwiftUI
+import UniformTypeIdentifiers
 import Combine
 import os
 
@@ -114,19 +116,20 @@ final class Line: ObservableObject {
     }
 
     /// What kind of thing an item is, for Tab while summoned.
-    enum Kind { case text, link, image }
+    enum Kind { case text, link, image, file }
 
     /// Tab while summoned narrows the line to one kind; nil shows them all.
     @Published var kindFilter: Kind?
 
     func kind(of url: URL) -> Kind {
+        if isFile(url) { return .file }
         guard isText(url) else { return .image }
         return Note.cached(url)?.link != nil ? .link : .text
     }
 
     /// Tab: all → text → links → images → all; ⇧Tab goes the other way.
     func cycleKind(_ step: Int) {
-        let order: [Kind?] = [nil, .text, .link, .image]
+        let order: [Kind?] = [nil, .text, .link, .image, .file]
         let i = order.firstIndex(of: kindFilter) ?? 0
         kindFilter = order[(i + step + order.count) % order.count]
     }
@@ -538,9 +541,12 @@ final class Line: ObservableObject {
                 return entry
             }
             // Each photo has its own image and file representation. Apps
-            // that accept several files can paste the whole selection.
-            if !isRecording(url), let png = pngData(url) { entry.setData(png, forType: .png) }
+            // that accept several files can paste the whole selection. A
+            // file is only its path. Marked as EnCopy's own, so the watcher
+            // does not hang it again.
+            if !isRecording(url), !isFile(url), let png = pngData(url) { entry.setData(png, forType: .png) }
             entry.setString(url.absoluteString, forType: .fileURL)
+            entry.setData(Data(), forType: selfCopyType)
             return entry
         }
         let pb = pasteboard
@@ -1195,6 +1201,16 @@ func isRecording(_ url: URL) -> Bool {
     ["mov", "mp4"].contains(url.pathExtension.lowercased())
 }
 
+/// A file copied in Finder, hung where it is (T-029): anything that is not a
+/// note, a recording or a picture, folders included.
+func isFile(_ url: URL) -> Bool {
+    guard !isText(url), !isRecording(url) else { return false }
+    if url.hasDirectoryPath { return true }
+    var isDir: ObjCBool = false
+    if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue { return true }
+    return !(UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false)
+}
+
 /// Copied text: plain text is saved as .txt, styled text as .rtf.
 func isText(_ url: URL) -> Bool {
     ["txt", "rtf", "md"].contains(url.pathExtension.lowercased()) && NoteFolder.contains(url)
@@ -1261,6 +1277,7 @@ let selfCopyType = NSPasteboard.PasteboardType("app.encopy.SelfCopy")
 func makeThumbnail(_ url: URL, maxPixels: Int = Int(320 * Layout.size.scale), full: Bool = false) -> NSImage? {
     if isRecording(url) { return firstFrame(url, maxPixels: maxPixels) }
     if isText(url) { return MainActor.assumeIsolated { noteCard(url, maxPixels: maxPixels, full: full) } }
+    if isFile(url) { return MainActor.assumeIsolated { fileCard(url, maxPixels: maxPixels) } }
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let options: [CFString: Any] = [
         kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -1278,4 +1295,62 @@ private func firstFrame(_ url: URL, maxPixels: Int) -> NSImage? {
     generator.maximumSize = CGSize(width: maxPixels, height: maxPixels)
     guard let cg = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
     return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+}
+
+/// A copied file on the line: a manila folder with the file's icon, its name
+/// and the folder it is in. Drawn like a note, in points times the scale.
+@MainActor func fileCard(_ url: URL, maxPixels: Int) -> NSImage? {
+    let width = Layout.cardWidth - 14
+    let renderer = ImageRenderer(content: FileCard(url: url, width: width))
+    renderer.proposedSize = ProposedViewSize(width: width, height: width * 0.78)
+    renderer.scale = max(1, CGFloat(maxPixels) / width)
+    guard let cg = renderer.cgImage else { return nil }
+    return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+}
+
+private struct FileCard: View {
+    let url: URL
+    let width: CGFloat
+
+    var body: some View {
+        let u = width / 136
+        VStack(alignment: .leading, spacing: 4 * u) {
+            HStack(alignment: .top, spacing: 6 * u) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                    .resizable().frame(width: 30 * u, height: 30 * u)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 10.5 * u, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.25, green: 0.2, blue: 0.1))
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+            Text(url.deletingLastPathComponent().lastPathComponent)
+                .font(.system(size: 8 * u, design: .monospaced))
+                .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.19))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9 * u)
+        .padding(.top, 14 * u)
+        .padding(.bottom, 7 * u)
+        .frame(width: width, height: width * 0.78, alignment: .topLeading)
+        .background(FolderShape(u: u).fill(Color(red: 0.93, green: 0.835, blue: 0.608)))
+    }
+}
+
+/// A folder: a tab on the top left, the rest one sheet.
+private struct FolderShape: Shape {
+    let u: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: 8 * u))
+        p.addLine(to: CGPoint(x: 7 * u, y: 8 * u))
+        p.addLine(to: CGPoint(x: 11 * u, y: 0))
+        p.addLine(to: CGPoint(x: 46 * u, y: 0))
+        p.addLine(to: CGPoint(x: 50 * u, y: 8 * u))
+        p.addLine(to: CGPoint(x: rect.maxX, y: 8 * u))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: 0, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
 }

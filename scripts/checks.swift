@@ -357,6 +357,7 @@ struct CheckFailed: Error { let message: String }
         try checkSourceApp()
         try checkAppRules()
         try checkVerificationCodes()
+        try checkFiles()
         try checkDataFolder()
         try checkHistory()
     }
@@ -675,9 +676,11 @@ struct CheckFailed: Error { let message: String }
         _ = bar.takes(tabKey([]), composing: false)
         try check(shownURLs() == [photo], "Tab again shows only images")
         _ = bar.takes(tabKey([]), composing: false)
+        try check(tab.kindFilter == .file && shownURLs().isEmpty, "Tab again shows only files (none here)")
+        _ = bar.takes(tabKey([]), composing: false)
         try check(tab.kindFilter == nil && shownURLs().count == 3, "Tab again shows everything")
         _ = bar.takes(tabKey([.shift]), composing: false)
-        try check(tab.kindFilter == .image, "⇧Tab goes back to images")
+        try check(tab.kindFilter == .file, "⇧Tab goes back to files")
         tab.kindFilter = .text
         tab.query = "tab"
         try check(shownURLs() == [text], "A search inside the text filter shows only matching text")
@@ -800,6 +803,43 @@ struct CheckFailed: Error { let message: String }
         try check(codes.liveCount == 1 && !FileManager.default.fileExists(atPath: hung[0].path)
                   && history.search(SearchIndex.words("663104"), onLine: [], limit: 5).basketTotal == 0,
                   "Eleven minutes later the code is gone from the line, the disk and the index")
+    }
+
+    /// T-029: a file copied in Finder hangs where it is, as a folder card,
+    /// found by its name; taking it down leaves the file alone.
+    func checkFiles() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let docs = root.appendingPathComponent("Quarterly Docs", isDirectory: true)
+        try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        let pdf = docs.appendingPathComponent("Budget plan 2027.pdf")
+        try Data("%PDF-1.4 fixture".utf8).write(to: pdf)
+        try check(isFile(pdf) && isFile(docs) && !isFile(try png("Not a file.png")), "A PDF and a folder are files; a picture is not")
+        let history = History(file: root.appendingPathComponent("files.sqlite"))
+        let files = Line(pasteboard: pasteboard, desktop: root, history: history)
+        files.maxItems = 100; files.visibleCount = 8; files.revealed = true
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                       onNew: { _ = files.hang($0, quietly: true) }, onAgain: { _ in })
+        pasteboard.clearContents(); pasteboard.writeObjects([pdf as NSURL]); watcher.check()
+        try check(files.items.map(\.url) == [pdf] && files.kind(of: pdf) == .file, "A file copied in Finder hangs as itself, a file")
+        try check(files.items.first.map { $0.thumb.size.width > 0 } == true, "It has a card to show")
+        files.search.update([pdf])
+        for _ in 0..<40 where !files.search.matches(pdf, SearchIndex.words("budget")) { pump(0.05) }
+        try check(files.search.matches(pdf, SearchIndex.words("budget 2027")) && files.search.matches(pdf, SearchIndex.words("quarterly")),
+                  "It is found by its name and by its folder")
+        files.copy(files.items[0].id)
+        try check(copiedURLs == [pdf] && pasteboard.data(forType: .png) == nil, "Copying it back gives the file, with no picture")
+        watcher.check()
+        try check(files.items.count == 1, "Copying it from the line does not hang it a second time")
+        files.kindFilter = .file
+        try check(files.shown.map(\.url) == [pdf], "Tab's file filter shows it")
+        files.kindFilter = nil
+        files.discard(files.items[0].id)
+        try check(FileManager.default.fileExists(atPath: pdf.path), "Taking it down leaves the file where it is")
+        ClipboardWatcher.filesEnabled = false
+        pasteboard.clearContents(); pasteboard.writeObjects([docs as NSURL]); watcher.check()
+        try check(files.liveCount == 0, "With files turned off, a copied file does not hang")
+        ClipboardWatcher.filesEnabled = true
     }
 
     func checkDesktopCopies() throws {

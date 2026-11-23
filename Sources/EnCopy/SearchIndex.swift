@@ -62,6 +62,8 @@ final class SearchIndex {
 
     /// The text in a picture, or in a recording's first frame.
     nonisolated private static func recognize(_ url: URL) -> String? {
+        // A file is found by its name and its folder, not by reading a picture of it.
+        if isFile(url) { return url.lastPathComponent + " " + url.deletingLastPathComponent().lastPathComponent }
         guard let image = makeThumbnail(url, maxPixels: 2400)?
             .cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let request = VNRecognizeTextRequest()
