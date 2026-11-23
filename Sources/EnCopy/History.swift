@@ -55,6 +55,11 @@ final class History {
                 fatalError("EnCopy cannot set up its history: \(message)")
             }
         }
+        // Histories from before the source app was kept get the column now.
+        let columns = (try? strings("SELECT name FROM pragma_table_info('item')", bind: { _ in })) ?? []
+        if !columns.contains("app") {
+            attempt("add app column") { try run("ALTER TABLE item ADD COLUMN app TEXT", bind: { _ in }) }
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -99,7 +104,7 @@ final class History {
 
     /// Keeps a note's row current: adds it, or reads its words again after an edit.
     /// `text` is what was copied, when it is known.
-    func record(_ url: URL, text: String? = nil) {
+    func record(_ url: URL, text: String? = nil, app: String? = nil) {
         guard isText(url), let path = relativePath(url),
               FileManager.default.fileExists(atPath: url.path),
               let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
@@ -112,13 +117,15 @@ final class History {
         attempt("record") {
             try transaction {
                 try run("""
-                    INSERT INTO item (path, hash, modified, used) VALUES (?, ?, ?, ?)
-                    ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified
+                    INSERT INTO item (path, hash, modified, used, app) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified,
+                        app = COALESCE(excluded.app, item.app)
                     """, bind: { stmt in
                         bind(stmt, 1, path)
                         bind(stmt, 2, hash)
                         bind(stmt, 3, modified)
                         bind(stmt, 4, used)
+                        if let app { bind(stmt, 5, app) } else { sqlite3_bind_null(stmt, 5) }
                     })
                 let id = try scalar("SELECT id FROM item WHERE path = ?", bind: { bind($0, 1, path) })
                 guard id != 0 else { throw Failure(message: "the note's row is missing after the upsert") }
@@ -129,6 +136,19 @@ final class History {
                 })
             }
         }
+    }
+
+    /// The bundle id of the app a note was copied from, when it was known.
+    func app(of url: URL) -> String? {
+        guard let path = relativePath(url) else { return nil }
+        return (try? strings("SELECT app FROM item WHERE path = ? AND app IS NOT NULL", bind: { bind($0, 1, path) }))?.first
+    }
+
+    /// That app's name as Finder shows it, or nil when it is not on this Mac.
+    static func appName(_ bundleID: String) -> String? {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let name = FileManager.default.displayName(atPath: url.path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
     /// Used: pasted or copied out of EnCopy, or the same words copied again.

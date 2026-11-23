@@ -1,4 +1,5 @@
 import AppKit
+import SQLite3
 import Carbon
 import SwiftUI
 import UniformTypeIdentifiers
@@ -353,6 +354,7 @@ struct CheckFailed: Error { let message: String }
         try checkDoubleClickPastes()
         try checkPickKeys()
         try checkTabFilter()
+        try checkSourceApp()
         try checkDataFolder()
         try checkHistory()
     }
@@ -678,6 +680,48 @@ struct CheckFailed: Error { let message: String }
         tab.query = "tab"
         try check(shownURLs() == [text], "A search inside the text filter shows only matching text")
         try check(!bar.takes(tabKey([]), composing: true), "Tab while composing stays with the input method")
+    }
+
+    /// T-026: the app in front when something is copied is kept with it and
+    /// shown on the card beside the time.
+    func checkSourceApp() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        let file = root.appendingPathComponent("source.sqlite")
+        let history = History(file: file)
+        var front: String? = "com.apple.finder"
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { front },
+                                       onNew: { hung.append($0) }, onAgain: { _ in })
+        func copy(_ text: String) { pasteboard.clearContents(); pasteboard.setString(text, forType: .string); watcher.check() }
+        copy("source app words one")
+        try check(hung.count == 1 && history.app(of: hung[0]) == "com.apple.finder", "The front app is kept with what was copied")
+        let finder = History.appName("com.apple.finder")
+        Note.sourceOf = { url in history.app(of: url).flatMap(History.appName) }
+        let note = Note.reload(hung[0])
+        try check(finder != nil && note?.app == finder && note?.caption.hasSuffix(" · \(finder!)") == true,
+                  "The card shows the app's name after the time")
+        let reopened = History(file: file)
+        try check(reopened.app(of: hung[0]) == "com.apple.finder", "The source app is still there after reopening")
+        front = "local.encopy.no-such-app"
+        copy("source app words two")
+        let unknown = Note.reload(hung[1])
+        try check(unknown?.app == nil && unknown?.caption == unknown?.dateText, "An app not on this Mac shows only the time")
+        front = nil
+        copy("source app words three")
+        try check(history.app(of: hung[2]) == nil, "No front app keeps no app")
+
+        // A history written before the column existed is upgraded on open.
+        let old = root.appendingPathComponent("old-schema.sqlite")
+        var db: OpaquePointer?
+        sqlite3_open(old.path, &db)
+        sqlite3_exec(db, "CREATE TABLE item (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, hash BLOB NOT NULL, modified REAL NOT NULL, used REAL NOT NULL)", nil, nil, nil)
+        sqlite3_close(db)
+        let upgraded = History(file: old)
+        let watcher2 = ClipboardWatcher(pasteboard: pasteboard, history: upgraded, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                        onNew: { hung.append($0) }, onAgain: { _ in })
+        pasteboard.clearContents(); pasteboard.setString("old schema words", forType: .string); watcher2.check()
+        try check(upgraded.app(of: hung.last!) == "com.apple.finder", "A history from before gets the app column and keeps the app")
+        Note.sourceOf = nil
     }
 
     func checkDesktopCopies() throws {

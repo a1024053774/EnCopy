@@ -61,6 +61,11 @@ struct Note {
     var link: URL? = nil
     /// Written in Markdown: shown formatted, copied back as written.
     var markdown = false
+    /// The app it was copied from, by name, when it is known.
+    var app: String? = nil
+
+    /// Where a note's source app comes from; the line points it at its history.
+    @MainActor static var sourceOf: ((URL) -> String?)?
 
     /// Read once per thumbnail and kept, so drawing the line never touches
     /// the disk.
@@ -82,6 +87,7 @@ struct Note {
     @MainActor @discardableResult static func reload(_ url: URL) -> Note? {
         guard var note = read(url) else { return nil }
         note.modified = modificationDate(url)
+        note.app = sourceOf?(url)
         cache[url] = note
         return note
     }
@@ -181,6 +187,9 @@ struct Note {
         f.doesRelativeDateFormatting = true
         return f.string(from: date)
     }
+
+    /// The date, and the app it came from when that is known.
+    var caption: String { app.map { "\(dateText) · \($0)" } ?? dateText }
 }
 
 /// A sheet from Notes: the yellow band, the perforation it was torn along,
@@ -266,7 +275,7 @@ struct NoteSheet: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Text(note.dateText)
+                Text(note.caption)
                     .font(.system(size: 7.5 * u))
                     .foregroundStyle(Color(red: 0.557, green: 0.557, blue: 0.576))
                     .lineLimit(1)
@@ -370,7 +379,7 @@ struct HeldNote: View {
                 }
                 .padding(.top, 5 * u)
                 .padding(.horizontal, 9 * u)
-                Text(note.dateText)
+                Text(note.caption)
                     .font(.system(size: 7.5 * u))
                     .foregroundStyle(Color(red: 0.557, green: 0.557, blue: 0.576))
                     .lineLimit(1)

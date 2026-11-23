@@ -217,6 +217,8 @@ final class Line: ObservableObject {
         self.pasteboard = pasteboard
         self.desktop = desktop
         self.history = history ?? History()
+        let kept = self.history
+        Note.sourceOf = { [weak kept] url in kept?.app(of: url).flatMap(History.appName) }
         restore()
         search.onChange = { [weak self] in
             self?.recomputeSearch()
