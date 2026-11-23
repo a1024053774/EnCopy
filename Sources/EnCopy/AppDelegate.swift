@@ -90,6 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar = SearchBar(line: line)
         searchBar.onMove = { [weak self] in self?.line.movePick($0) }
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
+        searchBar.onTab = { [weak self] step in
+            self?.line.cycleKind(step)
+            self?.line.pickNewest()
+        }
         searchBar.onPlainReturn = { [weak self] in self?.paster.pastePicked(plain: true) }
         searchBar.onPin = { [weak self] in if let id = self?.line.picked?.id { self?.line.togglePin(id) } }
         searchBar.onQuickLook = { [weak self] in if let id = self?.line.picked?.id { self?.line.quickLook(id) } }
@@ -623,6 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// click elsewhere it stays as it is.
     private func endSearch(tuckAway: Bool) {
         line.query = ""
+        line.kindFilter = nil
         line.clearPick()
         searchBar.hide()
         if tuckAway, isRevealed { setRevealed(false) }

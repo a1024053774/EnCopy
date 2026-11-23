@@ -352,6 +352,7 @@ struct CheckFailed: Error { let message: String }
         try checkUsedMovesToHead()
         try checkDoubleClickPastes()
         try checkPickKeys()
+        try checkTabFilter()
         try checkDataFolder()
         try checkHistory()
     }
@@ -641,6 +642,42 @@ struct CheckFailed: Error { let message: String }
         try check(keys.items.first { $0.id == id }?.kept == true && keys.items.first?.id == id, "⌘P pins the pick left of the knot")
         keys.togglePin(id)
         try check(keys.items.first { $0.id == id }?.kept == false, "⌘P again unpins it")
+    }
+
+    /// T-025: Tab while summoned narrows the line to one kind and cycles
+    /// all → text → links → images → all; ⇧Tab goes back.
+    func checkTabFilter() throws {
+        let tab = line()
+        let text = try adoptedNote("tabtext", "plain words for tab")
+        let src = root.appendingPathComponent("note-src/link-\(UUID().uuidString.prefix(8)).txt")
+        try "https://example.com/tab".write(to: src, atomically: true, encoding: .utf8)
+        guard let link = NoteFolder.adopt(src) else { throw CheckFailed(message: "Could not adopt the link fixture") }
+        let photo = try png("Tab photo.png")
+        for url in [text, link, photo] { _ = tab.hang(url, quietly: true) }
+        let kinds = [tab.kind(of: text), tab.kind(of: link), tab.kind(of: photo)]
+        try check(kinds == [.text, .link, .image], "Text, a link and a photo are told apart")
+        let bar = SearchBar(line: tab)
+        bar.onTab = { tab.cycleKind($0); tab.pickNewest() }
+        func tabKey(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: UInt16(kVK_Tab))!
+        }
+        func shownURLs() -> [URL] { tab.shown.filter { !$0.falling }.map(\.url) }
+        tab.pickNewest()
+        try check(shownURLs() == [text, link, photo], "With no filter everything shows")
+        try check(bar.takes(tabKey([]), composing: false) && shownURLs() == [text] && tab.picked?.url == text, "Tab shows only text and picks it")
+        _ = bar.takes(tabKey([]), composing: false)
+        try check(shownURLs() == [link] && tab.picked?.url == link, "Tab again shows only links")
+        _ = bar.takes(tabKey([]), composing: false)
+        try check(shownURLs() == [photo], "Tab again shows only images")
+        _ = bar.takes(tabKey([]), composing: false)
+        try check(tab.kindFilter == nil && shownURLs().count == 3, "Tab again shows everything")
+        _ = bar.takes(tabKey([.shift]), composing: false)
+        try check(tab.kindFilter == .image, "⇧Tab goes back to images")
+        tab.kindFilter = .text
+        tab.query = "tab"
+        try check(shownURLs() == [text], "A search inside the text filter shows only matching text")
+        try check(!bar.takes(tabKey([]), composing: true), "Tab while composing stays with the input method")
     }
 
     func checkDesktopCopies() throws {

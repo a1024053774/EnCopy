@@ -22,6 +22,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onPin: () -> Void = {}
     /// ⌘Y: Quick Look on the pick.
     var onQuickLook: () -> Void = {}
+    /// Tab and ⇧Tab: the next or previous kind of item.
+    var onTab: (Int) -> Void = { _ in }
 
     var isShown: Bool { panel.isVisible }
 
@@ -66,6 +68,7 @@ final class SearchBar: NSObject, NSWindowDelegate {
         if mods == .shift, event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) { onPlainReturn(); return true }
         if mods == .command, key == "p" { onPin(); return true }
         if mods == .command, key == "y" { onQuickLook(); return true }
+        if event.keyCode == UInt16(kVK_Tab), mods.isEmpty || mods == .shift { onTab(mods == .shift ? -1 : 1); return true }
         guard mods.isEmpty else { return false }
         switch event.keyCode {
         case UInt16(kVK_LeftArrow): onMove(-1)
@@ -125,6 +128,13 @@ private struct SearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
+            if let kind = line.kindFilter {
+                Text(kind == .text ? L("Text") : kind == .link ? L("Links") : L("Images"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                    .fixedSize()
+            }
             TextField(L("Search all history"), text: $line.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))

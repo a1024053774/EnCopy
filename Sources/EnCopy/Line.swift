@@ -108,8 +108,27 @@ final class Line: ObservableObject {
     /// hang to the left of the line's own.
     var shown: [Pegged] {
         let words = SearchIndex.words(query)
-        guard !words.isEmpty else { return items }
-        return basketCards + items.filter { $0.falling || matches($0) }
+        let fits = { (p: Pegged) in self.kindFilter == nil || self.kind(of: p.url) == self.kindFilter }
+        guard !words.isEmpty else { return kindFilter == nil ? items : items.filter { $0.falling || fits($0) } }
+        return basketCards.filter(fits) + items.filter { $0.falling || (matches($0) && fits($0)) }
+    }
+
+    /// What kind of thing an item is, for Tab while summoned.
+    enum Kind { case text, link, image }
+
+    /// Tab while summoned narrows the line to one kind; nil shows them all.
+    @Published var kindFilter: Kind?
+
+    func kind(of url: URL) -> Kind {
+        guard isText(url) else { return .image }
+        return Note.cached(url)?.link != nil ? .link : .text
+    }
+
+    /// Tab: all → text → links → images → all; ⇧Tab goes the other way.
+    func cycleKind(_ step: Int) {
+        let order: [Kind?] = [nil, .text, .link, .image]
+        let i = order.firstIndex(of: kindFilter) ?? 0
+        kindFilter = order[(i + step + order.count) % order.count]
     }
 
     /// Whether a line item matches the words being searched: a note through
