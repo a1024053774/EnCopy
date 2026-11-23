@@ -145,6 +145,8 @@ enum Retention {
     struct Result: Equatable {
         var expired: [URL] = []
         var shrunk: [URL] = []
+        /// Originals already gone, deleted in Finder say: only their rows are left.
+        var missing: [URL] = []
     }
 
     /// What the rules would do now, without doing it (the settings show this).
@@ -158,6 +160,10 @@ enum Retention {
             if isText(item.url) || (image && item.shrunk) {
                 if age > textDays * 86400 { result.expired.append(item.url) }
             } else if image {
+                guard FileManager.default.fileExists(atPath: item.url.path) else {
+                    result.missing.append(item.url)
+                    continue
+                }
                 if age > originalDays * 86400 {
                     result.shrunk.append(item.url)
                 } else {
@@ -178,13 +184,20 @@ enum Retention {
     static func run(history: History, clearing: Clearing, onLine: Set<String>, isKeptImage: (URL) -> Bool,
                     now: Date = Date(), cap: Int64 = defaultCap, inBackground: Bool = false) -> Result {
         let result = plan(history: history, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
+        for url in result.missing { history.remove(url) }
         if inBackground {
             // Decoding and encoding big pictures stays off the main thread
-            // (review #15); the history is marked back on it.
+            // (review #15). Writing back happens on the main thread, and only
+            // for what is still there: a picture cleared meanwhile stays
+            // cleared (review 2 #5).
             let urls = result.shrunk
             DispatchQueue.global(qos: .utility).async {
-                let done = urls.filter { smaller($0) }
-                DispatchQueue.main.async { for url in done { history.markShrunk(url) } }
+                let made = urls.compactMap { url in smallerData(url).map { (url, $0) } }
+                DispatchQueue.main.async {
+                    for (url, data) in made where history.contains(url) && FileManager.default.fileExists(atPath: url.path) {
+                        if write(data, to: url) { history.markShrunk(url) }
+                    }
+                }
             }
         } else {
             for url in result.shrunk { shrink(url, history: history) }
@@ -202,19 +215,29 @@ enum Retention {
     /// Writes the thumbnail over the original, in the original's own format
     /// (a JPEG stays a JPEG). Safe off the main thread. Returns whether it did.
     nonisolated static func smaller(_ url: URL) -> Bool {
+        guard let data = smallerData(url) else { return false }
+        return write(data, to: url)
+    }
+
+    /// The thumbnail, encoded in the original's own format. Safe off the main thread.
+    nonisolated static func smallerData(_ url: URL) -> Data? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let type = CGImageSourceGetType(source),
               let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                   kCGImageSourceThumbnailMaxPixelSize: thumbnailPixels,
-              ] as CFDictionary) else { return false }
+              ] as CFDictionary) else { return nil }
         let data = NSMutableData()
-        guard let output = CGImageDestinationCreateWithData(data, type, 1, nil) else { return false }
+        guard let output = CGImageDestinationCreateWithData(data, type, 1, nil) else { return nil }
         CGImageDestinationAddImage(output, thumb, nil)
-        guard CGImageDestinationFinalize(output) else { return false }
+        guard CGImageDestinationFinalize(output) else { return nil }
+        return data as Data
+    }
+
+    nonisolated static func write(_ data: Data, to url: URL) -> Bool {
         do {
-            try (data as Data).write(to: url, options: .atomic)
+            try data.write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             return true
         } catch {
