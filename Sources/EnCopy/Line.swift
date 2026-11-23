@@ -219,6 +219,7 @@ final class Line: ObservableObject {
         self.history = history ?? History()
         let kept = self.history
         Note.sourceOf = { [weak kept] url in kept?.app(of: url).flatMap(History.appName) }
+        Note.clearsOf = { [weak kept] url in kept?.ttl(of: url).map(Line.clearsText) }
         restore()
         search.onChange = { [weak self] in
             self?.recomputeSearch()
@@ -354,6 +355,24 @@ final class Line: ObservableObject {
                 self?.discard(item.id, quietly: n > 0, step: step)
             }
         }
+    }
+
+    /// What a card says about clearing by itself.
+    nonisolated static func clearsText(_ ttl: TimeInterval) -> String {
+        L("Clears in an hour")
+    }
+
+    /// Copies under an app's hourly rule whose time ran out since their last
+    /// use: deleted outright, not to the Trash and not kept anywhere.
+    func clearExpired(now: Date = Date()) {
+        let gone = history.expired(at: now)
+        guard !gone.isEmpty else { return }
+        for url in gone {
+            if let item = items.first(where: { $0.url == url && !$0.falling }) { drop(item.id, quietly: true) }
+            history.remove(url)
+            try? FileManager.default.removeItem(at: url)
+        }
+        if isSearching { recomputeSearch() }
     }
 
     /// Photos whose file was deleted or moved away fall off by themselves.

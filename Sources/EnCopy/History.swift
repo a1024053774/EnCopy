@@ -60,6 +60,10 @@ final class History {
         if !columns.contains("app") {
             attempt("add app column") { try run("ALTER TABLE item ADD COLUMN app TEXT", bind: { _ in }) }
         }
+        // Seconds an item stays after its last use, for the hourly app rule and verification codes.
+        if !columns.contains("ttl") {
+            attempt("add ttl column") { try run("ALTER TABLE item ADD COLUMN ttl REAL", bind: { _ in }) }
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -104,7 +108,7 @@ final class History {
 
     /// Keeps a note's row current: adds it, or reads its words again after an edit.
     /// `text` is what was copied, when it is known.
-    func record(_ url: URL, text: String? = nil, app: String? = nil) {
+    func record(_ url: URL, text: String? = nil, app: String? = nil, ttl: TimeInterval? = nil) {
         guard isText(url), let path = relativePath(url),
               FileManager.default.fileExists(atPath: url.path),
               let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
@@ -117,15 +121,16 @@ final class History {
         attempt("record") {
             try transaction {
                 try run("""
-                    INSERT INTO item (path, hash, modified, used, app) VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified,
-                        app = COALESCE(excluded.app, item.app)
+                        app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
                     """, bind: { stmt in
                         bind(stmt, 1, path)
                         bind(stmt, 2, hash)
                         bind(stmt, 3, modified)
                         bind(stmt, 4, used)
                         if let app { bind(stmt, 5, app) } else { sqlite3_bind_null(stmt, 5) }
+                        if let ttl { bind(stmt, 6, ttl) } else { sqlite3_bind_null(stmt, 6) }
                     })
                 let id = try scalar("SELECT id FROM item WHERE path = ?", bind: { bind($0, 1, path) })
                 guard id != 0 else { throw Failure(message: "the note's row is missing after the upsert") }
@@ -142,6 +147,18 @@ final class History {
     func app(of url: URL) -> String? {
         guard let path = relativePath(url) else { return nil }
         return (try? strings("SELECT app FROM item WHERE path = ? AND app IS NOT NULL", bind: { bind($0, 1, path) }))?.first
+    }
+
+    /// How long an item stays after its last use, when it does not stay for good.
+    func ttl(of url: URL) -> TimeInterval? {
+        guard let path = relativePath(url), let row = try? strings("SELECT ttl FROM item WHERE path = ? AND ttl IS NOT NULL", bind: { bind($0, 1, path) }).first else { return nil }
+        return TimeInterval(row)
+    }
+
+    /// Items whose time ran out by `now`: their last use plus their ttl.
+    func expired(at now: Date) -> [URL] {
+        let paths = (try? strings("SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= ?", bind: { bind($0, 1, now.timeIntervalSince1970) })) ?? []
+        return paths.map(absoluteURL)
     }
 
     /// That app's name as Finder shows it, or nil when it is not on this Mac.
