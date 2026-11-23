@@ -388,6 +388,7 @@ struct CheckFailed: Error { let message: String }
         try checkRecopyComesBack()
         try checkShelfSearch()
         try checkKindBeforeLimit()
+        try checkKeptImageSearchOnLine()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1548,6 +1549,27 @@ struct CheckFailed: Error { let message: String }
         kinds.kindFilter = .image
         try check(kinds.shown.map(\.url) == [picture] && kinds.matchCount == 1, "A search under Images finds the picture and counts one")
         kinds.query = ""; kinds.kindFilter = nil
+    }
+
+    /// Review #8: a picture of EnCopy's own on the line is found by the words
+    /// the history keeps for it, read from its original even after shrinking.
+    func checkKeptImageSearchOnLine() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Search shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("search-kept.sqlite"))
+        let finder = Line(pasteboard: pasteboard, desktop: root, history: history)
+        finder.maxItems = 100; finder.visibleCount = 8; finder.revealed = true
+        let shot = try png("Shrunk shot.png", in: Inbox.folder)
+        history.recordImage(shot, text: "zebrawordfromoriginal")
+        history.setShrunk(shot, true)
+        _ = finder.hang(shot, quietly: true)
+        pump(1.0)
+        finder.query = "zebrawordfromoriginal"
+        try check(finder.shown.contains { $0.url == shot }, "A shrunk picture back on the line is found by its original's words")
+        finder.query = ""
     }
 
     func checkShelves() throws {
