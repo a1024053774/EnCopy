@@ -95,7 +95,7 @@ struct LineView: View {
     private var shown: [Pegged] { line.shown }
     private var pinned: Int { line.layoutPinned }
     private var scroll: CGFloat { line.narrowsLine ? 0 : line.scroll }
-    private var narrowed: Bool { line.narrowsLine || (line.kindFilter != nil && !line.basketOpen) || line.shelf != .line }
+    private var narrowed: Bool { line.narrowsLine || (line.kindFilter != nil && !line.basketOpen) }
 
     var body: some View {
         GeometryReader { geo in
@@ -147,8 +147,9 @@ struct LineView: View {
                 }
 
                 // The basket hangs off the end of the line, under the papers,
-                // on a short cord from the rope (T-044).
-                if line.revealed, line.basketCount > 0, line.cameBySummon {
+                // on a short cord from the rope (T-044); for ⌥C and for the
+                // pointer, not for a peek (T-046).
+                if line.revealed, line.basketCount > 0, line.handleShown {
                     let hx = width - 92, top = Layout.ropeY(x: width - 92, width: width, sagScale: line.sagScale)
                     let hy = Layout.panelHeight - 22
                     Path { p in

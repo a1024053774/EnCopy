@@ -87,11 +87,11 @@ enum Motion {
     // MARK: The rope, the pegs, leaving (T-038)
 
     /// The line comes down with its rope pulled almost straight; it springs
-    /// into its sag. ⌥C settles quickly; sliding down bounces twice; ↓ once.
+    /// into its sag. ⌥C settles quickly; sliding down bounces twice; ↓ opening the basket list once.
     static let ropeTaut: CGFloat = 0.15
     static let ropeSummon = Animation.spring(response: 0.3, dampingFraction: 0.85)
     static let ropeSlide = Animation.spring(response: 0.5, dampingFraction: 0.5)
-    static let shelfTaut: CGFloat = 0.6
+    static let basketTaut: CGFloat = 0.6
 
     /// The line sliding to keep the pick in view: the papers swing the other
     /// way this far. Arrow presses closer together than `keyRepeat` are a

@@ -372,12 +372,10 @@ final class History {
     /// trigram index as quoted phrases; shorter ones — two Chinese
     /// characters are common — are substring checks on the folded text.
     ///
-    /// `used` narrows the basket to a shelf's span of last use (kept items
-    /// only, as the shelf shows them); `accept` sees each basket match with
-    /// its indexed words. Both apply before `limit`, so the basket and its
-    /// total are of what passes, however far back it is (review 2, #7).
+    /// `accept` sees each basket match with its indexed words. It applies
+    /// before `limit`, so the basket and its total are of what passes,
+    /// however far back it is (review 2, #7).
     func search(_ words: [String], onLine: [URL], limit: Int,
-                used: (from: Date?, to: Date?)? = nil,
                 accept: ((URL, String) -> Bool)? = nil) -> Found {
         var found = Found()
         let long = words.filter { $0.unicodeScalars.count >= 3 }
@@ -395,12 +393,6 @@ final class History {
             conditions.append("instr(item_text.text, ?) > 0")
             params.append(word)
         }
-        var times: [Double] = []
-        if let used {
-            conditions.append("item.ttl IS NULL")
-            if let from = used.from { conditions.append("item.used >= ?"); times.append(from.timeIntervalSince1970) }
-            if let to = used.to { conditions.append("item.used < ?"); times.append(to.timeIntervalSince1970) }
-        }
         let sql = """
             SELECT item.path, item_text.text FROM item_text JOIN item ON item.id = item_text.rowid
             WHERE \(conditions.joined(separator: " AND "))
@@ -414,7 +406,6 @@ final class History {
             let stmt = try prepare(sql)
             defer { sqlite3_finalize(stmt) }
             for (index, param) in params.enumerated() { bind(stmt, Int32(index + 1), param) }
-            for (index, time) in times.enumerated() { bind(stmt, Int32(params.count + index + 1), time) }
             var step = sqlite3_step(stmt)
             while step == SQLITE_ROW {
                 if let cString = sqlite3_column_text(stmt, 0) {
