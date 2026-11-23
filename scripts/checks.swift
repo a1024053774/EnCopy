@@ -56,11 +56,19 @@ struct CheckFailed: Error { let message: String }
 
     func show(_ line: Line) {
         window?.orderOut(nil)
-        window = NSWindow(contentRect: NSRect(x: 80, y: 200, width: 1100, height: 250),
+        // ENCOPY_CHECKS_SCREEN names a screen (a virtual one, say) to open
+        // on, out of the way of whoever is using the Mac meanwhile.
+        let named = ProcessInfo.processInfo.environment["ENCOPY_CHECKS_SCREEN"]
+        let screen = named.flatMap { name in NSScreen.screens.first { $0.localizedName == name } }
+        let origin = screen.map { NSPoint(x: $0.frame.minX + 80, y: $0.frame.minY + 200) } ?? NSPoint(x: 80, y: 200)
+        window = NSWindow(contentRect: NSRect(origin: origin, size: NSSize(width: 1100, height: 250)),
                           styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.title = "EnCopy checks — synthetic images"
         window.contentView = NSHostingView(rootView: LineView(line: line))
+        // Placed again once built: the frame given at creation does not
+        // always carry over to another screen.
+        window.setFrameOrigin(origin)
         window.orderFront(nil)
         pump(0.7)
     }
