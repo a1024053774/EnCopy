@@ -403,6 +403,7 @@ struct CheckFailed: Error { let message: String }
         try checkPutBackKeepsApp()
         try checkQuickLookWithFallingPin()
         try checkGroupDragOperations()
+        try checkEditOnlyOwnPictures()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1363,7 +1364,9 @@ struct CheckFailed: Error { let message: String }
         let pdf = root.appendingPathComponent("Markup contract.pdf"); try Data("%PDF".utf8).write(to: pdf)
         let app = root.appendingPathComponent("Markup Tool.app", isDirectory: true)
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
-        let picture = try png("Markup picture.png")
+        // A screenshot left on the Desktop: since review 2, only EnCopy's own
+        // pictures and those are marked up in place.
+        let picture = try png("Markup picture.png", in: root.appendingPathComponent("desktop", isDirectory: true))
         let note = try adoptedNote("markup-note", "markup note words")
         for url in [pdf, app, picture, note] { _ = edit.hang(url, quietly: true) }
         func id(_ url: URL) -> UUID { edit.items.first { $0.url == url }!.id }
@@ -1857,6 +1860,31 @@ struct CheckFailed: Error { let message: String }
         func id(_ url: URL) -> UUID { drag.items.first { $0.url == url }!.id }
         try check(drag.dragOperations(for: [id(note), id(outside)]) == .copy, "A group with a Finder file in it drags out as a copy")
         try check(drag.dragOperations(for: [id(note), id(other)]) == [.copy, .move, .delete], "A group of EnCopy's own can still be moved")
+    }
+
+    /// Review 2, on #1: only EnCopy's own pictures and recordings, and
+    /// screenshots left on the Desktop, are marked up or trimmed in place;
+    /// a picture or video from anywhere else opens in Quick Look.
+    func checkEditOnlyOwnPictures() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Edit own shots", isDirectory: true)
+        let edit = line()
+        let own = try png("Own shot.png", in: Inbox.folder)
+        let desktop = root.appendingPathComponent("desktop", isDirectory: true)
+        let onDesktop = try png("Desktop shot.png", in: desktop)
+        let elsewhere = try png("Someone's photo.png")
+        let movie = root.appendingPathComponent("Holiday.mov"); try Data([0, 0, 0, 20]).write(to: movie)
+        let ownMovie = Inbox.folder.appendingPathComponent("Recording.mov"); try Data([0, 0, 0, 20]).write(to: ownMovie)
+        for url in [own, onDesktop, elsewhere, movie, ownMovie] { _ = edit.hang(url, quietly: true) }
+        func id(_ url: URL) -> UUID { edit.items.first { $0.url == url }!.id }
+        try check(edit.editAction(for: id(own)) == .markup && edit.editAction(for: id(onDesktop)) == .markup,
+                  "EnCopy's own screenshot and one left on the Desktop are marked up")
+        try check(edit.editAction(for: id(elsewhere)) == .quickLook, "A picture from Finder is shown, never rewritten")
+        try check(edit.editAction(for: id(movie)) == .quickLook, "A video from Finder is shown, never trimmed in place")
+        try check(edit.editAction(for: id(ownMovie)) == .trim, "EnCopy's own recording is still trimmed")
     }
 
     func checkShelves() throws {
