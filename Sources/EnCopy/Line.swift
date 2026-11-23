@@ -487,6 +487,8 @@ final class Line: ObservableObject {
         let gone = history.expired(at: now)
         guard !gone.isEmpty else { return }
         for url in gone {
+            // Pinned stays, and never expires (review #5).
+            if items.contains(where: { $0.url == url && $0.kept }) { history.setTTL(url, nil); continue }
             if let item = items.first(where: { $0.url == url && !$0.falling }) { drop(item.id, quietly: true) }
             history.remove(url)
             try? FileManager.default.removeItem(at: url)
@@ -1251,6 +1253,8 @@ final class Line: ObservableObject {
                                kept: item.kept, byHand: item.byHand, pinChange: true)
         item.kept = true
         items.insert(item, at: keptCount)
+        // Pinned never expires, a code or an hourly app's copy included.
+        history.setTTL(item.url, nil)
         save()
         remember(before, in: step)
         if !quietly { play("Tink", volume: 0.35) }

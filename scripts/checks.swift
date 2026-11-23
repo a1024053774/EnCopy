@@ -369,6 +369,7 @@ struct CheckFailed: Error { let message: String }
         try checkDataFolder()
         try checkHistory()
         try checkTakeDownSides()
+        try checkCodeScope()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1223,6 +1224,39 @@ struct CheckFailed: Error { let message: String }
         try check(sides.neighbours(of: id(0), toTheLeft: false).isEmpty, "Nothing is right of the oldest")
         sides.togglePin(id(0))
         try check(sides.neighbours(of: id(4), toTheLeft: true).isEmpty, "A pinned one, left of the knot, is never taken down")
+    }
+
+    /// Review #5: only a number next to a word that means a code is a code;
+    /// a pinned code never expires; copied again as plain text, it stays.
+    func checkCodeScope() throws {
+        let notCodes = ["status code 500 on port 8080", "fix(T-1024): clean up dead code", "Postal code: 10001",
+                        "HTTP error code 4040", "The zip code is 94110", "v2024 code freeze"]
+        try check(notCodes.allSatisfy { !ClipboardWatcher.isCode($0, app: nil) }, "Status, postal and error codes, ticket numbers are not codes")
+        let codes = ["您的验证码是 553201，5 分钟内有效", "Your code: 90817264", "Use code 4821 to sign in",
+                     "123456 is your verification code", "【银行】动态码 883920，请勿泄露"]
+        try check(codes.allSatisfy { ClipboardWatcher.isCode($0, app: nil) }, "Real codes are still recognised")
+
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("code-scope.sqlite"))
+        let pin = Line(pasteboard: pasteboard, desktop: root, history: history)
+        pin.maxItems = 100; pin.visibleCount = 8; pin.revealed = true
+        var app = "com.apple.MobileSMS"
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { app },
+                                       onNew: { hung.append($0); _ = pin.hang($0, quietly: true) }, onAgain: { _ in })
+        let start = Date()
+        pasteboard.clearContents(); pasteboard.setString("771204", forType: .string); watcher.check()
+        pasteboard.clearContents(); pasteboard.setString("880315", forType: .string); watcher.check()
+        try check(hung.count == 2 && history.ttl(of: hung[1]) == ClipboardWatcher.codeLife, "Both are codes from Messages")
+        pin.togglePin(pin.items.first { $0.url == hung[0] }!.id)
+        app = "com.apple.Safari"
+        pasteboard.clearContents(); pasteboard.setString("880315", forType: .string); watcher.check()
+        try check(history.ttl(of: hung[1]) == nil, "Copied again as plain text elsewhere, the number no longer expires")
+        pin.clearExpired(now: start.addingTimeInterval(700))
+        try check(FileManager.default.fileExists(atPath: hung[0].path) && pin.items.contains { $0.url == hung[0] && $0.kept },
+                  "A pinned code is not cleared when its ten minutes are up")
+        try check(FileManager.default.fileExists(atPath: hung[1].path), "The other one, no longer a code, stays too")
     }
 
     func checkShelves() throws {

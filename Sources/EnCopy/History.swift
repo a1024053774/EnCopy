@@ -171,6 +171,17 @@ final class History {
     }
 
     /// Items whose time ran out by `now`: their last use plus their ttl.
+    /// How long an item stays, set afresh: nil keeps it.
+    func setTTL(_ url: URL, _ ttl: TimeInterval?) {
+        guard let path = relativePath(url) else { return }
+        attempt("set ttl") {
+            try run("UPDATE item SET ttl = ? WHERE path = ?", bind: { stmt in
+                if let ttl { bind(stmt, 1, ttl) } else { sqlite3_bind_null(stmt, 1) }
+                bind(stmt, 2, path)
+            })
+        }
+    }
+
     func expired(at now: Date) -> [URL] {
         let paths = (try? strings("SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= ?", bind: { bind($0, 1, now.timeIntervalSince1970) })) ?? []
         return paths.map(absoluteURL)
