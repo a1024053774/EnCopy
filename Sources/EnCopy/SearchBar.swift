@@ -16,6 +16,12 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onEnd: () -> Void = {}
     /// ← and → while summoned: -1 left, +1 right along the pick.
     var onMove: (Int) -> Void = { _ in }
+    /// ⇧⏎: paste the pick as plain text.
+    var onPlainReturn: () -> Void = {}
+    /// ⌘P: pin or unpin the pick.
+    var onPin: () -> Void = {}
+    /// ⌘Y: Quick Look on the pick.
+    var onQuickLook: () -> Void = {}
 
     var isShown: Bool { panel.isVisible }
 
@@ -49,12 +55,18 @@ final class SearchBar: NSObject, NSWindowDelegate {
         if line.query.isEmpty { onEnd() } else { line.query = "" }
     }
 
-    /// ← and → pick along the line instead of moving the caret. Returns
+    /// ← and → pick along the line instead of moving the caret; ⇧⏎, ⌘P and
+    /// ⌘Y act on the pick. Returns
     /// whether the key was taken. Not while an input method is composing:
     /// the arrows then belong to it.
     func takes(_ event: NSEvent, composing: Bool) -> Bool {
         guard event.type == .keyDown, !composing else { return false }
-        guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else { return false }
+        let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if mods == .shift, event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) { onPlainReturn(); return true }
+        if mods == .command, key == "p" { onPin(); return true }
+        if mods == .command, key == "y" { onQuickLook(); return true }
+        guard mods.isEmpty else { return false }
         switch event.keyCode {
         case UInt16(kVK_LeftArrow): onMove(-1)
         case UInt16(kVK_RightArrow): onMove(1)

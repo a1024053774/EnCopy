@@ -41,14 +41,15 @@ final class Paster {
         self.send = send
     }
 
-    func pastePicked() {
+    /// `plain` is ⇧⏎: the words without their styling.
+    func pastePicked(plain: Bool = false) {
         guard let item = line.picked else { return }
-        paste(item.id)
+        paste(item.id, plain: plain)
     }
 
     /// One item into the front app: ⏎ on the pick, or a double click on a card.
-    func paste(_ id: UUID) {
-        line.copy(id)
+    func paste(_ id: UUID, plain: Bool = false) {
+        line.copy(id, plain: plain)
         tuckAway()
         if isTrusted() {
             send(.commandV)

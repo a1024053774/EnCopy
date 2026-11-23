@@ -351,6 +351,7 @@ struct CheckFailed: Error { let message: String }
         try checkSummon()
         try checkUsedMovesToHead()
         try checkDoubleClickPastes()
+        try checkPickKeys()
         try checkDataFolder()
         try checkHistory()
     }
@@ -595,6 +596,51 @@ struct CheckFailed: Error { let message: String }
                   "A double click puts that card's words on the clipboard first")
         try check(dbl.items.filter { !$0.falling }.last?.url == notes[0],
                   "The double-clicked card goes to the head, like any paste")
+    }
+
+    /// T-024: while summoned, ⇧⏎ pastes the pick as plain text, ⌘P pins or
+    /// unpins it, ⌘Y asks for Quick Look; other modified keys stay with the field.
+    func checkPickKeys() throws {
+        let keys = line()
+        let dir = root.appendingPathComponent("note-src", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let rtfSrc = dir.appendingPathComponent("styled-\(UUID().uuidString.prefix(8)).rtf")
+        let styled = NSAttributedString(string: "bold plain words", attributes: [.font: NSFont.boldSystemFont(ofSize: 14)])
+        try styled.data(from: NSRange(location: 0, length: styled.length), documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]).write(to: rtfSrc)
+        guard let rtf = NoteFolder.adopt(rtfSrc) else { throw CheckFailed(message: "Could not adopt the RTF fixture") }
+        let other = try adoptedNote("other", "other words")
+        _ = keys.hang(rtf, quietly: true)
+        _ = keys.hang(other, quietly: true)
+        var sent = 0
+        let paster = Paster(line: keys, isTrusted: { true }, send: { _ in sent += 1 })
+        keys.pickNewest(); keys.movePick(-1)
+        paster.pastePicked()
+        try check(pasteboard.data(forType: .rtf) != nil, "⏎ on a styled note keeps its styling")
+        keys.pickNewest()
+        try check(keys.picked?.url == rtf, "The pasted styled note is now the newest, picked first")
+        paster.pastePicked(plain: true)
+        try check(sent == 2 && pasteboard.data(forType: .rtf) == nil && pasteboard.string(forType: .string) == "bold plain words",
+                  "⇧⏎ pastes the same words with no styling")
+
+        let bar = SearchBar(line: keys)
+        var plain = 0, pins = 0, looks = 0, moves = 0
+        bar.onPlainReturn = { plain += 1 }; bar.onPin = { pins += 1 }; bar.onQuickLook = { looks += 1 }; bar.onMove = { _ in moves += 1 }
+        func key(_ code: Int, _ chars: String, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code))!
+        }
+        try check(bar.takes(key(kVK_Return, "\r", [.shift]), composing: false) && plain == 1, "⇧⏎ is taken as a plain paste")
+        try check(bar.takes(key(kVK_ANSI_P, "p", [.command]), composing: false) && pins == 1, "⌘P is taken as pin")
+        try check(bar.takes(key(kVK_ANSI_Y, "y", [.command]), composing: false) && looks == 1, "⌘Y is taken as Quick Look")
+        try check(!bar.takes(key(kVK_Return, "\r", []), composing: false) && plain == 1, "A plain ⏎ still goes to the field's submit")
+        try check(!bar.takes(key(kVK_ANSI_P, "p", [.command]), composing: true) && pins == 1, "⌘P while composing stays with the input method")
+        try check(!bar.takes(key(kVK_ANSI_A, "a", [.command]), composing: false), "⌘A stays with the field")
+
+        let id = keys.items.first { $0.url == other }!.id
+        keys.togglePin(id)
+        try check(keys.items.first { $0.id == id }?.kept == true && keys.items.first?.id == id, "⌘P pins the pick left of the knot")
+        keys.togglePin(id)
+        try check(keys.items.first { $0.id == id }?.kept == false, "⌘P again unpins it")
     }
 
     func checkDesktopCopies() throws {
