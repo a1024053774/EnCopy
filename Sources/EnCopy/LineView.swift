@@ -94,8 +94,8 @@ struct LineView: View {
     /// line: no knot, no pinned end, no scroll.
     private var shown: [Pegged] { line.shown }
     private var pinned: Int { line.layoutPinned }
-    private var scroll: CGFloat { line.isSearching ? 0 : line.scroll }
-    private var narrowed: Bool { line.isSearching || line.kindFilter != nil || line.shelf != .line }
+    private var scroll: CGFloat { line.narrowsLine ? 0 : line.scroll }
+    private var narrowed: Bool { line.narrowsLine || (line.kindFilter != nil && !line.basketOpen) || line.shelf != .line }
 
     var body: some View {
         GeometryReader { geo in
@@ -144,6 +144,24 @@ struct LineView: View {
                         // instead of falling: it is still on the line.
                         .transition(.opacity.combined(with: .offset(y: -40)))
                         .position(x: x, y: ropeY - Layout.pinAbove + (Layout.panelHeight - ropeY) / 2)
+                }
+
+                // The basket hangs off the end of the line, under the papers,
+                // on a short cord from the rope (T-044).
+                if line.revealed, line.basketCount > 0, line.cameBySummon {
+                    let hx = width - 92, top = Layout.ropeY(x: width - 92, width: width, sagScale: line.sagScale)
+                    let hy = Layout.panelHeight - 22
+                    Path { p in
+                        p.move(to: CGPoint(x: hx, y: top))
+                        p.addLine(to: CGPoint(x: hx, y: hy - 14))
+                    }
+                    .stroke(line.theme == .neon ? Color.cyan.opacity(0.6) : Color(red: 0.55, green: 0.42, blue: 0.24).opacity(0.7),
+                            style: StrokeStyle(lineWidth: 1.2, dash: [3, 2]))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    BasketHandle(line: line)
+                        .position(x: hx, y: hy)
+                        .transition(.opacity)
                 }
             }
             // A search, Tab or ↓ leaving papers out closes the gaps without a

@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import SwiftUI
 
 /// Searching the line: a small glass field under it. What does not match
@@ -28,6 +29,10 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onShelf: (Int) -> Void = { _ in }
 
     var isShown: Bool { panel.isVisible }
+    /// The line's frame it was last shown under, to grow from when the
+    /// basket list opens.
+    private var lineFrame = NSRect.zero
+    private var watching: AnyCancellable?
 
     init(line: Line) {
         self.line = line
@@ -40,14 +45,28 @@ final class SearchBar: NSObject, NSWindowDelegate {
             onSubmit: { [weak self] in self?.onReturn() },
             onEscape: { [weak self] in self?.escape() }))
         panel.onEscape = { [weak self] in self?.escape() }
+        // The basket list opens under the field: the panel grows down.
+        watching = line.$basketOpen.dropFirst().removeDuplicates().sink { [weak self] open in
+            DispatchQueue.main.async { self?.place(open: open) }
+        }
     }
 
     /// Under the line, in the middle of its screen.
     func show(below lineFrame: NSRect) {
-        let size = NSSize(width: 340, height: 40)
+        self.lineFrame = lineFrame
+        place(open: line.basketOpen)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Just the field, or the field with the basket list under it, its top
+    /// edge staying just under the line.
+    private func place(open: Bool) {
+        guard lineFrame != .zero else { return }
+        let screenHeight = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+        let size = open ? NSSize(width: 600, height: min(480, max(240, screenHeight - lineFrame.height - 60)))
+                        : NSSize(width: 340, height: 40)
         panel.setFrame(NSRect(x: lineFrame.midX - size.width / 2, y: lineFrame.minY - size.height - 6,
                               width: size.width, height: size.height), display: true)
-        panel.makeKeyAndOrderFront(nil)
     }
 
     func hide() {
@@ -138,6 +157,19 @@ private struct SearchField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        VStack(spacing: 0) {
+            field.frame(height: 36)
+            if line.basketOpen {
+                Divider()
+                BasketListView(line: line)
+            }
+        }
+        .glassFrame(cornerRadius: 14, capsule: !line.basketOpen)
+        .padding(2)
+        .onAppear { focused = true }
+    }
+
+    private var field: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
@@ -156,13 +188,13 @@ private struct SearchField: View {
                     .background(Capsule().fill(Color.accentColor.opacity(0.18)))
                     .fixedSize()
             }
-            TextField(L("Search all history"), text: $line.query)
+            TextField(line.basketOpen ? L("Type to narrow the basket") : L("Search all history"), text: $line.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($focused)
                 .onSubmit(onSubmit)
                 .onExitCommand(perform: onEscape)
-            if line.isSearching {
+            if line.isSearching && !line.basketOpen {
                 Text(String(format: L("%d of %d"), line.matchCount, line.totalCount))
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -171,8 +203,5 @@ private struct SearchField: View {
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassFrame(capsule: true)
-        .padding(2)
-        .onAppear { focused = true }
     }
 }

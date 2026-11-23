@@ -176,3 +176,14 @@
 "Minimal" = "极简";
 "Neon" = "霓虹";
 "Journal" = "手账";
+
+/* Basket list (T-044) */
+"Basket %d" = "篮子 %d 件";
+"Open the basket" = "打开篮子";
+"%d items" = "%d 件";
+"Nothing in the basket matches" = "篮子里没有对上的";
+"The basket is empty" = "篮子是空的";
+"Type to narrow the basket" = "打字筛选篮子";
+"Link" = "链接";
+"Image" = "图片";
+"File" = "文件";
