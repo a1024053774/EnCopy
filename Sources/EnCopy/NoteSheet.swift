@@ -206,12 +206,21 @@ struct NoteSheet: View {
     let width: CGFloat
     /// The height the line gives it; none to take what the text needs.
     var height: CGFloat? = nil
+    /// Paper draws the receipt, printout and tag; any other theme its own card (T-041).
+    var theme: Theme = .paper
 
     /// Everything is drawn for a card 136 points wide and scaled from there.
     private var u: CGFloat { width / 136 }
     private let dark = false
-    private let ink = Color(red: 0.165, green: 0.145, blue: 0.122)
-    private let sub = Color(red: 0.463, green: 0.412, blue: 0.353)
+    private var card: Theme.Card { note.link != nil ? .link : note.code ? .code : .text }
+    private var ink: Color { theme == .paper ? Color(red: 0.165, green: 0.145, blue: 0.122) : theme.ink(card) }
+    private var sub: Color { theme == .paper ? Color(red: 0.463, green: 0.412, blue: 0.353) : theme.soft(card) }
+
+    /// Paper's own type, or the theme's.
+    private func font(_ size: CGFloat, bold: Bool = false, mono: Bool = true, code: Bool = false) -> Font {
+        theme == .paper ? .system(size: size * u, weight: bold ? .bold : .regular, design: mono ? .monospaced : .default)
+                        : theme.font(size * u, bold: bold, code: code)
+    }
 
     enum Paper { case receipt, tractor, tag }
     private var paper: Paper { Self.paper(of: note) }
@@ -221,21 +230,21 @@ struct NoteSheet: View {
         VStack(alignment: .leading, spacing: 3 * u) {
             if note.link != nil {
                 Text(note.title)
-                    .font(.system(size: 11.5 * u, weight: .bold))
-                    .foregroundStyle(Color(red: 0.25, green: 0.19, blue: 0.11))
+                    .font(font(11.5, bold: true, mono: false))
+                    .foregroundStyle(theme == .paper ? Color(red: 0.25, green: 0.19, blue: 0.11) : ink)
                     .lineLimit(1)
                     .padding(.trailing, 14 * u)
                     .layoutPriority(1)
                 if !note.linkPath.isEmpty {
                     Text(note.linkPath)
-                        .font(.system(size: 8.5 * u, design: .monospaced))
-                        .foregroundStyle(Color(red: 0.36, green: 0.29, blue: 0.2))
+                        .font(font(8.5, code: true))
+                        .foregroundStyle(theme == .paper ? Color(red: 0.36, green: 0.29, blue: 0.2) : sub)
                         .lineLimit(2)
                         .truncationMode(.middle)
                 }
             } else if note.code {
                 Text(note.body)
-                    .font(.system(size: 7.5 * u, design: .monospaced))
+                    .font(font(7.5, code: true))
                     .foregroundStyle(ink)
                     .lineSpacing(5.5 * u)
                     // Code keeps its lines whole and is cut at the edge.
@@ -246,7 +255,7 @@ struct NoteSheet: View {
             } else {
                 if !note.title.isEmpty {
                     Text(note.markdown ? Markdown.inline(note.title) : AttributedString(note.title))
-                        .font(.system(size: (note.body.isEmpty ? 11.5 : 10.5) * u, weight: .bold, design: .monospaced))
+                        .font(font(note.body.isEmpty ? 11.5 : 10.5, bold: true))
                         .foregroundStyle(ink)
                         .lineLimit(3)
                         .layoutPriority(1)
@@ -263,7 +272,7 @@ struct NoteSheet: View {
                             .layoutPriority(0)
                     } else {
                         Text(linked(note.body))
-                            .font(.system(size: 8.5 * u, design: .monospaced))
+                            .font(font(8.5))
                             .foregroundStyle(sub)
                             .lineSpacing(1 * u)
                             .lineLimit(3)
@@ -273,7 +282,7 @@ struct NoteSheet: View {
             }
             Spacer(minLength: 0)
             Text(note.caption)
-                .font(.system(size: 7 * u, design: .monospaced))
+                .font(font(7))
                 .foregroundStyle(sub)
                 .lineLimit(1)
                 .layoutPriority(2)
@@ -282,8 +291,17 @@ struct NoteSheet: View {
         .padding(.horizontal, (paper == .tractor ? 15 : 9) * u)
         .padding(.bottom, (paper == .receipt ? 11 : 7) * u)
         .frame(width: width, height: height, alignment: .top)
-        .background(background)
-        .clipShape(PaperShape(paper: paper, u: u))
+        .background(themedBackground)
+        .clipShape(themedShape)
+    }
+
+    @ViewBuilder private var themedBackground: some View {
+        if theme == .paper { background } else { ThemeCardBackground(theme: theme, card: card) }
+    }
+
+    private var themedShape: AnyShape {
+        theme == .paper ? AnyShape(PaperShape(paper: paper, u: u))
+                        : AnyShape(RoundedRectangle(cornerRadius: theme.corner, style: .continuous))
     }
 
     @ViewBuilder private var background: some View {

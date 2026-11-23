@@ -18,6 +18,8 @@ struct SettingsActions {
     var toggleLaunchAtLogin: () -> Void
     var soundOn: () -> Bool
     var setSoundOn: (Bool) -> Void
+    var theme: () -> Theme
+    var setTheme: (Theme) -> Void
 }
 
 /// 设置 (T-039): the choices made once and rarely changed, out of the
@@ -211,6 +213,11 @@ struct SettingsView: View {
                                            then: model.actions.refresh))
             }
             Section {
+                Picker(L("Theme"), selection: Binding(
+                    get: { _ = model.version; return model.actions.theme() },
+                    set: { model.actions.setTheme($0); model.reload() })) {
+                    ForEach(Theme.allCases) { Text($0.title).tag($0) }
+                }
                 Picker(L("Keep on line"), selection: Binding(
                     get: { _ = model.version; return Line.keepOnLine ?? 0 },
                     set: { model.actions.setKeep($0 == 0 ? nil : $0); model.reload() })) {

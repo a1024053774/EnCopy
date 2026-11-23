@@ -393,6 +393,7 @@ struct CheckFailed: Error { let message: String }
         try checkShrinkOffMain()
         try checkPeekDuration()
         try checkSourceAppBadge()
+        try checkThemes()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1665,6 +1666,22 @@ struct CheckFailed: Error { let message: String }
         Line.showsSourceApp = false
         try check(!Line.showsSourceApp, "The icons can be turned off")
         Line.showsSourceApp = true
+    }
+
+    /// T-041: six themes, paper by default; the choice is kept, and a theme
+    /// name this version does not know falls back to paper.
+    func checkThemes() throws {
+        UserDefaults.standard.removeObject(forKey: "theme")
+        try check(Theme.current == .paper && Theme.allCases.count == 6, "Paper out of the box, five more to choose from")
+        let themed = line()
+        try check(themed.theme == .paper, "A new line starts in the chosen theme")
+        themed.theme = .pixel
+        let next = Line(pasteboard: pasteboard, desktop: root)
+        try check(Theme.current == .pixel && next.theme == .pixel, "A theme picked on the line is kept for next time")
+        UserDefaults.standard.set("vaporwave", forKey: "theme")
+        try check(Theme.current == .paper, "An unknown theme falls back to paper")
+        try check(Set(Theme.allCases.map(\.title)).count == 6, "Each theme has its own name")
+        UserDefaults.standard.removeObject(forKey: "theme")
     }
 
     func checkShelves() throws {

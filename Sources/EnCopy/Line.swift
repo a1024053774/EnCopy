@@ -70,6 +70,11 @@ final class Line: ObservableObject {
     /// nil for as many as fit across the screen.
     nonisolated static let keepChoices = [25, 50, 100]
 
+    /// How the line looks (T-041). Every card redraws when it changes.
+    @Published var theme: Theme = Theme.current {
+        didSet { Theme.current = theme }
+    }
+
     /// A small icon of the app each card came from (T-042). On unless turned off.
     nonisolated static var showsSourceApp: Bool {
         get { UserDefaults.standard.object(forKey: "showsSourceApp") as? Bool ?? true }

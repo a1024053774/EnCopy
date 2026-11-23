@@ -169,3 +169,10 @@
 "Show it for" = "停留时间";
 "%@ seconds" = "%@ 秒";
 "Show the app it came from" = "显示来源 App";
+"Theme" = "主题";
+"Paper" = "纸";
+"Pixel" = "像素";
+"Skeuomorphic" = "拟物";
+"Minimal" = "极简";
+"Neon" = "霓虹";
+"Journal" = "手账";
