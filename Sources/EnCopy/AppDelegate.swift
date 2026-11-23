@@ -937,7 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
     }
 
-    /// The shirt fills in while copied images are hung, so it shows at a
+    /// The pegs fill in while copied things are hung, so it shows at a
     /// glance that the clipboard is being watched. It is dimmed while the
     /// line is empty, so resting in the menu bar and seeing nothing come down
     /// does not look broken.
@@ -946,9 +946,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let count = line.liveCount
         let description = on ? L("EnCopy, hanging copied images") : "EnCopy"
         let state = count == 0 ? L("The line is empty") : String(format: L("%d on the line"), count)
-        let image = NSImage(systemSymbolName: on ? "tshirt.fill" : "tshirt",
-                            accessibilityDescription: "\(description), \(state)")
-        image?.isTemplate = true
+        let image = MenuBarIcon.image(watching: on)
+        image.accessibilityDescription = "\(description), \(state)"
         statusItem.button?.image = image
         statusItem.button?.appearsDisabled = count == 0
         statusItem.button?.toolTip = "\(description)\n\(state)"
