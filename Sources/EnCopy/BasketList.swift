@@ -77,51 +77,87 @@ struct BasketListView: View {
     }
 }
 
-/// One row: what it is, its first line, and when it was last used.
+/// One row (T-045): a strip of the paper it would hang on, in the line's
+/// theme — a receipt, tractor-feed code, a link's tag, a polaroid, a folder —
+/// with its first words, the app it came from, and when it was last used.
 private struct BasketRowView: View {
     let row: Line.BasketRow
     @ObservedObject var line: Line
     let picked: Bool
 
     var body: some View {
+        let card = line.paperCard(of: row.url)
+        let theme = line.theme
+        let summary = line.basketSummary(row.url)
         HStack(spacing: 10) {
-            Text(kindLabel)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
-            Text(summary)
-                .font(.system(size: 13))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            leading(card)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.title)
+                    .font(theme.font(12.5, bold: card != .code, code: card == .code || card == .link))
+                    .foregroundStyle(ink(card))
+                    .lineLimit(1)
+                if let detail = summary.detail {
+                    Text(detail)
+                        .font(theme.font(11, code: card != .text))
+                        .foregroundStyle(soft(card))
+                        .lineLimit(1)
+                }
+            }
+            .truncationMode(.tail)
             Spacer(minLength: 8)
+            if Line.showsSourceApp, let app = row.app, let icon = AppIcons.icon(for: app) {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 16, height: 16)
+            }
             Text(Self.time(row.used))
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(theme.font(10.5, code: true).monospacedDigit())
+                .foregroundStyle(soft(card))
         }
-        .padding(.horizontal, 14).padding(.vertical, 7)
-        .background(picked ? Color.accentColor.opacity(0.18) : Color.clear)
+        .padding(.leading, card == .code ? 18 : 12).padding(.trailing, card == .code ? 18 : 12)
+        .padding(.vertical, 7)
+        .frame(minHeight: 46)
+        .background(PaperStrip(theme: theme, card: card))
+        .overlay {
+            if picked {
+                RoundedRectangle(cornerRadius: max(3, theme.corner), style: .continuous)
+                    .strokeBorder(theme.picked, lineWidth: theme.pickedWidth)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 3)
     }
 
-    private var kindLabel: String {
-        switch line.kind(of: row.url) {
-        case .text: L("Text")
-        case .link: L("Link")
-        case .image: L("Image")
-        case .file: L("File")
+    /// A picture shows a small polaroid of itself; a file its icon.
+    @ViewBuilder private func leading(_ card: Theme.Card) -> some View {
+        switch card {
+        case .image:
+            if let thumb = Self.thumbnail(row.url) {
+                Image(nsImage: thumb).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: 44, height: 30).clipped()
+                    .padding(3).padding(.bottom, 5)
+                    .background(Color.white)
+                    .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+            }
+        case .file:
+            Image(nsImage: NSWorkspace.shared.icon(forFile: row.url.path)).resizable().frame(width: 28, height: 28)
+        default:
+            EmptyView()
         }
     }
 
-    /// A note's first line; a picture's name and the start of the words read
-    /// from it; a file's name.
-    private var summary: String {
-        if isText(row.url), let note = Note.cached(row.url) {
-            let first = note.title.isEmpty ? note.body : note.title
-            return first.split(whereSeparator: \.isNewline).first.map(String.init) ?? first
-        }
-        if !isFile(row.url), let words = line.history.words(of: row.url), !words.isEmpty {
-            return row.url.deletingPathExtension().lastPathComponent + " · " + words.prefix(80)
-        }
-        return row.url.lastPathComponent
+    private func ink(_ card: Theme.Card) -> Color {
+        line.theme == .paper ? Color(red: 0.11, green: 0.12, blue: 0.13) : line.theme.ink(card)
+    }
+
+    private func soft(_ card: Theme.Card) -> Color {
+        line.theme == .paper ? Color(red: 0.42, green: 0.40, blue: 0.36) : line.theme.soft(card)
+    }
+
+    private static let thumbs = NSCache<NSURL, NSImage>()
+
+    static func thumbnail(_ url: URL) -> NSImage? {
+        if let known = thumbs.object(forKey: url as NSURL) { return known }
+        guard let made = makeThumbnail(url, maxPixels: 120) else { return nil }
+        thumbs.setObject(made, forKey: url as NSURL)
+        return made
     }
 
     static func time(_ date: Date) -> String {
@@ -142,4 +178,67 @@ private struct BasketRowView: View {
         f.setLocalizedDateFormatFromTemplate("MMMd")
         return f
     }()
+}
+
+/// The strip of paper behind a row. In the paper theme each kind has its own
+/// paper, as on the line; the other themes draw their own card background.
+private struct PaperStrip: View {
+    let theme: Theme
+    let card: Theme.Card
+
+    var body: some View {
+        if theme == .paper {
+            let shape = RoundedRectangle(cornerRadius: 3, style: .continuous)
+            ZStack {
+                switch card {
+                case .text:
+                    shape.fill(Color.white)
+                    shape.strokeBorder(Color(red: 0.88, green: 0.54, blue: 0.12), lineWidth: 1.5)
+                case .code:
+                    shape.fill(Color(red: 0.93, green: 0.96, blue: 0.89))
+                    // Tractor-feed holes down both edges.
+                    HStack {
+                        holes
+                        Spacer()
+                        holes
+                    }
+                    .padding(.horizontal, 5)
+                case .link:
+                    TagShape().fill(Color(red: 0.84, green: 0.69, blue: 0.52))
+                case .image:
+                    shape.fill(Color.white)
+                case .file:
+                    shape.fill(Color(red: 0.91, green: 0.77, blue: 0.56))
+                }
+            }
+            .shadow(color: .black.opacity(0.14), radius: 2, y: 1)
+        } else {
+            ThemeCardBackground(theme: theme, card: card)
+                .shadow(color: theme.shadow(hovering: false).0.opacity(0.6), radius: 2, y: 1)
+        }
+    }
+
+    private var holes: some View {
+        VStack(spacing: 5) {
+            ForEach(0..<4, id: \.self) { _ in Circle().fill(Color.black.opacity(0.18)).frame(width: 4, height: 4) }
+        }
+    }
+}
+
+/// A kraft tag: the left corners clipped, like the link cards on the line.
+private struct TagShape: Shape {
+    func path(in r: CGRect) -> Path {
+        let c: CGFloat = 9
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX + c, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - 3, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY + 3))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - 3))
+        p.addLine(to: CGPoint(x: r.maxX - 3, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX + c, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.minX, y: r.maxY - c))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + c))
+        p.closeSubpath()
+        return p
+    }
 }

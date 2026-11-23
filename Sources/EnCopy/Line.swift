@@ -378,6 +378,38 @@ final class Line: ObservableObject {
         }
     }
 
+    /// Which paper a row of the list is (T-045), as it would hang: a note is a
+    /// receipt, tractor-feed code or a link's tag; a picture a polaroid; a
+    /// file a folder.
+    func paperCard(of url: URL) -> Theme.Card {
+        if isFile(url) { return .file }
+        guard isText(url) else { return .image }
+        guard let note = Note.cached(url) else { return .text }
+        return note.link != nil ? .link : note.code ? .code : .text
+    }
+
+    /// What a row says: a note's first line and the next; a link's site and
+    /// path; a picture's words read from it; a file's name and folder.
+    func basketSummary(_ url: URL) -> (title: String, detail: String?) {
+        switch paperCard(of: url) {
+        case .text, .code:
+            let note = Note.cached(url)
+            let lines = ((note?.title ?? "") + "\n" + (note?.body ?? ""))
+                .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return (lines.first ?? url.lastPathComponent, lines.dropFirst().first)
+        case .link:
+            guard let link = Note.cached(url)?.link else { return (url.lastPathComponent, nil) }
+            let path = link.path + (link.query.map { "?" + $0 } ?? "")
+            return (link.host ?? link.absoluteString, path.isEmpty || path == "/" ? nil : path)
+        case .image:
+            let words = (history.words(of: url) ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return words.isEmpty ? (url.deletingPathExtension().lastPathComponent, nil)
+                                 : (String(words.prefix(120)), url.deletingPathExtension().lastPathComponent)
+        case .file:
+            return (url.lastPathComponent, url.deletingLastPathComponent().path)
+        }
+    }
+
     /// A click on a row picks it.
     func pickBasket(_ url: URL) {
         guard basketRows.contains(where: { $0.url == url }) else { return }
