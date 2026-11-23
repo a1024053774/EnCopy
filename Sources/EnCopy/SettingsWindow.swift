@@ -198,6 +198,14 @@ struct SettingsView: View {
                        isOn: model.binding({ AppDelegate.opensFromMenuBar }, { AppDelegate.opensFromMenuBar = $0 }))
                 Toggle(L("When something new hangs"),
                        isOn: model.binding({ AppDelegate.peeksAtNew }, { AppDelegate.peeksAtNew = $0 }))
+                Picker(L("Show it for"), selection: Binding(
+                    get: { _ = model.version; return Line.peekSeconds },
+                    set: { Line.peekSeconds = $0; model.reload() })) {
+                    ForEach(Line.peekChoices, id: \.self) { s in
+                        Text(String(format: L("%@ seconds"), s.formatted(.number.precision(.fractionLength(0...1))))).tag(s)
+                    }
+                }
+                .disabled({ _ = model.version; return !AppDelegate.peeksAtNew }())
                 Toggle(L("Over full screen apps"),
                        isOn: model.binding({ FullScreen.showLineOver }, { FullScreen.showLineOver = $0 },
                                            then: model.actions.refresh))

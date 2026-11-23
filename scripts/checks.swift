@@ -391,6 +391,7 @@ struct CheckFailed: Error { let message: String }
         try checkKeptImageSearchOnLine()
         try checkQuickLookOrder()
         try checkShrinkOffMain()
+        try checkPeekDuration()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1622,6 +1623,19 @@ struct CheckFailed: Error { let message: String }
         let data = try Data(contentsOf: jpg)
         try check(history.kept().contains { $0.url == jpg && $0.shrunk } && data.count < before, "Then it is shrunk and marked")
         try check(data.prefix(2) == Data([0xFF, 0xD8]), "A JPEG stays a JPEG when shrunk")
+    }
+
+    /// T-040: how long the line shows something new is a setting: short by
+    /// default, one of a few choices; anything else stored falls back.
+    func checkPeekDuration() throws {
+        UserDefaults.standard.removeObject(forKey: "peekSeconds")
+        try check(Line.peekSeconds == 1.5, "Out of the box the line shows something new for 1.5 seconds")
+        try check(Line.peekChoices == [0.8, 1.5, 2.5, 4], "The choices are 0.8, 1.5, 2.5 and 4 seconds")
+        Line.peekSeconds = 0.8
+        try check(Line.peekSeconds == 0.8, "A shorter time is kept")
+        UserDefaults.standard.set(7.0, forKey: "peekSeconds")
+        try check(Line.peekSeconds == 1.5, "A time that is not one of the choices falls back to the default")
+        UserDefaults.standard.removeObject(forKey: "peekSeconds")
     }
 
     func checkShelves() throws {
