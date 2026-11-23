@@ -399,6 +399,7 @@ struct CheckFailed: Error { let message: String }
         try checkSearchStaysForQuickLook()
         try checkCleanupConfirmFresh()
         try checkShrinkRespectsClearing()
+        try checkFinderPicturesWithoutFiles()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1793,6 +1794,23 @@ struct CheckFailed: Error { let message: String }
         try check(!plan.shrunk.contains(gone), "An original deleted in Finder is not waiting to be shrunk")
         keep.runRetention()
         try check(!history.contains(gone), "Its row is cleared")
+    }
+
+    /// Review 2, finding 6: with Files off and Images on, a picture copied in
+    /// Finder still hangs; a PDF does not.
+    func checkFinderPicturesWithoutFiles() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        ClipboardWatcher.imagesEnabled = true
+        ClipboardWatcher.filesEnabled = false
+        defer { ClipboardWatcher.imagesEnabled = false; ClipboardWatcher.filesEnabled = true }
+        let history = History(file: root.appendingPathComponent("finder-pictures.sqlite"))
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                       onNew: { hung.append($0) }, onAgain: { _ in })
+        let picture = try png("No files picture.png")
+        let doc = root.appendingPathComponent("No files notes.pdf"); try Data("%PDF".utf8).write(to: doc)
+        for url in [picture, doc] { pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check() }
+        try check(hung == [picture], "With Files off and Images on, a picture from Finder hangs and a PDF does not")
     }
 
     func checkShelves() throws {

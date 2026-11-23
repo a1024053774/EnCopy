@@ -174,7 +174,9 @@ final class ClipboardWatcher {
         guard rule != .skip else { return }
         let ttl = rule == .hourly ? Self.hourly : nil
         // Files copied in Finder hang where they are; nothing is copied.
-        if Self.filesEnabled, let files = copiedFiles(pb) {
+        // Finder's copies: files by the Files switch, pictures and videos by
+        // the Images switch, each on its own (review 2 #6).
+        if Self.filesEnabled || Self.imagesEnabled, let files = copiedFiles(pb) {
             for url in files { if isOnLine(url) { onAgain(url) } else { onNew(url) } }
             return
         }
@@ -244,7 +246,7 @@ final class ClipboardWatcher {
               !urls.isEmpty else { return nil }
         // A picture or a video copied in Finder hangs as one, so it goes by
         // the Images switch, which is off until chosen (review #4).
-        let kept = urls.filter { isFile($0) || Self.imagesEnabled }
+        let kept = urls.filter { isFile($0) ? Self.filesEnabled : Self.imagesEnabled }
         return kept.isEmpty ? [] : Array(kept.prefix(20))
     }
 
