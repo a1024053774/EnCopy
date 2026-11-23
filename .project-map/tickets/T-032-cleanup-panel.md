@@ -24,3 +24,5 @@ supersedes:
 完成，2026-11-23。`CleanupFilter`（在 `Clearing.swift`），`Line.cleanupCandidates`、`cleanUp`、`putBack(batch:)`、`originalsCap`；`Sources/EnCopy/CleanupPanel.swift` 是 SwiftUI 窗口；菜单「清理历史…」；`History.record` 在内容没变时也补上新知道的来源 App。`scripts/check.sh`：`127 strings`、`251 checks passed`，新增 10 项；不避开绳上东西的变异被抓到。
 
 做这一单时发现：T-030 的 `isKeptImage` 只在检查程序里能编译（检查用的 `Inbox` 是替身），App 本身从 T-030 起编译不过。这里修好，并给 `scripts/check.sh` 加了一步对整个 App 做类型检查；把那个错放回去，这一步会报错。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：菜单「清理历史…」打开面板：类型、最后用到、来源 App、包含的文字四个条件，「最近清掉」和「保留」两段都在（`07-cleanup-panel.png`、`cleanup-panel-ax.txt`）。真的清掉一批、放回没走。

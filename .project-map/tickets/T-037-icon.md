@@ -23,3 +23,5 @@ supersedes:
 完成，2026-11-23。`scripts/make-icon.swift` 重画，`scripts/build-app.sh` 不用改。新文件 `MenuBarIcon.swift` 画菜单栏的绳和夹子，`AppDelegate.updateStatusIcon` 改用它，原来的辅助功能说明照旧。构建出的图标：`evidence/T-037/app-icon.png`（从 `build/EnCopy Dev.app` 里的 `EnCopy.icns` 导出）；菜单栏两种状态放大 12 倍：`evidence/T-037/menubar.png`。
 
 新加 `checkMenuBarIcon`（3 条）。把夹子改成总是实心的变异版本，检查失败在「The pegs are filled while watching, hollow when not」。`scripts/check.sh`：`294 checks passed`；`scripts/build-app.sh` 通过。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：菜单栏图标（内建屏和外接屏的菜单栏都太挤，图标没露出来）。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。

@@ -21,3 +21,5 @@ supersedes:
 ## Resolution
 
 完成，2026-11-23。`ClipboardWatcher.isCode(_:app:)`，认出的验证码记 600 秒的 `ttl`，沿用 T-027 的到期清理。`scripts/check.sh`：`97 strings`、`215 checks passed`，新增 6 项；不给验证码 10 分钟的变异被抓到。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：「【示例】您的验证码是 384920」从 Paste Target 复制，历史里 `ttl = 600`，纸上写「今天 01:38 · 10 分钟后清」（`02-summon-left.png`）。01:27:33 复制的那一份，在 01:38 时文件、历史都已经没有了：10 分钟到了确实清掉。

@@ -27,3 +27,5 @@ supersedes:
 完成，2026-11-23。新文件 `Motion.swift` 放整张表；`PeggedView` 按纸的种类取摆动弹簧，接 `line.landing` 做拉下时的轻晃和滑下时的一阵风，单击复制改成跳一下；`LineView` 的面板动画由 `Motion.panel(revealed:bySummon:)` 选，搜索类变化用无回弹的滑拢；`Line` 记 `lastKeyAt`，风只在键盘安静 4 秒后吹，跟住选中的滚动带 spring(0.24, 1)；`AppDelegate` 的 ⌥C 路径告诉 Line 这次是 ⌥C 拉下来的，原来自己读系统「减弱动态效果」的地方改读 `Motion.reduced`。`NoteSheet.paper(of:)` 公开出来给摆动用。
 
 新加 `checkMotion`（17 条），数值以设计方案的表为准。三个变异版本都被抓到：风的安静时间改成 0（「No breeze until 4 s after the last key」）、⌥C 用滑下的弹簧（「⌥C drops the panel on the quick spring」）、挑选不算按键（「Picking counts as a key: the breeze waits」）。`scripts/check.sh`：`291 checks passed`；`scripts/build-app.sh` 通过。手感要真机看，跟这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：动画手感。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。

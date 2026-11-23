@@ -24,3 +24,5 @@ supersedes:
 完成，2026-11-23。`NoteSheet` 改画三种纸，`PaperShape` 管小票撕边和吊牌切角；`PeggedView` 按种类换纸，拍立得写时间，选中改成琥珀色；`Clothespin` 换木夹；`Rope` 换麻绳。用和检查一样的方式编了一个渲染程序，把真的 `LineView` 挂上五种东西各画一张，浅色、深色各一张：`evidence/T-034/light.png`、`dark.png`（重画：`evidence/T-034/run.sh evidence/T-034 <输出.png> [dark]`）。`scripts/check.sh`：`261 checks passed`；`scripts/build-app.sh` 通过。
 
 留下的事：拿在手上（Hold）的便签还是原来的样子；绳结右边放最新的在下一张单。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：五种纸在真屏上都看到了：拍立得、文件夹、小票（文字和带样式的文字）、吊牌、打孔纸；木夹和麻绳（`02-summon.png`）。
