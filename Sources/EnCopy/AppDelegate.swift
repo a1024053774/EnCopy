@@ -284,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = L("Let EnCopy handle your screenshots?")
         alert.informativeText = L(
-            "Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off from the menu bar, and your settings come back when EnCopy quits.")
+            "Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off in Settings, and your settings come back when EnCopy quits.")
         alert.addButton(withTitle: L("Turn on"))
         alert.addButton(withTitle: L("Not now"))
         if let icon = NSImage(named: "EnCopy") ?? NSApp.applicationIconImage { alert.icon = icon }
@@ -316,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Self.recordingExplained = true
         let alert = NSAlert()
         alert.messageText = L("EnCopy keeps the text you copy")
-        alert.informativeText = String(format: L("Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images under Hang what you copy."),
+        alert.informativeText = String(format: L("Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images in Settings."),
                                     (DataFolder.url.path as NSString).abbreviatingWithTildeInPath)
         alert.addButton(withTitle: L("OK"))
         alert.addButton(withTitle: L("Pause recording"))
@@ -981,59 +981,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(ClosureMenuItem(L("Hang everything back")) { Held.hangEverythingBack() })
         }
 
-        // Where screenshots and other images come from, together.
+        // The menu keeps what you reach for every day; choices made once
+        // live in Settings (T-039).
         menu.addItem(.separator())
-        menu.addItem(.sectionHeader(title: L("Screenshots")))
-        let inbox = ClosureMenuItem(L("Handle screenshots")) { [weak self] in
-            self?.setInbox(!Inbox.isEnabled)
-        }
-        inbox.state = Inbox.isEnabled ? .on : .off
-        inbox.toolTip = L("Screenshots hang instantly and skip the Desktop")
-        menu.addItem(inbox)
-        let copyItem = ClosureMenuItem(L("Copy each screenshot")) {
-            AppDelegate.copiesScreenshots.toggle()
-        }
-        copyItem.state = Self.copiesScreenshots ? .on : .off
-        copyItem.toolTip = L("Each new screenshot goes to the clipboard as it hangs")
-        menu.addItem(copyItem)
-
-        let folderItem = NSMenuItem(title: L("Also watch folders"), action: nil, keyEquivalent: "")
-        let folderMenu = NSMenu()
-        folderMenu.autoenablesItems = false
-        let folders = Self.extraFolders
-        // Each folder is ticked: a click stops watching it, as with any
-        // ticked item. Holding Option turns it into Show in Finder.
-        for folder in folders {
-            let name = FileManager.default.displayName(atPath: folder.path)
-            let item = ClosureMenuItem(name) { [weak self] in
-                AppDelegate.extraFolders.removeAll { $0.standardizedFileURL == folder.standardizedFileURL }
-                self?.startWatcher()
-            }
-            item.state = .on
-            folderMenu.addItem(item)
-            let reveal = ClosureMenuItem(String(format: L("Show “%@” in Finder"), name)) {
-                NSWorkspace.shared.open(folder)
-            }
-            reveal.isAlternate = true
-            reveal.keyEquivalentModifierMask = .option
-            folderMenu.addItem(reveal)
-        }
-        if !folders.isEmpty { folderMenu.addItem(.separator()) }
-        let add = ClosureMenuItem(L("Add Folder…")) { [weak self] in self?.chooseExtraFolder() }
-        add.isEnabled = folders.count < Self.maxExtraFolders
-        folderMenu.addItem(add)
-        folderItem.submenu = folderMenu
-        menu.addItem(folderItem)
-
-        menu.addItem(ClosureMenuItem(L("Open screenshots folder")) { [weak self] in
-            guard let self else { return }
-            NSWorkspace.shared.open(self.watcher.folder)
-        })
-
-        // What you copy, in a section of its own: pause is the one switch
-        // that stops all of it; each kind keeps its own choice below.
-        menu.addItem(.separator())
-        menu.addItem(.sectionHeader(title: L("Hang what you copy")))
         let pause = ClosureMenuItem(L("Pause recording")) { [weak self] in
             ClipboardWatcher.isPaused.toggle()
             self?.refreshClipboardWatcher()
@@ -1041,107 +991,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pause.state = ClipboardWatcher.isPaused ? .on : .off
         pause.toolTip = L("Nothing you copy is kept while this is on")
         menu.addItem(pause)
-        menu.addItem(appRulesItem())
         menu.addItem(ClosureMenuItem(L("Clean Up History…")) { [weak self] in
             guard let self else { return }
             CleanupPanel.shared.show(line: self.line)
         })
-        let kinds: [(String, String, ReferenceWritableKeyPath<ClipboardWatcher.Type, Bool>)] = [
-            (L("Images"), L("Images you copy hang on the line too"), \.imagesEnabled),
-            (L("Text"), L("Text you copy hangs on the line too"), \.textEnabled),
-            (L("Links"), L("Links you copy hang on the line too"), \.linksEnabled),
-            (L("Files"), L("Files you copy in Finder hang on the line, where they are"), \.filesEnabled),
-        ]
-        for (title, tip, key) in kinds {
-            let item = ClosureMenuItem(title) { [weak self] in
-                ClipboardWatcher.self[keyPath: key].toggle()
-                self?.refreshClipboardWatcher()
-            }
-            item.state = ClipboardWatcher.self[keyPath: key] ? .on : .off
-            item.toolTip = tip
-            menu.addItem(item)
-        }
-        menu.addItem(.separator())
-
-        let bringDown = NSMenuItem(title: L("Bring the line down"), action: nil, keyEquivalent: "")
-        let options = NSMenu()
-        let hover = ClosureMenuItem(L("When the pointer rests in the menu bar")) {
-            AppDelegate.opensFromMenuBar.toggle()
-        }
-        hover.state = Self.opensFromMenuBar ? .on : .off
-        options.addItem(hover)
-        let peek = ClosureMenuItem(L("When something new hangs")) {
-            AppDelegate.peeksAtNew.toggle()
-        }
-        peek.state = Self.peeksAtNew ? .on : .off
-        options.addItem(peek)
-        let fullScreen = ClosureMenuItem(L("Over full screen apps")) { [weak self] in
-            FullScreen.showLineOver.toggle()
-            self?.refresh()
-        }
-        fullScreen.state = FullScreen.showLineOver ? .on : .off
-        options.addItem(fullScreen)
-        bringDown.submenu = options
-        menu.addItem(bringDown)
-
-        let keepItem = NSMenuItem(title: L("Keep on line"), action: nil, keyEquivalent: "")
-        let keeps = NSMenu()
-        let fit = ClosureMenuItem(L("As many as fit")) { [weak self] in self?.setKeep(nil) }
-        fit.state = Line.keepOnLine == nil ? .on : .off
-        keeps.addItem(fit)
-        for n in Line.keepChoices {
-            let item = ClosureMenuItem(String(format: L("%d photos"), n)) { [weak self] in self?.setKeep(n) }
-            item.state = Line.keepOnLine == n ? .on : .off
-            keeps.addItem(item)
-        }
-        keepItem.submenu = keeps
-        menu.addItem(keepItem)
-
-        let sizeItem = NSMenuItem(title: L("Size"), action: nil, keyEquivalent: "")
-        let sizes = NSMenu()
-        for (size, title) in [(Layout.Size.small, L("Small")), (.medium, L("Medium")), (.large, L("Large"))] {
-            let item = ClosureMenuItem(title) { [weak self] in self?.setSize(size) }
-            item.state = Layout.size == size ? .on : .off
-            sizes.addItem(item)
-        }
-        sizeItem.submenu = sizes
-        menu.addItem(sizeItem)
-
-        let zoomItem = ClosureMenuItem(L("Zoom on hover")) { [weak self] in
-            Zoom.isEnabled.toggle()
-            if !Zoom.isEnabled { self?.zoom.hide() }
-        }
-        zoomItem.state = Zoom.isEnabled ? .on : .off
-        menu.addItem(zoomItem)
-
-        let shortcutItem = NSMenuItem(title: L("Shortcut"), action: nil, keyEquivalent: "")
-        let shortcuts = NSMenu()
-        let current = NSMenuItem(title: Shortcut.current?.display ?? L("None"), action: nil, keyEquivalent: "")
-        current.isEnabled = false
-        shortcuts.addItem(current)
-        shortcuts.addItem(ClosureMenuItem(L("Change Shortcut…")) { [weak self] in self?.changeShortcut() })
-        shortcutItem.submenu = shortcuts
-        menu.addItem(shortcutItem)
-
-        menu.addItem(.separator())
-
-        let sound = ClosureMenuItem(L("Sounds")) { [weak self] in
-            guard let self else { return }
-            self.line.soundOn.toggle()
-        }
-        sound.state = line.soundOn ? .on : .off
-        menu.addItem(sound)
-
-        let login = ClosureMenuItem(L("Open at login")) {
-            AppDelegate.toggleLaunchAtLogin()
-        }
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
-
-        // The app never connects to anything, so it cannot tell when a new
-        // version is out. The releases page can: it lists every version.
-        menu.addItem(ClosureMenuItem(L("Check for Updates…")) {
-            NSWorkspace.shared.open(AppDelegate.updatesURL)
+        menu.addItem(ClosureMenuItem(L("Settings…"), key: ",") { [weak self] in
+            self?.showSettings()
         })
 
         menu.addItem(.separator())
@@ -1160,36 +1015,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// By app: each app with a rule, and the app in front, gets three choices.
-    private func appRulesItem() -> NSMenuItem {
-        let item = NSMenuItem(title: L("By app"), action: nil, keyEquivalent: "")
-        let apps = NSMenu()
-        apps.autoenablesItems = false
-        var ids = ClipboardWatcher.appRules.keys.sorted { (History.appName($0) ?? $0) < (History.appName($1) ?? $1) }
-        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, front != Bundle.main.bundleIdentifier {
-            ids.removeAll { $0 == front }
-            ids.insert(front, at: 0)
-        }
-        for id in ids {
-            let app = NSMenuItem(title: History.appName(id) ?? id, action: nil, keyEquivalent: "")
-            let choices = NSMenu()
-            for (rule, title) in [(ClipboardWatcher.AppRule.normal, L("Record normally")), (.hourly, L("Clear after an hour")), (.skip, L("Don't record"))] {
-                let choice = ClosureMenuItem(title) {
-                    var rules = ClipboardWatcher.appRules
-                    rules[id] = rule
-                    ClipboardWatcher.appRules = rules
-                }
-                choice.state = ClipboardWatcher.rule(for: id) == rule ? .on : .off
-                choices.addItem(choice)
-            }
-            app.submenu = choices
-            apps.addItem(app)
-        }
-        item.submenu = apps
-        return item
-    }
-
     /// EnCopy's releases on GitHub.
-    private static let updatesURL = URL(string: "https://github.com/a1024053774/EnCopy/releases")!
+    static let updatesURL = URL(string: "https://github.com/a1024053774/EnCopy/releases")!
+
+    /// Settings, with the app in front before it opened offered first under By app.
+    private func showSettings() {
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        SettingsWindow.shared.show(actions: SettingsActions(
+            setInbox: { [weak self] in self?.setInbox($0) },
+            refreshClipboardWatcher: { [weak self] in self?.refreshClipboardWatcher() },
+            chooseExtraFolder: { [weak self] in self?.chooseExtraFolder() },
+            removeExtraFolder: { [weak self] folder in
+                AppDelegate.extraFolders.removeAll { $0.standardizedFileURL == folder.standardizedFileURL }
+                self?.startWatcher()
+            },
+            openScreenshotsFolder: { [weak self] in
+                guard let self else { return }
+                NSWorkspace.shared.open(self.watcher.folder)
+            },
+            setKeep: { [weak self] in self?.setKeep($0) },
+            setSize: { [weak self] in self?.setSize($0) },
+            hideZoom: { [weak self] in self?.zoom.hide() },
+            refresh: { [weak self] in self?.refresh() },
+            changeShortcut: { [weak self] in self?.changeShortcut() },
+            toggleLaunchAtLogin: { AppDelegate.toggleLaunchAtLogin() },
+            soundOn: { [weak self] in self?.line.soundOn ?? false },
+            setSoundOn: { [weak self] in self?.line.soundOn = $0 }
+        ), frontApp: front)
+    }
 
     private static func toggleLaunchAtLogin() {
         do {

@@ -4,7 +4,7 @@
 
 /* AppDelegate */
 "Let EnCopy handle your screenshots?" = "Let EnCopy handle your screenshots?";
-"Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off from the menu bar, and your settings come back when EnCopy quits." = "Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off from the menu bar, and your settings come back when EnCopy quits.";
+"Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off in Settings, and your settings come back when EnCopy quits." = "Screenshots will hang on the line the instant you take them, without the floating thumbnail, and will not pile up on your Desktop. Drag one to a folder to keep it, or discard it with the cross. You can turn this off in Settings, and your settings come back when EnCopy quits.";
 "Turn on" = "Turn on";
 "Not now" = "Not now";
 "Hide line" = "Hide line";
@@ -50,7 +50,7 @@
 "Pause recording" = "Pause recording";
 "Nothing you copy is kept while this is on" = "Nothing you copy is kept while this is on";
 "EnCopy keeps the text you copy" = "EnCopy keeps the text you copy";
-"Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images under Hang what you copy." = "Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images under Hang what you copy.";
+"Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images in Settings." = "Text, links and code you copy hang on the line. When the line is full, the oldest go into the basket, where a search still finds them. Nothing is kept from a password field, from a copy a password manager marks as private, or from another device. It all stays on this Mac, in %@, where only you can read it. You can pause anytime from the menu bar, and turn on copied images in Settings.";
 "OK" = "OK";
 "Images" = "Images";
 "Text" = "Text";
@@ -163,3 +163,8 @@
 "Yesterday" = "Yesterday";
 "This week" = "This week";
 "Earlier" = "Earlier";
+"The line" = "The line";
+"Settings…" = "Settings…";
+"Settings" = "Settings";
+"Stop watching" = "Stop watching";
+"General" = "General";
