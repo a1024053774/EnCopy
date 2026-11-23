@@ -13,6 +13,8 @@ final class ClipboardWatcher {
     private let pasteboard: NSPasteboard
     private let history: History
     private let isSecureInput: () -> Bool
+    /// The app in front when a copy is noticed: the one it came from.
+    private let frontApp: () -> String?
     private let onNew: (URL) -> Void
     /// The same words were already kept: the item comes back instead.
     private let onAgain: (URL) -> Void
@@ -77,11 +79,13 @@ final class ClipboardWatcher {
     init(pasteboard: NSPasteboard = .general,
          history: History,
          isSecureInput: @escaping () -> Bool = { IsSecureEventInputEnabled() },
+         frontApp: @escaping () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
          onNew: @escaping (URL) -> Void,
          onAgain: @escaping (URL) -> Void) {
         self.pasteboard = pasteboard
         self.history = history
         self.isSecureInput = isSecureInput
+        self.frontApp = frontApp
         self.onNew = onNew
         self.onAgain = onAgain
         lastCount = pasteboard.changeCount
@@ -114,9 +118,9 @@ final class ClipboardWatcher {
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if Note.webAddress(trimmed) != nil {
-                if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true) }
+                if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true, app: frontApp()) }
             } else if Self.textEnabled {
-                save(text: text, rtf: rtf, link: false)
+                save(text: text, rtf: rtf, link: false, app: frontApp())
             }
             return
         }
@@ -179,7 +183,7 @@ final class ClipboardWatcher {
 
     /// Notes and links go to their own folder, apart from the screenshots.
     /// The same words again add nothing: the kept note comes back instead.
-    private func save(text: String, rtf: Data?, link: Bool) {
+    private func save(text: String, rtf: Data?, link: Bool, app: String?) {
         if let kept = history.note(holding: text) { onAgain(kept); return }
         let ext = rtf == nil ? "txt" : "rtf"
         let name = link ? "Link" : "Text"
@@ -195,7 +199,7 @@ final class ClipboardWatcher {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try (rtf ?? Data(text.utf8)).write(to: url, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            history.record(url, text: text)
+            history.record(url, text: text, app: app)
             onNew(url)
         } catch {
             try? fm.removeItem(at: url)
