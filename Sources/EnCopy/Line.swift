@@ -190,7 +190,7 @@ final class Line: ObservableObject {
         let (from, to) = span(of: shelf, now: now)
         let onLine = onLinePaths
         let picked = history.kept().filter { item in
-            !onLine.contains(item.url.standardizedFileURL.path)
+            fitsKind(item.url) && !onLine.contains(item.url.standardizedFileURL.path)
                 && from.map { item.used >= $0 } ?? true && to.map { item.used < $0 } ?? true
                 && FileManager.default.fileExists(atPath: item.url.path)
         }.sorted { $0.used > $1.used }.prefix(visibleCount)
@@ -203,7 +203,13 @@ final class Line: ObservableObject {
     enum Kind { case text, link, image, file }
 
     /// Tab while summoned narrows the line to one kind; nil shows them all.
-    @Published var kindFilter: Kind?
+    @Published var kindFilter: Kind? {
+        // The basket's cards are picked by kind first (review #14).
+        didSet { if kindFilter != oldValue, shelf != .line || isSearching { recomputeSearch() } }
+    }
+
+    /// Whether a URL is of the kind Tab narrowed to.
+    private func fitsKind(_ url: URL) -> Bool { kindFilter == nil || kind(of: url) == kindFilter }
 
     func kind(of url: URL) -> Kind {
         if isFile(url) { return .file }
@@ -243,7 +249,8 @@ final class Line: ObservableObject {
             searchFound = History.Found()
             lineMatches = liveCount
         } else {
-            var found = history.search(words, onLine: liveText, limit: onShelf ? 1000 : visibleCount)
+            let byKind = kindFilter != nil
+            var found = history.search(words, onLine: liveText, limit: onShelf || byKind ? 1000 : visibleCount)
             if onShelf {
                 // Only what was last used in the shelf's span, and nothing from the line.
                 let (from, to) = span(of: shelf)
@@ -254,8 +261,12 @@ final class Line: ObservableObject {
                 }
                 found.basketTotal = found.basket.count
             }
+            if byKind {
+                found.basket = found.basket.filter(fitsKind)
+                found.basketTotal = found.basket.count
+            }
             searchFound = found
-            lineMatches = onShelf ? 0 : items.filter { !$0.falling && matches($0) }.count
+            lineMatches = onShelf ? 0 : items.filter { !$0.falling && matches($0) && fitsKind($0.url) }.count
             let room = max(0, visibleCount - lineMatches)
             var cards: [Pegged] = []
             // Found.basket is newest first; the cards hang oldest of them
@@ -951,7 +962,8 @@ final class Line: ObservableObject {
 
     /// Moves along a line that holds more than fit, from a scroll gesture.
     func scroll(by delta: CGFloat) {
-        let most = CGFloat(max(0, items.count - visibleCount)) * Layout.spacing
+        // As far as what is shown goes: Tab may have narrowed it (review #14).
+        let most = CGFloat(max(0, shown.count - visibleCount)) * Layout.spacing
         let next = min(most, max(0, scroll + delta))
         if next != scroll { scroll = next }
     }
