@@ -255,8 +255,7 @@ final class Line: ObservableObject {
     private func kind(of url: URL, words: String) -> Kind {
         if isFile(url) { return .file }
         guard isText(url) else { return .image }
-        if let note = Note.peek(url) { return note.link != nil ? .link : .text }
-        return Note.webAddress(words.trimmingCharacters(in: .whitespacesAndNewlines)) != nil ? .link : .text
+        return Note.isLink(url, words: words) ? .link : .text
     }
 
     /// Tab: all → text → links → images → all; ⇧Tab goes the other way.

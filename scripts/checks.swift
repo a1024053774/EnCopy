@@ -437,6 +437,7 @@ struct CheckFailed: Error { let message: String }
         try checkSearchBeforeLimit()
         try checkDiscardedCodesNotInTrash()
         try checkCopiedFilesClearToo()
+        try checkCleanupPreviewOnDisk()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -2006,6 +2007,26 @@ struct CheckFailed: Error { let message: String }
         copy(doc)
         files.clearExpired(now: Date().addingTimeInterval(3700))
         try check(onLine(doc), "Copied again in an everyday app, it stays")
+    }
+
+    /// Review 2, on #13 and #15: the cleanup panel lists only what is still
+    /// on disk, and tells links from text without reading every note.
+    func checkCleanupPreviewOnDisk() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("cleanup-disk.sqlite"))
+        let tidy = Line(pasteboard: pasteboard, desktop: root, history: history)
+        tidy.maxItems = 100; tidy.visibleCount = 8
+        let kept = try adoptedNote("disk-kept", "still on disk")
+        let gone = try adoptedNote("disk-gone", "deleted in Finder before the panel opened")
+        let link = try adoptedNote("disk-link", "https://example.com/cleanup-preview")
+        for url in [kept, gone, link] { history.record(url, text: try String(contentsOf: url, encoding: .utf8)) }
+        try FileManager.default.removeItem(at: gone)
+        try check(Set(tidy.cleanupCandidates(CleanupFilter())) == [kept, link] && !history.contains(gone),
+                  "A file already gone is not listed as going to Recently Cleared, and its row goes")
+        var links = CleanupFilter(); links.kind = .link
+        try check(tidy.cleanupCandidates(links) == [link] && Note.peek(link) == nil && Note.peek(kept) == nil,
+                  "Links are told from text by the words kept, without reading the notes")
     }
 
     func checkShelves() throws {
