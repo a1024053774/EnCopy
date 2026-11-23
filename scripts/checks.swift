@@ -385,6 +385,7 @@ struct CheckFailed: Error { let message: String }
         try checkCleanupAtClearTime()
         try checkCopiedImageApp()
         try checkFilesRespectImages()
+        try checkRecopyComesBack()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1450,6 +1451,38 @@ struct CheckFailed: Error { let message: String }
         pasteboard.clearContents(); pasteboard.writeObjects([item]); watcher.check()
         try check(hung.count == 2, "A copy marked auto-generated is not kept")
         ClipboardWatcher.imagesEnabled = false
+    }
+
+    /// Review #11: copying again a file already on the line, or the picture
+    /// copied last that has since fallen into the basket, brings it back to
+    /// the head instead of being ignored.
+    func checkRecopyComesBack() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        ClipboardWatcher.imagesEnabled = true
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved; ClipboardWatcher.imagesEnabled = false }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Recopy shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("recopy.sqlite"))
+        var new: [URL] = [], again: [URL] = []
+        var onLine: Set<URL> = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                       onNew: { new.append($0); onLine.insert($0) }, onAgain: { again.append($0) })
+        watcher.isOnLine = { onLine.contains($0) }
+        watcher.start()
+        defer { watcher.stop() }
+        let doc = root.appendingPathComponent("Recopy plan.pdf"); try Data("%PDF".utf8).write(to: doc)
+        pasteboard.clearContents(); pasteboard.writeObjects([doc as NSURL]); watcher.check()
+        pasteboard.clearContents(); pasteboard.setString("something else", forType: .string); watcher.check()
+        pasteboard.clearContents(); pasteboard.writeObjects([doc as NSURL]); watcher.check()
+        try check(new.filter { $0 == doc }.count == 1 && again == [doc], "A file copied again while on the line comes back to the head")
+
+        let image = NSImage(contentsOf: try png("Recopy picture.png", red: 0.3))!
+        pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
+        guard let picture = new.last, picture != doc else { throw CheckFailed(message: "The picture did not hang") }
+        onLine.remove(picture)                                   // it fell into the basket
+        pasteboard.clearContents(); pasteboard.setString("more words", forType: .string); watcher.check()
+        pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
+        try check(again.last == picture, "The same picture copied again comes back from the basket")
     }
 
     func checkShelves() throws {
