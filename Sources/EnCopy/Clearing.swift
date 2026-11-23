@@ -140,7 +140,7 @@ enum Retention {
     static let textDays: Double = 365
     static let originalDays: Double = 30
     nonisolated static let defaultCap: Int64 = 1 << 30
-    static let thumbnailPixels = 640
+    nonisolated static let thumbnailPixels = 640
 
     struct Result: Equatable {
         var expired: [URL] = []
@@ -176,9 +176,19 @@ enum Retention {
 
     @discardableResult
     static func run(history: History, clearing: Clearing, onLine: Set<String>, isKeptImage: (URL) -> Bool,
-                    now: Date = Date(), cap: Int64 = defaultCap) -> Result {
+                    now: Date = Date(), cap: Int64 = defaultCap, inBackground: Bool = false) -> Result {
         let result = plan(history: history, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
-        for url in result.shrunk { shrink(url, history: history) }
+        if inBackground {
+            // Decoding and encoding big pictures stays off the main thread
+            // (review #15); the history is marked back on it.
+            let urls = result.shrunk
+            DispatchQueue.global(qos: .utility).async {
+                let done = urls.filter { smaller($0) }
+                DispatchQueue.main.async { for url in done { history.markShrunk(url) } }
+            }
+        } else {
+            for url in result.shrunk { shrink(url, history: history) }
+        }
         if !result.expired.isEmpty { clearing.clear(result.expired, reason: "expired", history: history, now: now) }
         clearing.purge(now: now)
         return result
@@ -186,15 +196,30 @@ enum Retention {
 
     /// The original is replaced by a thumbnail at the same path. It cannot come back.
     static func shrink(_ url: URL, history: History) {
-        guard let thumb = makeThumbnail(url, maxPixels: thumbnailPixels),
-              let tiff = thumb.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
+        if smaller(url) { history.markShrunk(url) }
+    }
+
+    /// Writes the thumbnail over the original, in the original's own format
+    /// (a JPEG stays a JPEG). Safe off the main thread. Returns whether it did.
+    nonisolated static func smaller(_ url: URL) -> Bool {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let type = CGImageSourceGetType(source),
+              let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: thumbnailPixels,
+              ] as CFDictionary) else { return false }
+        let data = NSMutableData()
+        guard let output = CGImageDestinationCreateWithData(data, type, 1, nil) else { return false }
+        CGImageDestinationAddImage(output, thumb, nil)
+        guard CGImageDestinationFinalize(output) else { return false }
         do {
-            try png.write(to: url, options: .atomic)
+            try (data as Data).write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            history.markShrunk(url)
+            return true
         } catch {
             log.error("Could not shrink \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 }
@@ -213,6 +238,9 @@ struct CleanupFilter: Equatable {
 
     func candidates(history: History, onLine: Set<String>, isKeptImage: (URL) -> Bool, now: Date = Date()) -> [URL] {
         let words = SearchIndex.words(text)
+        // The words through the full-text index, once, not row by row (review #15).
+        let matching: Set<String>? = words.isEmpty ? nil
+            : Set(history.search(words, onLine: [], limit: max(1, history.count)).basket.map { $0.standardizedFileURL.path })
         return history.kept().filter { item in
             guard !onLine.contains(item.url.standardizedFileURL.path) else { return false }
             if let days = olderThanDays, now.timeIntervalSince(item.used) <= days * 86400 { return false }
@@ -222,10 +250,7 @@ struct CleanupFilter: Equatable {
                     : isKeptImage(item.url) ? .image : .file
                 if actual != kind { return false }
             }
-            if !words.isEmpty {
-                let have = history.words(of: item.url) ?? ""
-                if !words.allSatisfy({ have.contains($0) }) { return false }
-            }
+            if let matching, !matching.contains(item.url.standardizedFileURL.path) { return false }
             return true
         }.sorted { $0.used > $1.used }.map(\.url)
     }

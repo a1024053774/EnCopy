@@ -120,15 +120,29 @@ struct PeggedView: View {
     }
 
     /// Under a polaroid: when it was taken or copied.
+    /// The date is read from disk once per picture, and one formatter serves
+    /// every card: a redraw during a scroll or a breeze touches neither (review #15).
     private var polaroidCaption: String {
-        let date = (try? item.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+        let key = item.url.path as NSString
+        let date: Date
+        if let known = Self.created.object(forKey: key) {
+            date = known as Date
+        } else {
+            date = (try? item.url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+            Self.created.setObject(date as NSDate, forKey: key)
+        }
+        return Self.captionFormatter.string(from: date)
+    }
+
+    private static let created = NSCache<NSString, NSDate>()
+    private static let captionFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
         f.dateStyle = .short
         f.timeStyle = .short
         f.doesRelativeDateFormatting = true
-        return f.string(from: date)
-    }
+        return f
+    }()
 
     private var card: some View {
         paper
