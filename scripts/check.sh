@@ -30,6 +30,21 @@ if grep -rnE 'applicationSupportDirectory|Application Support' Sources/ | grep -
     exit 1
 fi
 
+# 3b. Every new file the app hears of, from the clipboard, the screenshot
+#     folder or a watched folder, goes through Line.shouldHang once each, and
+#     AppDelegate never decides with isKnown itself: a copy is written to the
+#     history before it is reported, so that test would drop every copy.
+for arrival in clipboard screenshots folder; do
+    if [ "$(grep -c "shouldHang(url, from: .$arrival)" Sources/EnCopy/AppDelegate.swift)" != "1" ]; then
+        echo "FAIL: AppDelegate must ask Line.shouldHang once for .$arrival" >&2
+        exit 1
+    fi
+done
+if grep -n 'isKnown(' Sources/EnCopy/AppDelegate.swift; then
+    echo "FAIL: AppDelegate must not decide what hangs with isKnown; use Line.shouldHang" >&2
+    exit 1
+fi
+
 # 4. Every L("...") has a translation in both languages, and no language
 #    keeps an entry the code no longer uses.
 swift scripts/check-strings.swift
