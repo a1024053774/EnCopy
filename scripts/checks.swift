@@ -436,6 +436,7 @@ struct CheckFailed: Error { let message: String }
         try checkEditOnlyOwnPictures()
         try checkSearchBeforeLimit()
         try checkDiscardedCodesNotInTrash()
+        try checkCopiedFilesClearToo()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1972,6 +1973,39 @@ struct CheckFailed: Error { let message: String }
         held.putBack()
         try check(left.isEmpty && !FileManager.default.fileExists(atPath: code.path) && id() == nil,
                   "When its time is up it is gone for good, and ⌘Z cannot bring it back")
+    }
+
+    /// Review 2, on #3: a file copied in an app set to clear in an hour
+    /// leaves the line after the hour; the file itself stays.
+    func checkCopiedFilesClearToo() throws {
+        let files = line()
+        let rules = ClipboardWatcher.appRules
+        defer { ClipboardWatcher.appRules = rules }
+        ClipboardWatcher.appRules = rules.merging(["com.tencent.xinWeChat": .hourly]) { _, new in new }
+        var front = "com.tencent.xinWeChat"
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: files.history, isSecureInput: { false }, frontApp: { front },
+                                       onNew: { _ = files.hang($0, quietly: true) }, onAgain: { files.rehang($0) })
+        watcher.isOnLine = { url in files.items.contains { $0.url == url && !$0.falling } }
+        watcher.fileLife = { files.setCardLife($0, $1) }
+        let doc = root.appendingPathComponent("Hourly contract.pdf"); try Data("%PDF".utf8).write(to: doc)
+        let other = root.appendingPathComponent("Everyday notes.pdf"); try Data("%PDF".utf8).write(to: other)
+        func onLine(_ url: URL) -> Bool { files.items.contains { $0.url == url && !$0.falling } }
+        func copy(_ url: URL) { pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check() }
+        copy(doc)
+        front = "com.apple.finder"
+        copy(other)
+        files.clearExpired(now: Date().addingTimeInterval(1800))
+        try check(onLine(doc) && onLine(other), "Within the hour both copied files hang")
+        files.clearExpired(now: Date().addingTimeInterval(3700))
+        try check(!onLine(doc) && onLine(other) && FileManager.default.fileExists(atPath: doc.path),
+                  "After the hour the file copied in the hourly app leaves the line; the file itself stays")
+
+        front = "com.tencent.xinWeChat"
+        copy(doc)
+        front = "com.apple.finder"
+        copy(doc)
+        files.clearExpired(now: Date().addingTimeInterval(3700))
+        try check(onLine(doc), "Copied again in an everyday app, it stays")
     }
 
     func checkShelves() throws {

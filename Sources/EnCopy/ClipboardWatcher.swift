@@ -128,6 +128,9 @@ final class ClipboardWatcher {
     /// Whether a file hangs on the line now; set by the app. A file copied
     /// again while it hangs comes back to the head (review #11).
     var isOnLine: (URL) -> Bool = { _ in false }
+    /// How long a copied file's card stays, by the app it was copied in:
+    /// nil for good. The file is the user's own; only the card goes.
+    var fileLife: (URL, TimeInterval?) -> Void = { _, _ in }
 
     init(pasteboard: NSPasteboard = .general,
          history: History,
@@ -177,7 +180,11 @@ final class ClipboardWatcher {
         // Finder's copies: files by the Files switch, pictures and videos by
         // the Images switch, each on its own (review 2 #6).
         if Self.filesEnabled || Self.imagesEnabled, let files = copiedFiles(pb) {
-            for url in files { if isOnLine(url) { onAgain(url) } else { onNew(url) } }
+            for url in files {
+                if isOnLine(url) { onAgain(url) } else { onNew(url) }
+                // In an app set to clear in an hour, a file's card goes too (review 2, on #3).
+                fileLife(url, ttl)
+            }
             return
         }
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {

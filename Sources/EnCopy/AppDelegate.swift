@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                self.hangCapture(url)
                                            },
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
+        clipboardWatcher.fileLife = { [weak self] url, ttl in self?.line.setCardLife(url, ttl) }
         clipboardWatcher.isOnLine = { [weak self] url in
             self?.line.items.contains { $0.url.standardizedFileURL == url.standardizedFileURL && !$0.falling } ?? false
         }

@@ -544,8 +544,40 @@ final class Line: ObservableObject {
 
     /// Copies under an app's hourly rule, and verification codes, whose time ran
     /// out since their last use: deleted outright, not to the Trash and not kept anywhere.
+    /// When a card of a file copied in an app set to clear in an hour
+    /// leaves the line, by path. Its file stays where it is: it is not
+    /// EnCopy's. Kept across launches.
+    private var cardLeaves: [String: Date] {
+        get { (UserDefaults.standard.dictionary(forKey: "cardLeaves") as? [String: Date]) ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: "cardLeaves") }
+    }
+
+    /// Copied with a time of its own, the card leaves then; copied without,
+    /// it stays (the copy that counts is the latest, as for notes).
+    func setCardLife(_ url: URL, _ ttl: TimeInterval?, now: Date = Date()) {
+        let path = url.standardizedFileURL.path
+        guard items.contains(where: { $0.url.standardizedFileURL.path == path && !$0.falling }) else { return }
+        cardLeaves[path] = ttl.map { now.addingTimeInterval($0) }
+    }
+
+    /// The cards whose time is up leave the line; pinned ones stay for good.
+    private func letCardsLeave(now: Date) {
+        var leaves = cardLeaves
+        guard !leaves.isEmpty else { return }
+        for (path, date) in leaves {
+            guard let item = items.first(where: { $0.url.standardizedFileURL.path == path && !$0.falling }) else {
+                leaves[path] = nil      // already off the line
+                continue
+            }
+            if item.kept { leaves[path] = nil; continue }
+            if date <= now { drop(item.id, quietly: true); leaves[path] = nil }
+        }
+        cardLeaves = leaves
+    }
+
     func clearExpired(now: Date = Date()) {
         purgeHeld(now: now)
+        letCardsLeave(now: now)
         let gone = history.expired(at: now)
         guard !gone.isEmpty else { return }
         for url in gone {
