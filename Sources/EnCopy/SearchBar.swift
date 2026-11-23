@@ -160,6 +160,8 @@ private struct SearchField: View {
         VStack(spacing: 0) {
             field.frame(height: 36)
             if line.basketOpen {
+                BasketKindChips(line: line)
+                    .padding(.bottom, 8)
                 Divider()
                 BasketListView(line: line)
             }
@@ -174,7 +176,8 @@ private struct SearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            if let kind = line.kindFilter {
+            // With the list open the chips under the field show the kind.
+            if let kind = line.kindFilter, !line.basketOpen {
                 Text(kind == .text ? L("Text") : kind == .link ? L("Links") : kind == .image ? L("Images") : L("Files"))
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 7).padding(.vertical, 2)

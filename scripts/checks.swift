@@ -402,6 +402,7 @@ struct CheckFailed: Error { let message: String }
         try checkBasketList()
         try checkBasketPapers()
         try checkBasketKeys()
+        try checkKindChips()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -2253,6 +2254,54 @@ struct CheckFailed: Error { let message: String }
         try check(sent == 1 && pasteboard.string(forType: .string) == "keys words t2" && pasteboard.data(forType: .rtf) == nil
                   && keys.items.filter { !$0.falling }.last?.url == urls["t2"],
                   "⇧⏎ in the list pastes the pick's words only, and it comes back to the head of the line")
+    }
+
+    /// T-047: the chips above the list count each kind of what the list
+    /// holds, follow the words typed, and narrow it as Tab does; every card
+    /// and row is tagged with what it is, code apart from text.
+    func checkKindChips() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Kind chip shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("kind-chips.sqlite"))
+        let chips = Line(pasteboard: pasteboard, desktop: root, history: history)
+        chips.maxItems = 1; chips.visibleCount = 8; chips.revealed = true
+        let t1 = try adoptedNote("chip-t1", "chip words budget sheet")
+        let t2 = try adoptedNote("chip-t2", "chip words meeting room")
+        let code = try adoptedNote("chip-code", "func chip() {\n    return budget\n}")
+        let l1 = try adoptedNote("chip-l1", "https://example.com/budget")
+        let l2 = try adoptedNote("chip-l2", "https://example.org/other")
+        let shot = try png("Chip shot.png", in: Inbox.folder)
+        for url in [t1, t2, code, l1, l2] { _ = chips.hang(url, quietly: true) }
+        _ = chips.hang(shot, quietly: true)
+        chips.search.onRead(shot, "BUDGET 2027 draft")
+        let last = try adoptedNote("chip-last", "chip words left hanging")
+        _ = chips.hang(last, quietly: true)
+        pump(0.7); chips.closeGaps()
+        chips.openBasket()
+        try check(chips.basketMatchCount == 6 && chips.basketKindCounts[.text] == 3 && chips.basketKindCounts[.link] == 2
+                  && chips.basketKindCounts[.image] == 1 && chips.basketKindCounts[.file] == nil,
+                  "The chips count six: three text (code among them), two links, one image, no files")
+        chips.query = "budget"
+        try check(chips.basketMatchCount == 4 && chips.basketKindCounts[.text] == 2 && chips.basketKindCounts[.link] == 1
+                  && chips.basketKindCounts[.image] == 1,
+                  "Typing narrows the counts with the list: two text, one link, one image match")
+        chips.query = ""
+        chips.kindFilter = .link
+        let byChip = chips.basketRows.map(\.url)
+        chips.kindFilter = nil
+        chips.cycleKind(1); chips.cycleKind(1)
+        try check(chips.kindFilter == .link && chips.basketRows.map(\.url) == byChip && Set(byChip) == [l1, l2],
+                  "A click on the links chip and Tab to links show the same two rows")
+        try check(chips.basketMatchCount == 6 && chips.basketKindCounts[.text] == 3, "Narrowed to links, the chips still count every kind")
+        chips.kindFilter = nil
+        try check(chips.tag(of: t1) == .text && chips.tag(of: code) == .code && chips.tag(of: l1) == .link
+                  && chips.tag(of: shot) == .image && chips.tag(of: try movie("Chip clip.mov")) == .video
+                  && chips.tag(of: try png("Chip file.pdf")) == .file,
+                  "Each thing is tagged with what it is: text, code, link, image, video, file")
+        chips.closeBasket()
     }
 
     func checkDesktopCopies() throws {

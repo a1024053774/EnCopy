@@ -183,3 +183,11 @@
 "Nothing in the basket matches" = "篮子里没有对上的";
 "The basket is empty" = "篮子是空的";
 "Type to narrow the basket" = "打字筛选篮子";
+
+/* Kind tags and chips (T-047) */
+"Code" = "代码";
+"Link" = "链接";
+"Image" = "图片";
+"Video" = "视频";
+"File" = "文件";
+"All" = "全部";

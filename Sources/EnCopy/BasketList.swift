@@ -90,6 +90,9 @@ private struct BasketRowView: View {
         let theme = line.theme
         let summary = line.basketSummary(row.url)
         HStack(spacing: 10) {
+            // What it is, first and the same width on every row (T-047).
+            KindTag(tag: line.tag(of: row.url))
+                .frame(width: 50, alignment: .leading)
             leading(card)
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.title)
@@ -105,12 +108,19 @@ private struct BasketRowView: View {
             }
             .truncationMode(.tail)
             Spacer(minLength: 8)
-            if Line.showsSourceApp, let app = row.app, let icon = AppIcons.icon(for: app) {
-                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 16, height: 16)
+            // The app and the time in columns of their own, so rows line up.
+            Group {
+                if Line.showsSourceApp, let app = row.app, let icon = AppIcons.icon(for: app) {
+                    Image(nsImage: icon).resizable().interpolation(.high)
+                } else {
+                    Color.clear
+                }
             }
+            .frame(width: 16, height: 16)
             Text(Self.time(row.used))
                 .font(theme.font(10.5, code: true).monospacedDigit())
                 .foregroundStyle(soft(card))
+                .frame(width: 74, alignment: .trailing)
         }
         .padding(.leading, card == .code ? 18 : 12).padding(.trailing, card == .code ? 18 : 12)
         .padding(.vertical, 7)
@@ -248,5 +258,92 @@ private struct TagShape: Shape {
         p.addLine(to: CGPoint(x: r.minX, y: r.minY + c))
         p.closeSubpath()
         return p
+    }
+}
+
+/// What something is, as a small coloured tag (T-047): on each card on the
+/// line and on each row of the basket list. One colour per kind, the same in
+/// every theme, so the kinds read apart at a glance.
+struct KindTag: View {
+    let tag: Line.Tag
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: Self.symbol(tag)).font(.system(size: 8, weight: .bold))
+            Text(Self.label(tag)).font(.system(size: 9.5, weight: .semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(Capsule().fill(Self.color(tag)))
+        .fixedSize()
+    }
+
+    static func label(_ tag: Line.Tag) -> String {
+        switch tag {
+        case .text: L("Text")
+        case .code: L("Code")
+        case .link: L("Link")
+        case .image: L("Image")
+        case .video: L("Video")
+        case .file: L("File")
+        }
+    }
+
+    static func symbol(_ tag: Line.Tag) -> String {
+        switch tag {
+        case .text: "text.alignleft"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .link: "link"
+        case .image: "photo"
+        case .video: "video.fill"
+        case .file: "doc.fill"
+        }
+    }
+
+    static func color(_ tag: Line.Tag) -> Color {
+        switch tag {
+        case .text: Color(red: 0.86, green: 0.52, blue: 0.10)
+        case .code: Color(red: 0.18, green: 0.58, blue: 0.34)
+        case .link: Color(red: 0.16, green: 0.44, blue: 0.86)
+        case .image: Color(red: 0.56, green: 0.34, blue: 0.86)
+        case .video: Color(red: 0.86, green: 0.28, blue: 0.30)
+        case .file: Color(red: 0.52, green: 0.38, blue: 0.24)
+        }
+    }
+}
+
+/// The chips above the basket list (T-047): all, text, links, images, each
+/// with how many the list holds. A click narrows the list, as Tab does.
+/// Files copied in Finder never fall into the basket, so they have none.
+struct BasketKindChips: View {
+    @ObservedObject var line: Line
+
+    var body: some View {
+        HStack(spacing: 6) {
+            chip(nil, L("All"), line.basketMatchCount, color: .secondary)
+            chip(.text, L("Text"), line.basketKindCounts[.text] ?? 0, color: KindTag.color(.text))
+            chip(.link, L("Links"), line.basketKindCounts[.link] ?? 0, color: KindTag.color(.link))
+            chip(.image, L("Images"), line.basketKindCounts[.image] ?? 0, color: KindTag.color(.image))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private func chip(_ kind: Line.Kind?, _ title: String, _ count: Int, color: Color) -> some View {
+        let on = line.kindFilter == kind
+        return Button(action: { line.kindFilter = kind }) {
+            HStack(spacing: 5) {
+                if kind != nil { Circle().fill(color).frame(width: 6, height: 6) }
+                Text(title).font(.system(size: 11.5, weight: .semibold))
+                Text("\(count)").font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(on ? Color.white.opacity(0.85) : Color.secondary)
+            }
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(Capsule().fill(on ? Color.accentColor : Color.primary.opacity(0.08)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .opacity(count == 0 && !on ? 0.45 : 1)
     }
 }

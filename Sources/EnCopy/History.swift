@@ -266,6 +266,22 @@ final class History {
         return out
     }
 
+    /// The words kept for every item kept for good, by absolute path: how the
+    /// basket list tells a link from a note without reading a file (T-047).
+    func keptWords() -> [String: String] {
+        guard let stmt = try? prepare("""
+            SELECT item.path, item_text.text FROM item LEFT JOIN item_text ON item_text.rowid = item.id
+            WHERE item.ttl IS NULL
+            """) else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [String: String] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let path = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) else { continue }
+            out[absoluteURL(path).standardizedFileURL.path] = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+        }
+        return out
+    }
+
     /// The picture's original is gone; a thumbnail stands in.
     func markShrunk(_ url: URL) {
         guard let path = relativePath(url) else { return }

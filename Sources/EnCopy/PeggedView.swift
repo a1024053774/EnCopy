@@ -151,6 +151,13 @@ struct PeggedView: View {
 
     private var card: some View {
         paper
+            // What it is, in the top corner (T-047).
+            .overlay(alignment: .topLeading) {
+                KindTag(tag: line.tag(of: item.url))
+                    .scaleEffect(0.9, anchor: .topLeading)
+                    .padding(.top, 5).padding(.leading, 5)
+                    .allowsHitTesting(false)
+            }
             // Where it was copied from, in the corner (T-042).
             .overlay(alignment: .bottomTrailing) {
                 if Line.showsSourceApp, let app = line.sourceApp(of: item.url), let icon = AppIcons.icon(for: app) {
