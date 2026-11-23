@@ -147,7 +147,8 @@ final class Line: ObservableObject {
     /// the basket fills the room left across the screen.
     private func recomputeSearch() {
         let words = SearchIndex.words(query)
-        let liveText = items.filter { !$0.falling && isText($0.url) }.map(\.url)
+        // Everything on the line that the history also keeps: notes and EnCopy's own pictures.
+        let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url)) }.map(\.url)
         var lineMatches = 0
         if words.isEmpty {
             basketCards = []
@@ -197,6 +198,20 @@ final class Line: ObservableObject {
         save()
     }
 
+    /// A picture EnCopy keeps in its own folder — a screenshot or a copied
+    /// image — goes into the history like a note, and into the basket when
+    /// it falls off a full line (T-030).
+    func isKeptImage(_ url: URL) -> Bool {
+        guard !isText(url), !isRecording(url), !isFile(url), let folder = Inbox.folder else { return false }
+        return url.standardizedFileURL.path.hasPrefix(folder.standardizedFileURL.path + "/")
+    }
+
+    /// Gives the history its row for what is kept: a note's words, or a
+    /// picture's row, whose words come when they have been read.
+    private func keep(_ url: URL) {
+        if isText(url) { history.record(url) } else if isKeptImage(url) { history.recordImage(url, text: nil) }
+    }
+
     /// Photos hung by hand. They hang together at the left end of the line,
     /// before the knot, and never fall to make room.
     var keptCount: Int { items.filter { !$0.falling && $0.kept }.count }
@@ -224,6 +239,12 @@ final class Line: ObservableObject {
         Note.sourceOf = { [weak kept] url in kept?.app(of: url).flatMap(History.appName) }
         Note.clearsOf = { [weak kept] url in kept?.ttl(of: url).map(Line.clearsText) }
         restore()
+        // The words read from a kept picture go into the history, so the
+        // basket finds it after it falls off the line.
+        search.onRead = { [weak self] url, text in
+            guard let self, self.isKeptImage(url) else { return }
+            self.history.recordImage(url, text: text)
+        }
         search.onChange = { [weak self] in
             self?.recomputeSearch()
             self?.objectWillChange.send()
@@ -247,7 +268,7 @@ final class Line: ObservableObject {
         // The line moves anyway for a new photo, so the gaps close with it.
         sweepFallen()
         items.append(item)
-        if isText(url) { history.record(url) }
+        keep(url)
         scroll = 0
         // A full line lets the oldest photo fall off the far end. Only one: a
         // line hung on a wider screen keeps its length here instead of losing
@@ -381,7 +402,7 @@ final class Line: ObservableObject {
     /// Photos whose file was deleted or moved away fall off by themselves.
     func prune() {
         for item in items where !item.falling && !FileManager.default.fileExists(atPath: item.url.path) {
-            if isText(item.url) { history.remove(item.url) }
+            history.remove(item.url)
             drop(item.id, quietly: true)
         }
     }
@@ -467,7 +488,7 @@ final class Line: ObservableObject {
     private func copyPhotos(_ photos: [Pegged], plain: Bool = false) {
         guard !photos.isEmpty else { return }
         putOnClipboard(photos.map(\.url), plain: plain)
-        for url in photos.map(\.url) where isText(url) { history.use(url) }
+        for url in photos.map(\.url) { history.use(url) }
         moveToHead(photos.map(\.id))
         flashCopied(photos)
     }
@@ -672,7 +693,7 @@ final class Line: ObservableObject {
             if soundOn && !quietly { Line.trashSound?.play() }
             // Out of the history before the line saves: the search must
             // not find it again on the way down.
-            if isText(item.url) { history.remove(item.url) }
+            history.remove(item.url)
             drop(id, quietly: true)
             if let step, let index {
                 remember(TakenDown(url: item.url, index: index, trashed: trashed as URL?, kept: item.kept, byHand: item.byHand), in: step)
@@ -734,7 +755,7 @@ final class Line: ObservableObject {
         if isInInbox(id), items.first(where: { $0.id == id })?.kept == false {
             trash(id, quietly: quietly, step: step)
         } else if let item = items.first(where: { $0.id == id && !$0.falling }), let index = liveIndex(of: id) {
-            if isText(item.url) { history.remove(item.url) }
+            history.remove(item.url)
             drop(id, quietly: quietly)
             remember(TakenDown(url: item.url, index: index, trashed: nil, kept: item.kept, byHand: item.byHand), in: step)
         }
@@ -756,12 +777,12 @@ final class Line: ObservableObject {
         scroll = 0
     }
 
-    /// The oldest photo falling off a full line. Like the cross, a file from
-    /// EnCopy's folder goes to the Trash, or nothing would ever take it out
-    /// of that folder — except text: it falls into the basket instead, file
-    /// and row kept. If the Trash refuses a photo, it still leaves the line.
+    /// The oldest photo falling off a full line. Text and EnCopy's own pictures
+    /// fall into the basket, file and row kept (T-030). Anything else from
+    /// EnCopy's folder, a recording, goes to the Trash; files from elsewhere
+    /// only leave the line. If the Trash refuses one, it still leaves the line.
     private func letGo(_ id: UUID) {
-        if let url = items.first(where: { $0.id == id })?.url, isText(url) {
+        if let url = items.first(where: { $0.id == id })?.url, isText(url) || isKeptImage(url) {
             drop(id, quietly: true)
             return
         }
@@ -813,7 +834,7 @@ final class Line: ObservableObject {
             } else {
                 try FileManager.default.moveItem(at: item.url, to: target)
                 clipboardFollows(item.url, to: target)
-                if isText(item.url) { history.remove(item.url) }
+                history.remove(item.url)
             }
             let identity = DesktopSave(target)
             desktopSaves[target.standardizedFileURL] = identity
@@ -859,7 +880,7 @@ final class Line: ObservableObject {
         guard let i = items.firstIndex(where: { $0.url == url && !$0.falling }),
               let thumb = makeThumbnail(url) else { return }
         items[i].thumb = thumb
-        if isText(url) { history.record(url) }
+        keep(url)
         indexForSearch()
     }
 
@@ -978,7 +999,7 @@ final class Line: ObservableObject {
             } else {
                 insert(item, atLiveIndex: photo.index)
             }
-            if isText(url) { history.record(url) }
+            keep(url)
             back.insert(item.id)
         }
         guard !back.isEmpty else {
@@ -1172,7 +1193,7 @@ final class Line: ObservableObject {
             items.append(item)
         }
         // Notes hung before the history existed get their rows here.
-        for item in items where isText(item.url) { history.record(item.url) }
+        for item in items { keep(item.url) }
         keepKeptFirst()
     }
 

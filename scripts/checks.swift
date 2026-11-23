@@ -358,6 +358,7 @@ struct CheckFailed: Error { let message: String }
         try checkAppRules()
         try checkVerificationCodes()
         try checkFiles()
+        try checkImagesInBasket()
         try checkDataFolder()
         try checkHistory()
     }
@@ -840,6 +841,51 @@ struct CheckFailed: Error { let message: String }
         pasteboard.clearContents(); pasteboard.writeObjects([docs as NSURL]); watcher.check()
         try check(files.liveCount == 0, "With files turned off, a copied file does not hang")
         ClipboardWatcher.filesEnabled = true
+    }
+
+    /// T-030: EnCopy's own pictures fall into the basket instead of the
+    /// Trash, are found there by the words read from them, and come back.
+    func checkImagesInBasket() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Basket check shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("images.sqlite"))
+        let shots = Line(pasteboard: pasteboard, desktop: root, history: history)
+        shots.maxItems = 2; shots.visibleCount = 8; shots.revealed = true
+        let a = try png("Screenshot A.png", in: Inbox.folder), b = try png("Screenshot B.png", in: Inbox.folder, red: 0.6)
+        let c = try png("Screenshot C.png", in: Inbox.folder, red: 0.9)
+        let outside = try png("Outside.png")
+        try check(shots.isKeptImage(a) && !shots.isKeptImage(outside), "A screenshot in EnCopy's folder is kept; a picture elsewhere is not")
+        _ = shots.hang(a, quietly: true)
+        shots.search.onRead(a, "INVOICE 7731 paid")
+        _ = shots.hang(b, quietly: true)
+        _ = shots.hang(c, quietly: true)
+        pump(0.7); shots.closeGaps()
+        try check(shots.items.map(\.url) == [b, c] && FileManager.default.fileExists(atPath: a.path) && history.count == 3,
+                  "A full line lets the oldest screenshot fall into the basket, file and row kept, not to the Trash")
+        shots.query = "invoice"
+        try check(shots.basketCards.map(\.url) == [a], "Typing the words read from it finds it in the basket")
+        let card = shots.basketCards[0].id
+        shots.copy(card)
+        try check(shots.items.last?.url == a && copiedURLs == [a], "Copying it from the basket brings it back to the head of the line")
+        shots.query = ""
+        pump(0.7); shots.closeGaps()
+        shots.query = "invoice"
+        let id = shots.items.first { $0.url == a }!.id
+        shots.query = ""
+        shots.discard(id)
+        try check(!FileManager.default.fileExists(atPath: a.path) && history.count == 2, "Taking it down trashes the file and forgets its row")
+        shots.putBack()
+        try check(FileManager.default.fileExists(atPath: a.path) && history.count == 3, "Put back brings back both the file and its row")
+        UserDefaults.standard.removeObject(forKey: "pegged")
+        let other = Line(pasteboard: pasteboard, desktop: root, history: History(file: root.appendingPathComponent("images2.sqlite")))
+        other.maxItems = 1; other.visibleCount = 8
+        _ = other.hang(outside, quietly: true)
+        _ = other.hang(try png("Outside 2.png"), quietly: true)
+        pump(0.7); other.closeGaps()
+        try check(FileManager.default.fileExists(atPath: outside.path) && other.history.count == 0, "A picture from elsewhere only leaves the line, as before")
     }
 
     func checkDesktopCopies() throws {

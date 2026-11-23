@@ -168,6 +168,38 @@ final class History {
         return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
+    /// A picture EnCopy keeps (T-030): a row of its own, with the words read
+    /// from it once they are ready. Nil text keeps whatever words it has.
+    func recordImage(_ url: URL, text: String?) {
+        guard !isText(url), let path = relativePath(url), FileManager.default.fileExists(atPath: url.path),
+              let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
+        let hash = Data(SHA256.hash(data: Data(("image:" + path).utf8)))
+        let used = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate)?
+            .timeIntervalSince1970 ?? Date().timeIntervalSince1970
+        attempt("record image") {
+            try transaction {
+                try run("""
+                    INSERT INTO item (path, hash, modified, used) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(path) DO UPDATE SET modified = excluded.modified
+                    """, bind: { stmt in
+                        bind(stmt, 1, path)
+                        bind(stmt, 2, hash)
+                        bind(stmt, 3, modified)
+                        bind(stmt, 4, used)
+                    })
+                let id = try scalar("SELECT id FROM item WHERE path = ?", bind: { bind($0, 1, path) })
+                guard id != 0 else { throw Failure(message: "the picture's row is missing after the upsert") }
+                let hasWords = try scalar("SELECT COUNT(*) FROM item_text WHERE rowid = ?", bind: { bind($0, 1, id) }) > 0
+                guard text != nil || !hasWords else { return }
+                try run("DELETE FROM item_text WHERE rowid = ?", bind: { bind($0, 1, id) })
+                try run("INSERT INTO item_text (rowid, text) VALUES (?, ?)", bind: { stmt in
+                    bind(stmt, 1, id)
+                    bind(stmt, 2, SearchIndex.fold(text ?? ""))
+                })
+            }
+        }
+    }
+
     /// Used: pasted or copied out of EnCopy, or the same words copied again.
     func use(_ url: URL) {
         guard let path = relativePath(url) else { return }
