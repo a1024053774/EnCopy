@@ -431,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateCapacity()
         wanted = true
         refresh()
-        if Self.peeksAtNew { reveal(peekFor: 2.5) } else if !isRevealed { swayMenuBarPegs() }
+        if Self.peeksAtNew { reveal(peekFor: Line.peekSeconds) } else if !isRevealed { swayMenuBarPegs() }
     }
 
     /// ⏎: the pasted paper leaves its peg and flies to the pointer,
@@ -914,7 +914,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateCapacity()
             wanted = true
             refresh()
-            reveal(peekFor: 2.5)
+            reveal(peekFor: Line.peekSeconds)
         }
         line.putBack()
     }

@@ -69,6 +69,17 @@ final class Line: ObservableObject {
     /// Keep on line, from the menu bar: how many photos the line keeps, or
     /// nil for as many as fit across the screen.
     nonisolated static let keepChoices = [25, 50, 100]
+
+    /// How long the line shows something new before tucking away (T-040).
+    /// 2.5 seconds got in the way of work; 1.5 is the default now.
+    nonisolated static let peekChoices: [Double] = [0.8, 1.5, 2.5, 4]
+    nonisolated static var peekSeconds: Double {
+        get {
+            let stored = UserDefaults.standard.double(forKey: "peekSeconds")
+            return peekChoices.contains(stored) ? stored : 1.5
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "peekSeconds") }
+    }
     nonisolated static var keepOnLine: Int? {
         get {
             let n = UserDefaults.standard.integer(forKey: "keepOnLine")
