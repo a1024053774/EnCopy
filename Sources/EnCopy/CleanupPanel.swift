@@ -8,6 +8,7 @@ import SwiftUI
 final class CleanupPanel {
     static let shared = CleanupPanel()
     private var window: NSWindow?
+    private var model: CleanupModel?
 
     func show(line: Line) {
         if window == nil {
@@ -15,10 +16,14 @@ final class CleanupPanel {
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             w.title = L("Clean Up History")
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: CleanupView(model: CleanupModel(line: line)))
+            let model = CleanupModel(line: line)
+            self.model = model
+            w.contentView = NSHostingView(rootView: CleanupView(model: model))
             w.center()
             window = w
         }
+        // Opened again: list what is true now, not what was (review #13).
+        model?.refresh()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }

@@ -382,6 +382,7 @@ struct CheckFailed: Error { let message: String }
         try checkDragOperations()
         try checkMarkupOnlyPictures()
         try checkPutBackNotNew()
+        try checkCleanupAtClearTime()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1372,6 +1373,29 @@ struct CheckFailed: Error { let message: String }
         try check(FileManager.default.fileExists(atPath: old.path) && shots.isKnown(old), "Put back, it is known again: not a new screenshot")
         let fresh = try png("Fresh shot.png", in: Inbox.folder)
         try check(!shots.isKnown(fresh), "A screenshot just taken is new")
+    }
+
+    /// Review #13: clearing re-checks what is on the line at that moment, and
+    /// a row whose file is already gone is cleared too.
+    func checkCleanupAtClearTime() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("cleanup-fresh.sqlite"))
+        let tidy = Line(pasteboard: pasteboard, desktop: root, history: history)
+        tidy.maxItems = 100; tidy.visibleCount = 8
+        tidy.clearing = Clearing(folder: root.appendingPathComponent("cleared-fresh", isDirectory: true))
+        let back = try adoptedNote("fresh-back", "comes back to the line")
+        let ghost = try adoptedNote("fresh-ghost", "deleted in Finder")
+        for url in [back, ghost] { history.record(url, text: try String(contentsOf: url, encoding: .utf8)) }
+        let picked = tidy.cleanupCandidates(CleanupFilter())
+        try check(Set(picked) == [back, ghost], "Both are candidates while in the basket")
+        _ = tidy.hang(back, quietly: true)                      // used again meanwhile: back on the line
+        try FileManager.default.removeItem(at: ghost)            // deleted in Finder meanwhile
+        tidy.cleanUp(picked)
+        try check(FileManager.default.fileExists(atPath: back.path) && history.contains(back),
+                  "What came back to the line since the panel listed it is not cleared")
+        try check(!history.contains(ghost) && tidy.cleanupCandidates(CleanupFilter()).isEmpty,
+                  "A row whose file is already gone is cleared, not left behind")
     }
 
     func checkShelves() throws {

@@ -510,16 +510,20 @@ final class Line: ObservableObject {
     /// Clears them into 「最近清掉」 as one batch.
     @discardableResult
     func cleanUp(_ urls: [URL], now: Date = Date()) -> Clearing.Batch? {
-        let batch = clearing.clear(urls, reason: "manual", history: history, now: now)
+        // The panel listed these a while ago: what has come back onto the
+        // line since stays (review #13).
+        let onLine = onLinePaths
+        let batch = clearing.clear(urls.filter { !onLine.contains($0.standardizedFileURL.path) },
+                                   reason: "manual", history: history, now: now)
         if isSearching { recomputeSearch() }
         return batch
     }
 
-    /// A batch from 「最近清掉」 goes back into the basket.
     /// Already in the history: a file put back from Recently Cleared, not a
     /// screenshot just taken (review #7).
     func isKnown(_ url: URL) -> Bool { history.contains(url) }
 
+    /// A batch from 「最近清掉」 goes back into the basket.
     func putBack(batch id: String) {
         clearing.putBack(id, history: history)
         if isSearching { recomputeSearch() }
