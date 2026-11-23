@@ -2039,7 +2039,8 @@ struct CheckFailed: Error { let message: String }
         let picture = try png("Taxi receipt.png", in: root.appendingPathComponent("Receipts 2027", isDirectory: true))
         let own = try png("Own taxi shot.png", in: DataFolder.url.appendingPathComponent("Name check shots", isDirectory: true))
         for url in [picture, own] { _ = named.hang(url, quietly: true) }      // what hangs is what is indexed
-        for _ in 0..<100 where !named.search.matches(picture, SearchIndex.words("taxi")) { pump(0.05) }
+        // Text recognition runs alongside; under load it can take several seconds.
+        for _ in 0..<400 where !named.search.matches(picture, SearchIndex.words("taxi")) { pump(0.05) }
         try check(named.search.matches(picture, SearchIndex.words("taxi receipt")) && named.search.matches(picture, SearchIndex.words("receipts 2027")),
                   "A picture from Finder is found by its name and its folder")
         try check(!named.search.matches(own, SearchIndex.words("taxi")), "EnCopy's own screenshot is not found by its file name")
