@@ -401,6 +401,7 @@ struct CheckFailed: Error { let message: String }
         try checkShrinkRespectsClearing()
         try checkFinderPicturesWithoutFiles()
         try checkPutBackKeepsApp()
+        try checkQuickLookWithFallingPin()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1824,6 +1825,22 @@ struct CheckFailed: Error { let message: String }
         guard let batch = clearing.clear([picture], reason: "manual", history: history) else { throw CheckFailed(message: "Nothing was cleared") }
         _ = clearing.putBack(batch.id, history: history)
         try check(history.app(of: picture) == "com.tencent.xinWeChat", "A picture put back still knows the app it was copied from")
+    }
+
+    /// Review 2, finding 9: Quick Look keeps the screen's order while a
+    /// pinned card is still falling.
+    func checkQuickLookWithFallingPin() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let look = line()
+        let urls = try (0..<3).map { try png("Falling pin \($0).png", red: CGFloat($0) / 3) }
+        for url in urls { _ = look.hang(url, quietly: true) }
+        func id(_ url: URL) -> UUID { look.items.first { $0.url == url }!.id }
+        look.togglePin(id(urls[0]))
+        look.discard(id(urls[0]))                       // still falling, holding its place
+        try check(look.items.contains { $0.url == urls[0] && $0.falling }, "The pinned card is falling")
+        let found = look.quickLookItems(for: id(urls[2]))
+        try check(found?.urls == [urls[2], urls[1]] && found?.index == 0, "Quick Look still goes newest first, as on screen")
     }
 
     func checkShelves() throws {
