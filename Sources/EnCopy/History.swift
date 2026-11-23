@@ -205,6 +205,14 @@ final class History {
         if ttl == nil || self.ttl(of: url) != nil { setTTL(url, ttl) }
     }
 
+    /// When an item with a ttl clears by itself: its last use plus its ttl.
+    func expiry(of url: URL) -> Date? {
+        guard let path = relativePath(url),
+              let row = try? strings("SELECT used + ttl FROM item WHERE path = ? AND ttl IS NOT NULL", bind: { bind($0, 1, path) }).first,
+              let seconds = TimeInterval(row) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     func expired(at now: Date) -> [URL] {
         let paths = (try? strings("SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= ?", bind: { bind($0, 1, now.timeIntervalSince1970) })) ?? []
         return paths.map(absoluteURL)
