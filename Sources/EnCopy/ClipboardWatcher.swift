@@ -125,6 +125,10 @@ final class ClipboardWatcher {
     private static let maxBytes = 64 * 1024 * 1024
     nonisolated private static let maxPixels = 80_000_000
 
+    /// Whether a file hangs on the line now; set by the app. A file copied
+    /// again while it hangs comes back to the head (review #11).
+    var isOnLine: (URL) -> Bool = { _ in false }
+
     init(pasteboard: NSPasteboard = .general,
          history: History,
          isSecureInput: @escaping () -> Bool = { IsSecureEventInputEnabled() },
@@ -171,7 +175,7 @@ final class ClipboardWatcher {
         let ttl = rule == .hourly ? Self.hourly : nil
         // Files copied in Finder hang where they are; nothing is copied.
         if Self.filesEnabled, let files = copiedFiles(pb) {
-            for url in files { onNew(url) }
+            for url in files { if isOnLine(url) { onAgain(url) } else { onNew(url) } }
             return
         }
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
@@ -299,7 +303,9 @@ final class ClipboardWatcher {
     /// `app` and `ttl` are as when it was copied: the picture is cleared by
     /// its app's rule like text, and cleanup by app finds it (review #3).
     private func save(_ png: Data, app: String?, ttl: TimeInterval?) {
-        if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) { return }
+        // The picture copied last, copied again: it comes back to the head,
+        // from the basket if it fell there (review #11).
+        if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) { onAgain(last.url); return }
         let fm = FileManager.default
         var url = Inbox.folder.appendingPathComponent("Clipboard \(Self.stamp()).png")
         var n = 2

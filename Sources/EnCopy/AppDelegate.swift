@@ -88,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.hangCapture(url)
                 },
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
+        clipboardWatcher.isOnLine = { [weak self] url in
+            self?.line.items.contains { $0.url.standardizedFileURL == url.standardizedFileURL && !$0.falling } ?? false
+        }
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() }
         line.clearExpired()
         retentionIfDue()
