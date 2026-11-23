@@ -90,6 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar = SearchBar(line: line)
         searchBar.onMove = { [weak self] in self?.line.movePick($0) }
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
+        searchBar.onPlainReturn = { [weak self] in self?.paster.pastePicked(plain: true) }
+        searchBar.onPin = { [weak self] in if let id = self?.line.picked?.id { self?.line.togglePin(id) } }
+        searchBar.onQuickLook = { [weak self] in if let id = self?.line.picked?.id { self?.line.quickLook(id) } }
         searchBar.onEnd = { [weak self] in self?.endSearch(tuckAway: true) }
         paster = Paster(line: line)
         line.onPaste = { [weak self] id in self?.paster.paste(id) }

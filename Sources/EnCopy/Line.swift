@@ -407,10 +407,11 @@ final class Line: ObservableObject {
 
     // MARK: Actions on photos
 
-    func copy(_ id: UUID) {
+    /// `plain`: words only, no styling (⇧⏎). A photo has no words and copies as usual.
+    func copy(_ id: UUID, plain: Bool = false) {
         reclaim(id)
         guard let item = items.first(where: { $0.id == id && !$0.falling }) else { return }
-        copyPhotos([item])
+        copyPhotos([item], plain: plain)
     }
 
     func copy(_ ids: [UUID]) {
@@ -420,9 +421,9 @@ final class Line: ObservableObject {
     /// Copying is using: what is copied goes to the head of the line, so
     /// the next ⌥C picks what the clipboard holds. Pasting copies first,
     /// so it goes the same way.
-    private func copyPhotos(_ photos: [Pegged]) {
+    private func copyPhotos(_ photos: [Pegged], plain: Bool = false) {
         guard !photos.isEmpty else { return }
-        putOnClipboard(photos.map(\.url))
+        putOnClipboard(photos.map(\.url), plain: plain)
         for url in photos.map(\.url) where isText(url) { history.use(url) }
         moveToHead(photos.map(\.id))
         flashCopied(photos)
@@ -465,7 +466,7 @@ final class Line: ObservableObject {
     /// right after. While the count is the same, nothing else has been copied.
     private var onClipboard: (urls: [URL], change: Int)?
 
-    private func putOnClipboard(_ urls: [URL]) {
+    private func putOnClipboard(_ urls: [URL], plain: Bool = false) {
         // Several notes paste as one text, a blank line apart: most apps
         // paste only the first item of a copy.
         if urls.count > 1, urls.allSatisfy(isText) {
@@ -486,7 +487,7 @@ final class Line: ObservableObject {
             if isText(url) {
                 if url.pathExtension.lowercased() == "rtf", let data = try? Data(contentsOf: url) {
                     let data = lightPageRTF(data)
-                    entry.setData(data, forType: .rtf)
+                    if !plain { entry.setData(data, forType: .rtf) }
                     if let plain = NSAttributedString(rtf: data, documentAttributes: nil)?.string {
                         entry.setString(plain, forType: .string)
                     }
@@ -817,6 +818,12 @@ final class Line: ObservableObject {
     }
 
     /// Quick Look on this photo, with the rest of the line a key press away.
+    /// ⌘P while summoned: pinned goes loose, loose gets pinned.
+    func togglePin(_ id: UUID) {
+        guard let item = items.first(where: { $0.id == id && !$0.falling }) else { return }
+        if item.kept { unpin(id) } else { pin(id) }
+    }
+
     func quickLook(_ id: UUID) {
         let live = items.filter { !$0.falling }
         guard let index = live.firstIndex(where: { $0.id == id }) else { return }
