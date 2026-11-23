@@ -64,8 +64,13 @@ struct Note {
     /// The app it was copied from, by name, when it is known.
     var app: String? = nil
 
+    /// When it clears by itself ("Clears in an hour"), if it does.
+    var clears: String? = nil
+
     /// Where a note's source app comes from; the line points it at its history.
     @MainActor static var sourceOf: ((URL) -> String?)?
+    /// Where a note's own clearing time comes from, likewise.
+    @MainActor static var clearsOf: ((URL) -> String?)?
 
     /// Read once per thumbnail and kept, so drawing the line never touches
     /// the disk.
@@ -88,6 +93,7 @@ struct Note {
         guard var note = read(url) else { return nil }
         note.modified = modificationDate(url)
         note.app = sourceOf?(url)
+        note.clears = clearsOf?(url)
         cache[url] = note
         return note
     }
@@ -189,7 +195,7 @@ struct Note {
     }
 
     /// The date, and the app it came from when that is known.
-    var caption: String { app.map { "\(dateText) · \($0)" } ?? dateText }
+    var caption: String { [dateText, app, clears].compactMap { $0 }.joined(separator: " · ") }
 }
 
 /// A sheet from Notes: the yellow band, the perforation it was torn along,

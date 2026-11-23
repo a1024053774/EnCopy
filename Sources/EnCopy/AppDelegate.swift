@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let zoom = Zoom()
     private var cancellables = Set<AnyCancellable>()
     private var mouseTimer: Timer?
+    /// Once a minute: copies whose own time ran out are cleared.
+    private var expiryTimer: Timer?
 
     /// Whether the panel is ordered in. It can be in and still tucked away
     /// above the top edge, like an auto-hiding Dock.
@@ -84,6 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            onNew: { [weak self] url in self?.hangCapture(url) },
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() }
+        line.clearExpired()
+        let expiry = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Not while you are picking: nothing leaves under your hand.
+                guard let self, self.searchBar?.isShown != true else { return }
+                self.line.clearExpired()
+            }
+        }
+        RunLoop.main.add(expiry, forMode: .common)
+        expiryTimer = expiry
         noteWatcher = NoteWatcher { [weak self] in self?.line.refreshNotes() }
         noteWatcher.start()
 
@@ -1020,6 +1032,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pause.state = ClipboardWatcher.isPaused ? .on : .off
         pause.toolTip = L("Nothing you copy is kept while this is on")
         menu.addItem(pause)
+        menu.addItem(appRulesItem())
         let kinds: [(String, String, ReferenceWritableKeyPath<ClipboardWatcher.Type, Bool>)] = [
             (L("Images"), L("Images you copy hang on the line too"), \.imagesEnabled),
             (L("Text"), L("Text you copy hangs on the line too"), \.textEnabled),
@@ -1121,6 +1134,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(ClosureMenuItem(L("Quit EnCopy"), key: "q") {
             NSApp.terminate(nil)
         })
+    }
+
+    /// By app: each app with a rule, and the app in front, gets three choices.
+    private func appRulesItem() -> NSMenuItem {
+        let item = NSMenuItem(title: L("By app"), action: nil, keyEquivalent: "")
+        let apps = NSMenu()
+        apps.autoenablesItems = false
+        var ids = ClipboardWatcher.appRules.keys.sorted { (History.appName($0) ?? $0) < (History.appName($1) ?? $1) }
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, front != Bundle.main.bundleIdentifier {
+            ids.removeAll { $0 == front }
+            ids.insert(front, at: 0)
+        }
+        for id in ids {
+            let app = NSMenuItem(title: History.appName(id) ?? id, action: nil, keyEquivalent: "")
+            let choices = NSMenu()
+            for (rule, title) in [(ClipboardWatcher.AppRule.normal, L("Record normally")), (.hourly, L("Clear after an hour")), (.skip, L("Don't record"))] {
+                let choice = ClosureMenuItem(title) {
+                    var rules = ClipboardWatcher.appRules
+                    rules[id] = rule
+                    ClipboardWatcher.appRules = rules
+                }
+                choice.state = ClipboardWatcher.rule(for: id) == rule ? .on : .off
+                choices.addItem(choice)
+            }
+            app.submenu = choices
+            apps.addItem(app)
+        }
+        item.submenu = apps
+        return item
     }
 
     /// EnCopy's releases on GitHub.

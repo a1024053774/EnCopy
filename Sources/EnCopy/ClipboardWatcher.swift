@@ -56,6 +56,30 @@ final class ClipboardWatcher {
         set { UserDefaults.standard.set(newValue, forKey: pausedKey) }
     }
 
+    /// What to do with copies from one app (T-027): keep them, keep them for
+    /// an hour after their last use, or never record them.
+    enum AppRule: String { case normal, hourly, skip }
+
+    /// Passwords and Keychain Access are never recorded unless you say so.
+    static let presetSkips = ["com.apple.Passwords", "com.apple.keychainaccess"]
+    private static let rulesKey = "appRules"
+
+    /// Every app with a rule of its own, by bundle id.
+    static var appRules: [String: AppRule] {
+        get {
+            guard let raw = UserDefaults.standard.dictionary(forKey: rulesKey) as? [String: String] else {
+                return Dictionary(uniqueKeysWithValues: presetSkips.map { ($0, AppRule.skip) })
+            }
+            return raw.compactMapValues(AppRule.init(rawValue:))
+        }
+        set { UserDefaults.standard.set(newValue.mapValues(\.rawValue), forKey: rulesKey) }
+    }
+
+    static func rule(for app: String?) -> AppRule { app.flatMap { appRules[$0] } ?? .normal }
+
+    /// How long copies under the hourly rule stay after their last use.
+    static let hourly: TimeInterval = 3600
+
     /// The clipboard is watched while anything is on and recording is not paused.
     static var isEnabled: Bool { !isPaused && (imagesEnabled || textEnabled || linksEnabled) }
 
@@ -115,12 +139,17 @@ final class ClipboardWatcher {
         let count = pb.changeCount
         guard count != lastCount else { return }
         lastCount = count
+        let app = frontApp()
+        let rule = Self.rule(for: app)
+        // An app you never want recorded leaves no trace, text or image.
+        guard rule != .skip else { return }
+        let ttl = rule == .hourly ? Self.hourly : nil
         if Self.textEnabled || Self.linksEnabled, let (text, rtf) = copiedText(pb) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if Note.webAddress(trimmed) != nil {
-                if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true, app: frontApp()) }
+                if Self.linksEnabled { save(text: trimmed, rtf: nil, link: true, app: app, ttl: ttl) }
             } else if Self.textEnabled {
-                save(text: text, rtf: rtf, link: false, app: frontApp())
+                save(text: text, rtf: rtf, link: false, app: app, ttl: ttl)
             }
             return
         }
@@ -183,7 +212,7 @@ final class ClipboardWatcher {
 
     /// Notes and links go to their own folder, apart from the screenshots.
     /// The same words again add nothing: the kept note comes back instead.
-    private func save(text: String, rtf: Data?, link: Bool, app: String?) {
+    private func save(text: String, rtf: Data?, link: Bool, app: String?, ttl: TimeInterval?) {
         if let kept = history.note(holding: text) { onAgain(kept); return }
         let ext = rtf == nil ? "txt" : "rtf"
         let name = link ? "Link" : "Text"
@@ -199,7 +228,7 @@ final class ClipboardWatcher {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             try (rtf ?? Data(text.utf8)).write(to: url, options: .atomic)
             try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            history.record(url, text: text, app: app)
+            history.record(url, text: text, app: app, ttl: ttl)
             onNew(url)
         } catch {
             try? fm.removeItem(at: url)

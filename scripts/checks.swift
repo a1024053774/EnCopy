@@ -355,6 +355,7 @@ struct CheckFailed: Error { let message: String }
         try checkPickKeys()
         try checkTabFilter()
         try checkSourceApp()
+        try checkAppRules()
         try checkDataFolder()
         try checkHistory()
     }
@@ -722,6 +723,50 @@ struct CheckFailed: Error { let message: String }
         pasteboard.clearContents(); pasteboard.setString("old schema words", forType: .string); watcher2.check()
         try check(upgraded.app(of: hung.last!) == "com.apple.finder", "A history from before gets the app column and keeps the app")
         Note.sourceOf = nil
+    }
+
+    /// T-027: per-app rules. Passwords and Keychain Access are preset to
+    /// never record; "clear after an hour" keeps a copy for an hour after its
+    /// last use, then deletes it outright.
+    func checkAppRules() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("rules.sqlite"))
+        let rules = Line(pasteboard: pasteboard, desktop: root, history: history)
+        rules.maxItems = 100; rules.visibleCount = 8; rules.revealed = true
+        var front = "com.apple.Passwords"
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { front },
+                                       onNew: { hung.append($0); _ = rules.hang($0, quietly: true) }, onAgain: { _ in })
+        func copy(_ text: String) { pasteboard.clearContents(); pasteboard.setString(text, forType: .string); watcher.check() }
+        try check(ClipboardWatcher.rule(for: "com.apple.Passwords") == .skip && ClipboardWatcher.rule(for: "com.apple.keychainaccess") == .skip
+                  && ClipboardWatcher.rule(for: "com.apple.finder") == .normal, "Passwords and Keychain Access are preset to never record")
+        copy("secret from passwords")
+        try check(hung.isEmpty && history.count == 0 && rules.liveCount == 0
+                  && history.search(SearchIndex.words("secret"), onLine: [], limit: 5).basketTotal == 0,
+                  "A copy from a never-record app leaves nothing on the line, in the history or in the index")
+        var all = ClipboardWatcher.appRules
+        all["com.apple.finder"] = .hourly
+        ClipboardWatcher.appRules = all
+        front = "com.apple.finder"
+        let start = Date()
+        copy("hourly words from finder")
+        try check(hung.count == 1 && history.ttl(of: hung[0]) == ClipboardWatcher.hourly, "An hourly app's copy is kept with an hour to live")
+        Note.clearsOf = { url in history.ttl(of: url).map(Line.clearsText) }
+        try check(Note.reload(hung[0])?.caption.contains(Line.clearsText(3600)) == true, "Its card says it clears in an hour")
+        rules.clearExpired(now: start.addingTimeInterval(3000))
+        try check(rules.liveCount == 1 && FileManager.default.fileExists(atPath: hung[0].path), "Before the hour is up it stays")
+        rules.clearExpired(now: start.addingTimeInterval(3700))
+        pump(0.7); rules.closeGaps()
+        try check(rules.liveCount == 0 && !FileManager.default.fileExists(atPath: hung[0].path) && history.count == 0,
+                  "After the hour its card, its file and its row are gone")
+        all["com.apple.Passwords"] = .normal
+        ClipboardWatcher.appRules = all
+        front = "com.apple.Passwords"
+        copy("passwords now recorded")
+        try check(hung.count == 2 && history.ttl(of: hung[1]) == nil, "Set to record normally, that app's copies are kept for good")
+        Note.clearsOf = nil
+        UserDefaults.standard.removeObject(forKey: "appRules")
     }
 
     func checkDesktopCopies() throws {

@@ -113,3 +113,10 @@
 
 /* Zoom on hover */
 "Zoom on hover" = "悬停时放大";
+
+/* App rules (T-027) */
+"By app" = "按 App 记录";
+"Record normally" = "正常记录";
+"Clear after an hour" = "一小时后清";
+"Don't record" = "不记";
+"Clears in an hour" = "一小时后清";
