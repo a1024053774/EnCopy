@@ -84,6 +84,49 @@ enum Motion {
     static let hopHeight: CGFloat = 7
     static let hop = Animation.spring(response: 0.42, dampingFraction: 0.72)
 
+    // MARK: The rope, the pegs, leaving (T-038)
+
+    /// The line comes down with its rope pulled almost straight; it springs
+    /// into its sag. ⌥C settles quickly; sliding down bounces twice; ↓ once.
+    static let ropeTaut: CGFloat = 0.15
+    static let ropeSummon = Animation.spring(response: 0.3, dampingFraction: 0.85)
+    static let ropeSlide = Animation.spring(response: 0.5, dampingFraction: 0.5)
+    static let shelfTaut: CGFloat = 0.6
+
+    /// The line sliding to keep the pick in view: the papers swing the other
+    /// way this far. Arrow presses closer together than `keyRepeat` are a
+    /// held key, and a held key slides without swinging.
+    static let slideSway: Double = 1.5
+    static let keyRepeat: TimeInterval = 0.12
+
+    /// A new paper: the peg opens, then clamps.
+    static let pegOpen: CGFloat = 1.3
+    static let pegClamp = Animation.spring(response: 0.25, dampingFraction: 0.6)
+
+    /// ⏎: the paper leaves its peg and flies to the pointer, shrinking.
+    static let flyOut: TimeInterval = 0.3
+    static let flyOutScale: CGFloat = 0.16
+
+    /// ⌘⌫: the paper sinks at once, then falls under gravity.
+    static let fall: TimeInterval = 0.42
+    static let fallSink: CGFloat = 5
+    /// The share of the fall spent sinking, eased out so the key shows at once.
+    static let fallSinkShare: Double = 0.1
+
+    /// Where a falling paper is, `raw` (0…1) through the fall: how far it has
+    /// sunk below where it hung, and how far gravity has taken it (0…1).
+    static func fallProgress(_ raw: Double) -> (sink: CGFloat, gravity: Double) {
+        let s = min(1, raw / fallSinkShare)
+        let sink = fallSink * CGFloat(1 - (1 - s) * (1 - s))
+        let g = raw <= fallSinkShare ? 0 : (raw - fallSinkShare) / (1 - fallSinkShare)
+        return (sink, g * g)
+    }
+
+    /// Copied while the line is tucked away: the menu bar pegs sway once,
+    /// these angles in turn over 0.6 s.
+    static let menuBarSway: [CGFloat] = [8, -6, 4, -2, 0]
+    static let menuBarSwayTotal: TimeInterval = 0.6
+
     // MARK: Breeze
 
     /// No breeze until this long after the last key: none while you type or pick.

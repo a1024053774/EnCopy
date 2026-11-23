@@ -365,6 +365,7 @@ struct CheckFailed: Error { let message: String }
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
+        try checkMotionRest()
         try checkDataFolder()
         try checkHistory()
     }
@@ -1142,6 +1143,65 @@ struct CheckFailed: Error { let message: String }
         let a = inked(on), b = inked(off)
         try check(a.ropeRow > 0 && b.ropeRow > 0, "The rope runs to both ends, high at the edges")
         try check(a.pegCore >= 8 && b.pegCore == 0, "The pegs are filled while watching, hollow when not")
+    }
+
+    /// T-038: the rest of the motion table, all on springs that stop by
+    /// themselves: the rope bounces, a slide swings the papers unless the key
+    /// is held, the fall sinks then drops, ⏎ sends the paper to the pointer.
+    func checkMotionRest() throws {
+        let start = Motion.fallProgress(0), sunk = Motion.fallProgress(0.1), end = Motion.fallProgress(1)
+        try check(start.sink == 0 && start.gravity == 0 && abs(sunk.sink - 5) < 1e-9 && sunk.gravity == 0
+                  && abs(end.sink - 5) < 1e-9 && end.gravity == 1, "The fall sinks 5 points in its first tenth, then gravity takes it")
+        try check(Motion.fallProgress(0.03).sink > 5 * 0.3, "The sink is eased out: the key shows at once")
+        try check(Motion.fallProgress(0.4).gravity < Motion.fallProgress(0.7).gravity - 0.1
+                  && Motion.fallProgress(0.7).gravity - Motion.fallProgress(0.4).gravity
+                     < Motion.fallProgress(1).gravity - Motion.fallProgress(0.7).gravity, "The fall speeds up")
+        try check(Motion.fall == 0.42 && Motion.flyOut == 0.3 && Motion.flyOutScale == 0.16 && Motion.menuBarSwayTotal == 0.6,
+                  "Fall 0.42 s, flight to the pointer 0.3 s to 0.16×, menu bar sway 0.6 s")
+
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        Motion.reducedOverride = false
+        defer { Motion.reducedOverride = nil }
+        let rope = line()
+        rope.landed(bySummon: true)
+        try check(rope.sagScale == Motion.ropeTaut, "Coming down, the rope starts pulled almost straight")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        try check(rope.sagScale == 1, "Then it is let go into its sag")
+        rope.moveShelf(1)
+        try check(rope.sagScale == Motion.shelfTaut, "↓ to a shelf bounces the rope once")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        Motion.reducedOverride = true
+        rope.landed(bySummon: false)
+        try check(rope.sagScale == 1, "With Reduce motion the rope does not bounce")
+        Motion.reducedOverride = false
+
+        let long = line()
+        Line.keepOnLine = 25
+        long.maxItems = 25; long.visibleCount = 8
+        defer { Line.keepOnLine = nil }
+        for i in 0..<12 { _ = long.hang(try png("Sway \(i).png", red: CGFloat(i) / 12), quietly: true) }
+        long.pickNewest()
+        for _ in 0..<7 { long.lastPickMove = .distantPast; long.movePick(1) }
+        try check(long.scroll == 0 && long.slide.count == 0, "No slide while the pick stays in view")
+        long.lastPickMove = .distantPast; long.movePick(1)
+        try check(long.scroll == Layout.spacing && long.slide.count == 1 && long.slide.degrees == -Motion.slideSway,
+                  "Sliding to older ones swings the papers the other way")
+        long.movePick(1)
+        try check(long.scroll == 2 * Layout.spacing && long.slide.count == 1, "A held arrow slides without swinging")
+
+        let plainPegs = MenuBarIcon.image(watching: true), swung = MenuBarIcon.image(watching: true, tilt: 8)
+        try check(plainPegs.tiffRepresentation != swung.tiffRepresentation, "The menu bar pegs can swing")
+
+        let flyLine = line()
+        _ = flyLine.hang(try adoptedNote("fly", "fly words"), quietly: true)
+        var order: [String] = []
+        let flyer = Paster(line: flyLine, isTrusted: { true }, send: { _ in order.append("send") })
+        flyer.flyOut = { _ in order.append("fly") }
+        flyer.tuckAway = { order.append("tuck") }
+        flyLine.pickNewest()
+        flyer.pastePicked()
+        try check(order == ["fly", "tuck", "send"], "⏎ sends the paper flying while the line is still down, then tucks and pastes")
     }
 
     func checkShelves() throws {

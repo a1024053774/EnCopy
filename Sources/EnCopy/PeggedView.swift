@@ -10,6 +10,7 @@ struct PeggedView: View {
 
     @State private var swing: Double = 0
     @State private var hop: CGFloat = 0
+    @State private var pegOpen = false
     @State private var arrived = false
     @State private var hovering = false
 
@@ -29,6 +30,8 @@ struct PeggedView: View {
     var body: some View {
         VStack(spacing: -12) {
             Clothespin(pinned: item.kept)
+                // A new paper: the peg opens, then clamps (T-038).
+                .scaleEffect(x: pegOpen ? Motion.pegOpen : 1, y: 1, anchor: .top)
                 .zIndex(1)
             // Held in your hand: a faded trace of it waits on its clip.
             card
@@ -47,6 +50,7 @@ struct PeggedView: View {
         .onChange(of: item.flying) { was, now in if was && !now { land() } }
         .onChange(of: line.gust) { _, _ in breeze() }
         .onChange(of: line.landing) { _, _ in sway() }
+        .onChange(of: line.slide) { _, slide in nudge(slide.degrees) }
         .onChange(of: copied) { _, isCopied in if isCopied { jump() } }
     }
 
@@ -206,6 +210,8 @@ struct PeggedView: View {
             return
         }
         swing = 16
+        pegOpen = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { withAnimation(Motion.pegClamp) { pegOpen = false } }
         withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) { arrived = true }
         withAnimation(Motion.swing(paperKind)) { swing = 0 }
     }
