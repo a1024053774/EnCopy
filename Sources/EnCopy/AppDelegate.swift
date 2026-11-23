@@ -87,11 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            onAgain: { [weak self] url in self?.hangAgain(url) })
         if ClipboardWatcher.isEnabled { clipboardWatcher.start() }
         line.clearExpired()
+        retentionIfDue()
         let expiry = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 // Not while you are picking: nothing leaves under your hand.
                 guard let self, self.searchBar?.isShown != true else { return }
                 self.line.clearExpired()
+                self.retentionIfDue()
             }
         }
         RunLoop.main.add(expiry, forMode: .common)
@@ -1135,6 +1137,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(ClosureMenuItem(L("Quit EnCopy"), key: "q") {
             NSApp.terminate(nil)
         })
+    }
+
+    /// The retention rules run at launch and then once a day (T-031).
+    private func retentionIfDue() {
+        let last = UserDefaults.standard.double(forKey: "retentionLastRun")
+        let now = Date()
+        guard now.timeIntervalSince1970 - last >= 86400 else { return }
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "retentionLastRun")
+        line.runRetention(now: now)
     }
 
     /// By app: each app with a rule, and the app in front, gets three choices.

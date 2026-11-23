@@ -64,6 +64,10 @@ final class History {
         if !columns.contains("ttl") {
             attempt("add ttl column") { try run("ALTER TABLE item ADD COLUMN ttl REAL", bind: { _ in }) }
         }
+        // Whether a picture's original was shrunk to a thumbnail (T-031).
+        if !columns.contains("shrunk") {
+            attempt("add shrunk column") { try run("ALTER TABLE item ADD COLUMN shrunk INTEGER NOT NULL DEFAULT 0", bind: { _ in }) }
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -167,6 +171,66 @@ final class History {
         let name = FileManager.default.displayName(atPath: url.path)
         return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
+
+    /// One kept item, as the retention rules see it.
+    struct Kept {
+        let url: URL
+        let used: Date
+        let shrunk: Bool
+        let app: String?
+    }
+
+    /// Every item kept for good (no ttl of its own), for the retention rules.
+    func kept() -> [Kept] {
+        guard let stmt = try? prepare("SELECT path, used, shrunk, app FROM item WHERE ttl IS NULL") else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var out: [Kept] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let path = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) else { continue }
+            let app = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+            out.append(Kept(url: absoluteURL(path), used: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1)),
+                            shrunk: sqlite3_column_int(stmt, 2) != 0, app: app))
+        }
+        return out
+    }
+
+    /// The picture's original is gone; a thumbnail stands in.
+    func markShrunk(_ url: URL) {
+        guard let path = relativePath(url) else { return }
+        attempt("mark shrunk") { try run("UPDATE item SET shrunk = 1 WHERE path = ?", bind: { bind($0, 1, path) }) }
+    }
+
+    /// The words kept for an item, folded as the index keeps them.
+    func words(of url: URL) -> String? {
+        guard let path = relativePath(url) else { return nil }
+        return (try? strings("SELECT item_text.text FROM item_text JOIN item ON item.id = item_text.rowid WHERE item.path = ?",
+                             bind: { bind($0, 1, path) }))?.first
+    }
+
+    /// When an item was last used; put back from 「最近清掉」, it keeps the time it had.
+    func setUsed(_ url: URL, _ date: Date) {
+        guard let path = relativePath(url) else { return }
+        attempt("set used") {
+            try run("UPDATE item SET used = ? WHERE path = ?", bind: { stmt in
+                bind(stmt, 1, date.timeIntervalSince1970)
+                bind(stmt, 2, path)
+            })
+        }
+    }
+
+    func setShrunk(_ url: URL, _ shrunk: Bool) {
+        guard let path = relativePath(url) else { return }
+        attempt("set shrunk") {
+            try run("UPDATE item SET shrunk = ? WHERE path = ?", bind: { stmt in
+                bind(stmt, 1, Int64(shrunk ? 1 : 0))
+                bind(stmt, 2, path)
+            })
+        }
+    }
+
+    /// The path inside the data folder, as the history and 「最近清掉」 store it.
+    func relative(_ url: URL) -> String? { relativePath(url) }
+    func absolute(_ path: String) -> URL { absoluteURL(path) }
 
     /// A picture EnCopy keeps (T-030): a row of its own, with the words read
     /// from it once they are ready. Nil text keeps whatever words it has.

@@ -399,6 +399,18 @@ final class Line: ObservableObject {
         if isSearching { recomputeSearch() }
     }
 
+    /// 「最近清掉」, where expired and cleaned-up items wait seven days.
+    lazy var clearing = Clearing()
+
+    /// T-004's daily rules: see `Retention`. Nothing on the line is touched.
+    @discardableResult
+    func runRetention(now: Date = Date(), cap: Int64 = Retention.defaultCap) -> Retention.Result {
+        let onLine = Set(items.filter { !$0.falling }.map { $0.url.standardizedFileURL.path })
+        let result = Retention.run(history: history, clearing: clearing, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
+        if isSearching { recomputeSearch() }
+        return result
+    }
+
     /// Photos whose file was deleted or moved away fall off by themselves.
     func prune() {
         for item in items where !item.falling && !FileManager.default.fileExists(atPath: item.url.path) {
