@@ -119,9 +119,16 @@ private struct BasketRowView: View {
         .overlay {
             if picked {
                 RoundedRectangle(cornerRadius: max(3, theme.corner), style: .continuous)
-                    .strokeBorder(theme.picked, lineWidth: theme.pickedWidth)
+                    .strokeBorder(theme.picked, lineWidth: theme.pickedWidth + 1)
             }
         }
+        // The pick is pulled a little out of the pile, with a deeper shadow;
+        // the rest sit back. A receipt's own amber edge alone would look the
+        // same as the pick's edge (seen on the walk).
+        .shadow(color: .black.opacity(picked ? 0.35 : 0), radius: picked ? 6 : 0, y: picked ? 3 : 0)
+        .offset(x: picked ? 5 : 0)
+        .opacity(picked ? 1 : 0.86)
+        .animation(Motion.reduced ? nil : .spring(response: 0.22, dampingFraction: 0.8), value: picked)
         .padding(.horizontal, 10).padding(.vertical, 3)
     }
 
@@ -193,7 +200,8 @@ private struct PaperStrip: View {
                 switch card {
                 case .text:
                     shape.fill(Color.white)
-                    shape.strokeBorder(Color(red: 0.88, green: 0.54, blue: 0.12), lineWidth: 1.5)
+                    // A faint receipt edge: the amber one is the pick's.
+                    shape.strokeBorder(Color(red: 0.88, green: 0.54, blue: 0.12).opacity(0.35), lineWidth: 0.8)
                 case .code:
                     shape.fill(Color(red: 0.93, green: 0.96, blue: 0.89))
                     // Tractor-feed holes down both edges.
