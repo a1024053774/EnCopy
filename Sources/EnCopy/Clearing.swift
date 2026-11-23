@@ -112,7 +112,7 @@ final class Clearing {
 enum Retention {
     static let textDays: Double = 365
     static let originalDays: Double = 30
-    static let defaultCap: Int64 = 1 << 30
+    nonisolated static let defaultCap: Int64 = 1 << 30
     static let thumbnailPixels = 640
 
     struct Result: Equatable {

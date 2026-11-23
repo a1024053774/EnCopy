@@ -264,8 +264,11 @@ final class History {
                     })
                 let id = try scalar("SELECT id FROM item WHERE path = ?", bind: { bind($0, 1, path) })
                 guard id != 0 else { throw Failure(message: "the picture's row is missing after the upsert") }
-                let hasWords = try scalar("SELECT COUNT(*) FROM item_text WHERE rowid = ?", bind: { bind($0, 1, id) }) > 0
-                guard text != nil || !hasWords else { return }
+                let hasWords = try scalar("SELECT COUNT(*) FROM item_text WHERE rowid = ? AND text != ''", bind: { bind($0, 1, id) }) > 0
+                let shrunk = try scalar("SELECT shrunk FROM item WHERE id = ?", bind: { bind($0, 1, id) }) != 0
+                // Words already kept are never replaced by nothing, and a shrunk
+                // picture keeps the words read from its original, not its thumbnail's.
+                if hasWords, (text ?? "").isEmpty || shrunk { return }
                 try run("DELETE FROM item_text WHERE rowid = ?", bind: { bind($0, 1, id) })
                 try run("INSERT INTO item_text (rowid, text) VALUES (?, ?)", bind: { stmt in
                     bind(stmt, 1, id)

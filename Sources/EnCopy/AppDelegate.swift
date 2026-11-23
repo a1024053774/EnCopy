@@ -104,6 +104,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar = SearchBar(line: line)
         searchBar.onMove = { [weak self] in self?.line.movePick($0) }
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
+        searchBar.onShelf = { [weak self] step in
+            self?.line.moveShelf(step)
+            self?.line.pickNewest()
+        }
         searchBar.onTab = { [weak self] step in
             self?.line.cycleKind(step)
             self?.line.pickNewest()
@@ -642,6 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func endSearch(tuckAway: Bool) {
         line.query = ""
         line.kindFilter = nil
+        line.shelf = .line
         line.clearPick()
         searchBar.hide()
         if tuckAway, isRevealed { setRevealed(false) }

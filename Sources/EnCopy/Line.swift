@@ -111,8 +111,52 @@ final class Line: ObservableObject {
     var shown: [Pegged] {
         let words = SearchIndex.words(query)
         let fits = { (p: Pegged) in self.kindFilter == nil || self.kind(of: p.url) == self.kindFilter }
+        // On a shelf of the basket (↓), its cards stand in for the line's.
+        if words.isEmpty, shelf != .line { return basketCards.filter(fits) }
         guard !words.isEmpty else { return kindFilter == nil ? items : items.filter { $0.falling || fits($0) } }
         return basketCards.filter(fits) + items.filter { $0.falling || (matches($0) && fits($0)) }
+    }
+
+    /// ↓ while summoned walks the basket by when things were last used (T-033).
+    enum Shelf: Int, CaseIterable { case line, today, yesterday, week, earlier }
+
+    @Published var shelf: Shelf = .line {
+        didSet { if shelf != oldValue { loadShelf() } }
+    }
+
+    /// ↓ goes one shelf further back, ↑ one nearer; stops at either end.
+    func moveShelf(_ step: Int) {
+        shelf = Shelf(rawValue: min(Shelf.allCases.count - 1, max(0, shelf.rawValue + step))) ?? .line
+    }
+
+    /// The time span a shelf covers, by last use: today, yesterday, the rest
+    /// of the past week, and everything before.
+    func span(of shelf: Shelf, now: Date = Date()) -> (from: Date?, to: Date?) {
+        let start = Calendar.current.startOfDay(for: now)
+        let day: TimeInterval = 86400
+        switch shelf {
+        case .line: return (nil, nil)
+        case .today: return (start, nil)
+        case .yesterday: return (start.addingTimeInterval(-day), start)
+        case .week: return (start.addingTimeInterval(-7 * day), start.addingTimeInterval(-day))
+        case .earlier: return (nil, start.addingTimeInterval(-7 * day))
+        }
+    }
+
+    /// The shelf's cards: basket items in its span, newest at the right, as
+    /// many as fit across the screen.
+    private func loadShelf(now: Date = Date()) {
+        guard shelf != .line else { basketCards = []; recomputeSearch(); return }
+        let (from, to) = span(of: shelf, now: now)
+        let onLine = onLinePaths
+        let picked = history.kept().filter { item in
+            !onLine.contains(item.url.standardizedFileURL.path)
+                && from.map { item.used >= $0 } ?? true && to.map { item.used < $0 } ?? true
+                && FileManager.default.fileExists(atPath: item.url.path)
+        }.sorted { $0.used > $1.used }.prefix(visibleCount)
+        basketCards = picked.reversed().compactMap { item in
+            basketCards.first { $0.url == item.url } ?? makeThumbnail(item.url).map { Pegged(url: item.url, thumb: $0) }
+        }
     }
 
     /// What kind of thing an item is, for Tab while summoned.
@@ -147,6 +191,8 @@ final class Line: ObservableObject {
     /// the basket fills the room left across the screen.
     private func recomputeSearch() {
         let words = SearchIndex.words(query)
+        // A shelf keeps its own cards until something is typed.
+        if words.isEmpty, shelf != .line { return }
         // Everything on the line that the history also keeps: notes and EnCopy's own pictures.
         let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url)) }.map(\.url)
         var lineMatches = 0
@@ -929,6 +975,8 @@ final class Line: ObservableObject {
     /// Quick Look on this photo, with the rest of the line a key press away.
     /// ⌘P while summoned: pinned goes loose, loose gets pinned.
     func togglePin(_ id: UUID) {
+        // A basket card comes back onto the line first, then is pinned there.
+        if isInBasket(id) { reclaim(id) }
         guard let item = items.first(where: { $0.id == id && !$0.falling }) else { return }
         if item.kept { unpin(id) } else { pin(id) }
     }
