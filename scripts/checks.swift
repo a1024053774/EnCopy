@@ -400,6 +400,7 @@ struct CheckFailed: Error { let message: String }
         try checkCleanupConfirmFresh()
         try checkShrinkRespectsClearing()
         try checkFinderPicturesWithoutFiles()
+        try checkPutBackKeepsApp()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1811,6 +1812,18 @@ struct CheckFailed: Error { let message: String }
         let doc = root.appendingPathComponent("No files notes.pdf"); try Data("%PDF".utf8).write(to: doc)
         for url in [picture, doc] { pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check() }
         try check(hung == [picture], "With Files off and Images on, a picture from Finder hangs and a PDF does not")
+    }
+
+    /// Review 2, finding 8: a picture put back keeps the app it came from.
+    func checkPutBackKeepsApp() throws {
+        let history = History(file: root.appendingPathComponent("putback-app.sqlite"))
+        let clearing = Clearing(folder: root.appendingPathComponent("cleared-app", isDirectory: true))
+        let picture = DataFolder.url.appendingPathComponent("putback-app.png")
+        try FileManager.default.copyItem(at: try png("putback-app-src.png"), to: picture)
+        history.recordImage(picture, text: "app words"); history.setApp(picture, "com.tencent.xinWeChat")
+        guard let batch = clearing.clear([picture], reason: "manual", history: history) else { throw CheckFailed(message: "Nothing was cleared") }
+        _ = clearing.putBack(batch.id, history: history)
+        try check(history.app(of: picture) == "com.tencent.xinWeChat", "A picture put back still knows the app it was copied from")
     }
 
     func checkShelves() throws {
