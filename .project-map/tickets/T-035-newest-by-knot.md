@@ -27,3 +27,5 @@ supersedes:
 需求变了，原有检查跟着改：方向键相关的 7 处 `movePick(±1)` 对调，「Left moves the pick one older」改成「Right moves the pick one older」等，检查的意思没变，只是方向跟着新的布局。新加 `checkNewestByKnot`（12 条）。把 `slot` 改回恒等（旧布局）的变异版本，检查失败在「The newest pick shows the newest end」。渲染：`evidence/T-035/light.png`（重画：`evidence/T-034/run.sh evidence/T-034 <输出.png> [dark]`），收藏的 PDF、绳结、最新的（琥珀色选中）、再往右越来越旧。`scripts/check.sh`：`274 checks passed`；`scripts/build-app.sh` 通过。
 
 真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：⌥C 后最新的（刚复制的图片）在最左、描着琥珀色边，往右依次是更早复制的，最右是更早的几条（`02-summon.png`）。之后用户在用鼠标，绳子被点到别处收起，→、⌘P、越过绳结的 ← 都没走到。
+
+真机第二次（2026-11-23 02:10–02:20，用户离开电脑，开发版在虚拟屏上；证据在本地 `evidence/walk-v1b/`）：→ 选到下一张更旧的；⌘P 收藏后它挂到最左、深灰木夹，右边出现绳结；从收藏的往 → 越过绳结到最新的，← 再越过绳结回到收藏的并停住（`strip-02-05.png`）。

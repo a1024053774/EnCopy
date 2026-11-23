@@ -25,3 +25,5 @@ supersedes:
 新加 `checkMenuBarIcon`（3 条）。把夹子改成总是实心的变异版本，检查失败在「The pegs are filled while watching, hollow when not」。`scripts/check.sh`：`294 checks passed`；`scripts/build-app.sh` 通过。
 
 真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：菜单栏图标（内建屏和外接屏的菜单栏都太挤，图标没露出来）。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。
+
+真机第二次（2026-11-23 02:10–02:20，用户离开电脑，开发版在虚拟屏上；证据在本地 `evidence/walk-v1b/`）：外接屏菜单栏里看到新的菜单栏图标：一根绳两个实心夹子（`13-menubar-sway.png`）。
