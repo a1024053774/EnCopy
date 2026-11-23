@@ -1117,10 +1117,20 @@ final class Line: ObservableObject {
         if item.kept { unpin(id) } else { pin(id) }
     }
 
+    /// What Quick Look goes through, and where it starts: what is shown,
+    /// basket cards and Tab's narrowing included, left to right as it hangs,
+    /// so ← and → in Quick Look go the way they do on the line (review #12).
+    func quickLookItems(for id: UUID) -> (urls: [URL], index: Int)? {
+        let all = shown.filter { !$0.falling }
+        let pinned = layoutPinned
+        let onScreen = Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()
+        guard let index = onScreen.firstIndex(where: { $0.id == id }) else { return nil }
+        return (onScreen.map(\.url), index)
+    }
+
     func quickLook(_ id: UUID) {
-        let live = items.filter { !$0.falling }
-        guard let index = live.firstIndex(where: { $0.id == id }) else { return }
-        QuickLook.shared.show(live.map(\.url), at: index)
+        guard let (urls, index) = quickLookItems(for: id) else { return }
+        QuickLook.shared.show(urls, at: index)
     }
 
     /// A note edited in another app shows its new words, on the line and

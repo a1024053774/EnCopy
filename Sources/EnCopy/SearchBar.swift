@@ -54,6 +54,12 @@ final class SearchBar: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
     }
 
+    /// Takes the keyboard back, after Quick Look had it.
+    func refocus() {
+        guard panel.isVisible else { return }
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     /// The first Escape clears what was typed; the next one ends the search.
     private func escape() {
         if line.query.isEmpty { onEnd() } else { line.query = "" }

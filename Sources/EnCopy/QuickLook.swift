@@ -15,6 +15,13 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
 
     private var urls: [URL] = []
 
+    /// Called when the window closes, to give the keyboard back.
+    var onClosed: () -> Void = {}
+
+    var isOpen: Bool { QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared()?.isVisible == true }
+
+    func close() { QLPreviewPanel.shared()?.orderOut(nil) }
+
     func show(_ urls: [URL], at index: Int) {
         guard !urls.isEmpty, let panel = QLPreviewPanel.shared() else { return }
         self.urls = urls
@@ -36,6 +43,7 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         panel.dataSource = nil
         panel.delegate = nil
         urls = []
+        onClosed()
     }
 
     // MARK: QLPreviewPanelDataSource
@@ -53,6 +61,14 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     /// Left and right go to the photo before or after it on the line.
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
         guard event.type == .keyDown, let panel else { return false }
+        // ⌘Y again, Return or Escape closes it; the keyboard goes back to
+        // the line's search, so ⏎ never lands in Quick Look (review #12).
+        let closes = (event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "y")
+            || event.keyCode == 36 || event.keyCode == 53
+        if closes {
+            MainActor.assumeIsolated { panel.orderOut(nil) }
+            return true
+        }
         let step: Int
         switch Int(event.keyCode) {
         case 123: step = -1 // left arrow

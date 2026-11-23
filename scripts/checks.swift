@@ -389,6 +389,7 @@ struct CheckFailed: Error { let message: String }
         try checkShelfSearch()
         try checkKindBeforeLimit()
         try checkKeptImageSearchOnLine()
+        try checkQuickLookOrder()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1570,6 +1571,28 @@ struct CheckFailed: Error { let message: String }
         finder.query = "zebrawordfromoriginal"
         try check(finder.shown.contains { $0.url == shot }, "A shrunk picture back on the line is found by its original's words")
         finder.query = ""
+    }
+
+    /// Review #12: Quick Look goes through what is shown, in the order it
+    /// hangs on screen, basket cards and Tab's narrowing included.
+    func checkQuickLookOrder() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("quicklook.sqlite"))
+        let look = Line(pasteboard: pasteboard, desktop: root, history: history)
+        look.maxItems = 3; look.visibleCount = 8; look.revealed = true
+        let notes = try (0..<4).map { try adoptedNote("ql-\($0)", "qlword note \($0)") }
+        for note in notes { history.record(note, text: try String(contentsOf: note, encoding: .utf8)); _ = look.hang(note, quietly: true) }
+        pump(0.7); look.closeGaps()
+        // On the line: 3 2 1, newest at the left; note 0 fell into the basket.
+        func id(_ url: URL) -> UUID { look.shown.first { $0.url == url }!.id }
+        let onLine = look.quickLookItems(for: id(notes[2]))
+        try check(onLine?.urls == [notes[3], notes[2], notes[1]] && onLine?.index == 1, "On the line, Quick Look goes left to right as they hang")
+        look.query = "qlword"
+        guard let basketCard = look.basketCards.first(where: { $0.url == notes[0] }) else { throw CheckFailed(message: "Note 0 is not in the basket") }
+        let found = look.quickLookItems(for: basketCard.id)
+        try check(found.map { $0.urls.contains(notes[0]) && $0.urls[$0.index] == notes[0] } == true, "A basket card found by a search opens in Quick Look")
+        look.query = ""
     }
 
     func checkShelves() throws {

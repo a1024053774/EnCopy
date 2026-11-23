@@ -120,7 +120,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         searchBar.onPlainReturn = { [weak self] in self?.paster.pastePicked(plain: true) }
         searchBar.onPin = { [weak self] in if let id = self?.line.picked?.id { self?.line.togglePin(id) } }
-        searchBar.onQuickLook = { [weak self] in if let id = self?.line.picked?.id { self?.line.quickLook(id) } }
+        // ⌘Y opens Quick Look on the pick, and closes it again.
+        searchBar.onQuickLook = { [weak self] in
+            if QuickLook.shared.isOpen { QuickLook.shared.close(); return }
+            if let id = self?.line.picked?.id { self?.line.quickLook(id) }
+        }
+        QuickLook.shared.onClosed = { [weak self] in self?.searchBar.refocus() }
         searchBar.onEnd = { [weak self] in self?.endSearch(tuckAway: true) }
         paster = Paster(line: line)
         line.onPaste = { [weak self] id in self?.paster.paste(id) }
