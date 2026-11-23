@@ -141,6 +141,10 @@ struct CheckFailed: Error { let message: String }
         click(try grab(b))
         pump(0.65)
         try check(line.selectedIDs.isEmpty && copiedURLs == [b], "An ordinary click clears selection and still copies one photo")
+        // Copying B sent it to the head (T-021); copying C sends C after
+        // it, so the pins below start from A, B, C again.
+        click(try grab(c))
+        pump(0.65)
 
         let gestures = GrabView(frame: NSRect(x: 0, y: 0, width: 100, height: 80))
         var singles = 0, doubles = 0, holds = 0, toggles = 0
@@ -218,6 +222,9 @@ struct CheckFailed: Error { let message: String }
         let saveLine = self.line()
         let s1 = try png("Save 1.png", in: Inbox.folder), s2 = try png("Save 2.png", in: Inbox.folder)
         let s1ID = saveLine.hang(s1, quietly: true)!, s2ID = saveLine.hang(s2, quietly: true)!
+        // Copied before A hangs: copying sends them to the head (T-021),
+        // where they already are, so the line stays S1, S2, A.
+        saveLine.copy([s1ID, s2ID])
         _ = saveLine.hang(a, quietly: true)
         saveLine.pin(s1ID)
         let savedBytes = [try Data(contentsOf: s1), try Data(contentsOf: s2)]
@@ -228,7 +235,6 @@ struct CheckFailed: Error { let message: String }
         let unrelated = Data("already on Desktop".utf8)
         try unrelated.write(to: saved1)
         let renamed1 = desktop.appendingPathComponent("Save 1 2.png")
-        saveLine.copy([s1ID, s2ID])
         saveLine.saveToDesktop([s1ID, s2ID])
         try check(saveLine.liveCount == 1 && copiedURLs == [renamed1, saved2], "Batch save records the actual destinations and updates clipboard URLs")
         try check(try Data(contentsOf: saved1) == unrelated, "Saving never overwrites an existing Desktop file")
@@ -343,6 +349,7 @@ struct CheckFailed: Error { let message: String }
         try check(eviction.selectedIDs.isEmpty && FileManager.default.fileExists(atPath: a.path), "Capacity eviction clears stale selection without deleting an external file")
         try checkDesktopCopies()
         try checkSummon()
+        try checkUsedMovesToHead()
         try checkDataFolder()
         try checkHistory()
     }
@@ -503,6 +510,68 @@ struct CheckFailed: Error { let message: String }
                   "An arrow while composing stays with the input method")
         try check(!bar.takes(keyDown(0), composing: false) && moves.isEmpty,
                   "A letter key stays with the field")
+    }
+
+    /// T-021: what is used goes to the head of the line — pasted after ⌥C,
+    /// clicked to copy, copied from the menu — so the next ⌥C picks what
+    /// the clipboard holds. Pinned and held stay where they are, and the
+    /// new order is what a restart brings back.
+    func checkUsedMovesToHead() throws {
+        let use = line()
+        let notes = try (0..<4).map { try adoptedNote("use\($0)", "used words \($0) headcheck\($0)") }
+        for note in notes { _ = use.hang(note, quietly: true) }
+        func order() -> [URL] { use.items.filter { !$0.falling }.map(\.url) }
+        func id(_ url: URL) -> UUID { use.items.first { $0.url == url && !$0.falling }!.id }
+
+        // ⌥C, ← ←, ⏎: the third newest is pasted and goes to the head.
+        use.pickNewest()
+        use.movePick(-1)
+        use.movePick(-1)
+        var sent = 0
+        let paster = Paster(line: use, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.tuckAway = { use.clearPick() }
+        paster.pastePicked()
+        try check(sent == 1 && pasteboard.string(forType: .string) == "used words 1 headcheck1",
+                  "⏎ pastes the picked note, the third newest")
+        try check(order() == [notes[0], notes[2], notes[3], notes[1]],
+                  "The pasted note goes to the head; the others keep their order")
+        use.pickNewest()
+        try check(use.picked?.url == notes[1] && pasteboard.string(forType: .string) == "used words 1 headcheck1",
+                  "The next ⌥C picks the note just pasted, which is what the clipboard holds")
+        use.clearPick()
+
+        // A click copies one note and sends it to the head.
+        show(use)
+        click(try grab(notes[2]))
+        pump(0.7)
+        try check(pasteboard.string(forType: .string) == "used words 2 headcheck2"
+                  && order() == [notes[0], notes[3], notes[1], notes[2]],
+                  "A click copies the note and sends it to the head; the rest keep their order")
+
+        // Copied together from the menu: they go to the head in line order.
+        use.toggleSelection(id(notes[3]))
+        use.toggleSelection(id(notes[0]))
+        try fire("Copy", in: try grab(notes[0]).menuProvider())
+        try check(order() == [notes[1], notes[2], notes[0], notes[3]],
+                  "Copied together, they go to the head in the order they hung")
+        use.clearSelection()
+        let restarted = Line(pasteboard: pasteboard)
+        try check(restarted.items.map(\.url) == order(),
+                  "A restart brings back the order that use gave the line")
+
+        // Pinned and held stay where they are when copied.
+        use.pin(id(notes[2]))
+        try check(order() == [notes[2], notes[1], notes[0], notes[3]], "The pinned note sits left of the knot")
+        use.copy(id(notes[2]))
+        try check(order() == [notes[2], notes[1], notes[0], notes[3]]
+                  && pasteboard.string(forType: .string) == "used words 2 headcheck2",
+                  "A pinned note is copied and stays left of the knot")
+        use.setHeld(id(notes[1]), true)
+        use.copy(id(notes[1]))
+        try check(order() == [notes[2], notes[1], notes[0], notes[3]]
+                  && pasteboard.string(forType: .string) == "used words 1 headcheck1",
+                  "A held note is copied and keeps its empty clip")
+        use.setHeld(id(notes[1]), false)
     }
 
     func checkDesktopCopies() throws {

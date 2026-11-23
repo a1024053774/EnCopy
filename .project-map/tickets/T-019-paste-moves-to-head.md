@@ -2,7 +2,7 @@
 id: T-019
 title: 绳上的一件贴出去后要不要挪到绳头
 type: decide
-status: open
+status: closed
 blocked_by: []
 claimed_by:
 supersedes:
@@ -18,3 +18,5 @@ supersedes:
 - 不挪：绳子按复制的先后排，位置不会因为贴了一次就变，连着贴几件不同的东西时好找。
 
 ## Resolution
+
+挪。绳子按最后一次用到的时间排：贴出去、点一下复制、菜单里复制，都让那一件回到绳头；收藏的和拿在手上的不动。刚贴过或复制过的那件，下次 ⌥C 就是选中的第一件，和系统剪贴板一致。来源：用户 2026-11-22 选择「挪」，追问后选「复制也挪」。实现见 [T-021](T-021-used-moves-to-head.md)。
