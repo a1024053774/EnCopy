@@ -22,6 +22,8 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
     private(set) var isLending = false
     /// The app in front before Quick Look took over, given the front back after.
     private var before: NSRunningApplication?
+    /// Waiting for EnCopy to resign active before the keyboard goes back.
+    private var resigned: NSObjectProtocol?
 
     var isOpen: Bool { QLPreviewPanel.sharedPreviewPanelExists() && QLPreviewPanel.shared()?.isVisible == true }
 
@@ -52,10 +54,29 @@ final class QuickLook: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
         panel.delegate = nil
         urls = []
         // The app you were in comes back to the front, so ⏎ pastes into it.
-        before?.activate()
+        // As it does, EnCopy stops being the active app and the line's search
+        // loses the keyboard; were the lending over by then, the search would
+        // end (seen on the T-047 walk: ⌘Y to close tucked the line away). So
+        // the lending ends, and the search gets the keyboard back, once EnCopy
+        // has resigned active.
+        guard let app = before, !app.isTerminated, NSApp.isActive else {
+            before = nil
+            isLending = false
+            onClosed()
+            return
+        }
         before = nil
-        isLending = false
-        onClosed()
+        resigned = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let waiting = self.resigned else { return }
+                NotificationCenter.default.removeObserver(waiting)
+                self.resigned = nil
+                self.isLending = false
+                self.onClosed()
+            }
+        }
+        app.activate()
     }
 
     // MARK: QLPreviewPanelDataSource

@@ -30,7 +30,7 @@ Press ⌥C and the line drops onto the screen the pointer is on and takes the ke
 
 Text, links and code you copy are recorded out of the box, files copied in Finder hang on the line too, and you can pause recording from the menu bar. Screenshots can be handed to it as well: a screenshot hangs on the line the moment you take it.
 
-- Text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Each card shows the icon of the app it was copied from, which you can turn off.
+- Text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Each card carries a kind tag in its top corner (text, code, link, image, video, file), one colour per kind. Each card shows the icon of the app it was copied from, which you can turn off.
 - Pinned items hang left of the knot; the newest hangs first right of the knot, older ones further right.
 - An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first. Copying the same content again adds no new item and brings the existing one back to the head; the same goes for copying the same picture again, which is not saved twice.
 - When something new is copied, the line peeks out for 1.5 seconds; set it from 0.8 to 4 seconds in Settings → The line, or turn it off.
@@ -43,7 +43,7 @@ Text, links and code you copy are recorded out of the box, files copied in Finde
 When the line is full, the oldest item falls into the basket instead of the Trash; screenshots and copied images that EnCopy keeps do too. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result:
 
 - Pictures are found by the text read from them; pictures and videos from Finder by their file names.
-- After ⌥C, a basket handle hangs at the lower right of the line: "Basket N ↓". Press ↓ or click it and the basket opens as a list, newest first all the way back, grouped by today, yesterday, this week, then by month; each row is a strip of its own paper, in the theme. ↑↓ go row by row, ← → jump a group, typing and Tab narrow the list, ⏎ pastes, ⌘P pins it back on the line.
+- After ⌥C, a basket handle hangs at the lower right of the line: "Basket N ↓". Press ↓ or click it and the basket opens as a list, newest first all the way back, grouped by today, yesterday, this week, then by month; each row is a strip of its own paper, in the theme; chips above the list, "All / Text / Links / Images" with counts, narrow it by kind. ↑↓ go row by row, ← → jump a group, typing and Tab narrow the list, ⏎ pastes, ⌘P pins it back on the line.
 
 ### Six themes
 

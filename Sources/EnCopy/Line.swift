@@ -214,6 +214,11 @@ final class Line: ObservableObject {
     @Published private(set) var basketPick: URL?
     /// How many things are in the basket, for the handle at the end of the line.
     @Published private(set) var basketCount = 0
+    /// What the list holds of each kind, after the words typed and before
+    /// Tab's kind: the counts on the chips above the list (T-047).
+    @Published private(set) var basketKindCounts: [Kind: Int] = [:]
+    /// All of them, the 「全部」 chip's count.
+    @Published private(set) var basketMatchCount = 0
     /// The handle at the end of the line was clicked: the list opens.
     var onOpenBasket: () -> Void = {}
     /// The handle's place among the line's click targets.
@@ -291,18 +296,29 @@ final class Line: ObservableObject {
         let words = SearchIndex.words(query)
         var rows: [BasketRow]
         if words.isEmpty {
-            rows = kept.filter { fitsKind($0.url) }
-                .sorted { $0.used > $1.used }
+            rows = kept.sorted { $0.used > $1.used }
                 .map { BasketRow(url: $0.url, used: $0.used, app: $0.app) }
         } else {
             let byPath = Dictionary(kept.map { ($0.url.standardizedFileURL.path, $0) }, uniquingKeysWith: { a, _ in a })
-            let found = history.search(words, onLine: [], limit: Int.max,
-                                       accept: kindFilter.map { want in { self.kind(of: $0, words: $1) == want } })
+            let found = history.search(words, onLine: [], limit: Int.max)
             rows = found.basket.compactMap { url in
                 byPath[url.standardizedFileURL.path].map { BasketRow(url: $0.url, used: $0.used, app: $0.app) }
             }
         }
         rows = rows.filter { FileManager.default.fileExists(atPath: $0.url.path) }
+        // Counted before Tab's kind narrows them, for the chips above the
+        // list (T-047); told apart by the words kept, so no file is read.
+        let texts = history.keptWords()
+        var counts: [Kind: Int] = [:]
+        var kinds: [URL: Kind] = [:]
+        for row in rows {
+            let k = kind(of: row.url, words: texts[row.url.standardizedFileURL.path] ?? "")
+            kinds[row.url] = k
+            counts[k, default: 0] += 1
+        }
+        basketKindCounts = counts
+        basketMatchCount = rows.count
+        if let want = kindFilter { rows = rows.filter { kinds[$0.url] == want } }
         var groups: [BasketGroup] = []
         var title: String?
         var run: [BasketRow] = []
@@ -344,6 +360,21 @@ final class Line: ObservableObject {
             if !moveBasketPick(step) { closeBasket(); pickNewest() }
         } else if step > 0 {
             openBasket()
+        }
+    }
+
+    /// The small tag naming what something is, on the line and in the list
+    /// (T-047). Code is told from text here, though Tab files it under text.
+    enum Tag { case text, code, link, image, video, file }
+
+    func tag(of url: URL) -> Tag {
+        if isRecording(url) { return .video }
+        switch paperCard(of: url) {
+        case .text: return .text
+        case .code: return .code
+        case .link: return .link
+        case .image: return .image
+        case .file: return .file
         }
     }
 
