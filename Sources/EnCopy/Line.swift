@@ -508,14 +508,15 @@ final class Line: ObservableObject {
 
     /// The photos hung before (left) or after (right) this one.
     /// Left and right as they hang on screen (T-035): pinned ones first, then
-    /// the newest, older ones further right. Nearest first.
+    /// the newest, older ones further right. Nearest first. Only what is
+    /// shown: a search or Tab hides the rest, and what is hidden stays
+    /// (review 2, on #6). The basket's cards are not the line's to take down.
     func neighbours(of id: UUID, toTheLeft: Bool) -> [Pegged] {
-        let live = items.filter { !$0.falling }
-        let pinned = live.prefix { $0.kept }.count
-        let onScreen = Array(live.prefix(pinned)) + live.dropFirst(pinned).reversed()
+        let all = shown, pinned = layoutPinned
+        let onScreen = (Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()).filter { !$0.falling }
         guard let i = onScreen.firstIndex(where: { $0.id == id }) else { return [] }
         let side = toTheLeft ? Array(onScreen[..<i].reversed()) : Array(onScreen[(i + 1)...])
-        return side.filter { !$0.kept && !$0.held }
+        return side.filter { !$0.kept && !$0.held && !isInBasket($0.id) }
     }
 
     /// Takes down everything on one side of a photo. Each one goes the way

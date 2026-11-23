@@ -439,6 +439,7 @@ struct CheckFailed: Error { let message: String }
         try checkCopiedFilesClearToo()
         try checkCleanupPreviewOnDisk()
         try checkFinderPicturesByName()
+        try checkTakeDownOnlyShown()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -2041,6 +2042,22 @@ struct CheckFailed: Error { let message: String }
         try check(named.search.matches(picture, SearchIndex.words("taxi receipt")) && named.search.matches(picture, SearchIndex.words("receipts 2027")),
                   "A picture from Finder is found by its name and its folder")
         try check(!named.search.matches(own, SearchIndex.words("taxi")), "EnCopy's own screenshot is not found by its file name")
+    }
+
+    /// Review 2, on #6: with Tab narrowing the line, "take down everything to
+    /// the right" takes only what is shown; hidden cards stay.
+    func checkTakeDownOnlyShown() throws {
+        let sides = line()
+        let urls = [try png("Shown side 0.png", red: 0.1), try adoptedNote("hidden-side-1", "a note Tab hides"),
+                    try png("Shown side 2.png", red: 0.5), try adoptedNote("hidden-side-3", "another hidden note"),
+                    try png("Shown side 4.png", red: 0.9)]
+        for url in urls { _ = sides.hang(url, quietly: true) }
+        func id(_ i: Int) -> UUID { sides.items.first { $0.url == urls[i] }!.id }
+        sides.kindFilter = .image
+        // Shown: 4 2 0, newest at the left; the notes 3 and 1 are hidden between them.
+        try check(sides.neighbours(of: id(2), toTheLeft: false).map(\.url) == [urls[0]]
+                  && sides.neighbours(of: id(2), toTheLeft: true).map(\.url) == [urls[4]],
+                  "With only images shown, the sides hold only the images")
     }
 
     func checkShelves() throws {
