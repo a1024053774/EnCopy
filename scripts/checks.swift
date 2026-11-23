@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SQLite3
 import Carbon
 import SwiftUI
@@ -39,6 +40,35 @@ struct CheckFailed: Error { let message: String }
         let output = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
         CGImageDestinationAddImage(output, context.makeImage()!, nil)
         guard CGImageDestinationFinalize(output) else { throw CheckFailed(message: "Could not write fixture") }
+        return url
+    }
+
+    /// A one-frame movie a thumbnail can be read from: four bytes named
+    /// .mov get no first frame, so they never hang.
+    func movie(_ name: String, in folder: URL? = nil) throws -> URL {
+        let url = (folder ?? root).appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: url)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 48])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB, kCVPixelBufferWidthKey as String: 64,
+            kCVPixelBufferHeightKey as String: 48])
+        writer.add(input)
+        guard writer.startWriting() else { throw CheckFailed(message: "Could not start the movie fixture") }
+        writer.startSession(atSourceTime: .zero)
+        var buffer: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 64, 48, kCVPixelFormatType_32ARGB, nil, &buffer)
+        guard let buffer else { throw CheckFailed(message: "Could not make the movie frame") }
+        while !input.isReadyForMoreMediaData { pump(0.01) }
+        adaptor.append(buffer, withPresentationTime: .zero)
+        input.markAsFinished()
+        writer.endSession(atSourceTime: CMTime(value: 1, timescale: 30))
+        var done = false
+        writer.finishWriting { done = true }
+        while !done { pump(0.01) }
+        guard writer.status == .completed else { throw CheckFailed(message: "Could not write the movie fixture") }
         return url
     }
 
@@ -1876,8 +1906,8 @@ struct CheckFailed: Error { let message: String }
         let desktop = root.appendingPathComponent("desktop", isDirectory: true)
         let onDesktop = try png("Desktop shot.png", in: desktop)
         let elsewhere = try png("Someone's photo.png")
-        let movie = root.appendingPathComponent("Holiday.mov"); try Data([0, 0, 0, 20]).write(to: movie)
-        let ownMovie = Inbox.folder.appendingPathComponent("Recording.mov"); try Data([0, 0, 0, 20]).write(to: ownMovie)
+        let movie = try self.movie("Holiday.mov")
+        let ownMovie = try self.movie("Recording.mov", in: Inbox.folder)
         for url in [own, onDesktop, elsewhere, movie, ownMovie] { _ = edit.hang(url, quietly: true) }
         func id(_ url: URL) -> UUID { edit.items.first { $0.url == url }!.id }
         try check(edit.editAction(for: id(own)) == .markup && edit.editAction(for: id(onDesktop)) == .markup,
