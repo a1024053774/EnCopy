@@ -268,7 +268,7 @@ final class ClipboardWatcher {
     private func save(text: String, rtf: Data?, link: Bool, app: String?, ttl: TimeInterval?) {
         // Copied again: how long it stays follows this copy, so a number
         // first copied as a code and then as plain text no longer expires.
-        if let kept = history.note(holding: text) { history.setTTL(kept, ttl); onAgain(kept); return }
+        if let kept = history.note(holding: text) { history.renewTTL(kept, ttl); onAgain(kept); return }
         let ext = rtf == nil ? "txt" : "rtf"
         let name = link ? "Link" : "Text"
         let fm = FileManager.default
@@ -305,7 +305,12 @@ final class ClipboardWatcher {
     private func save(_ png: Data, app: String?, ttl: TimeInterval?) {
         // The picture copied last, copied again: it comes back to the head,
         // from the basket if it fell there (review #11).
-        if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) { onAgain(last.url); return }
+        if let last, last.png == png, FileManager.default.fileExists(atPath: last.url.path) {
+            history.setApp(last.url, app)
+            history.renewTTL(last.url, ttl)
+            onAgain(last.url)
+            return
+        }
         let fm = FileManager.default
         var url = Inbox.folder.appendingPathComponent("Clipboard \(Self.stamp()).png")
         var n = 2

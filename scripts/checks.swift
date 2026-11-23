@@ -395,6 +395,7 @@ struct CheckFailed: Error { let message: String }
         try checkSourceAppBadge()
         try checkThemes()
         try checkWhatHangs()
+        try checkRecopyNeverShortens()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1698,6 +1699,27 @@ struct CheckFailed: Error { let message: String }
         try check(!hangs.shouldHang(known, from: .screenshots) && !hangs.shouldHang(known, from: .folder),
                   "A file put back is not a new screenshot or a new file in a watched folder")
         try check(hangs.shouldHang(fresh, from: .screenshots) && hangs.shouldHang(fresh, from: .folder), "A new screenshot hangs")
+    }
+
+    /// Review 2, finding 2: copying again never turns something kept for good
+    /// into something that expires; it can only take an expiry away.
+    func checkRecopyNeverShortens() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        let history = History(file: root.appendingPathComponent("recopy-ttl.sqlite"))
+        var app = "com.apple.Safari"
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { app },
+                                       onNew: { _ in }, onAgain: { _ in })
+        pasteboard.clearContents(); pasteboard.setString("440912", forType: .string); watcher.check()
+        guard let note = history.note(holding: "440912") else { throw CheckFailed(message: "The note was not kept") }
+        try check(history.ttl(of: note) == nil, "Copied in Safari, the number is kept for good")
+        app = "com.apple.MobileSMS"
+        pasteboard.clearContents(); pasteboard.setString("440912", forType: .string); watcher.check()
+        try check(history.ttl(of: note) == nil, "Copied again in Messages, it is still kept for good, not a ten-minute code")
+        ClipboardWatcher.appRules = ["com.example.chat": .hourly]
+        defer { ClipboardWatcher.appRules = [:] }
+        app = "com.example.chat"
+        pasteboard.clearContents(); pasteboard.setString("440912", forType: .string); watcher.check()
+        try check(history.ttl(of: note) == nil, "Copied again in an hourly app, it is still kept for good")
     }
 
     func checkShelves() throws {

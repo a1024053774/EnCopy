@@ -199,6 +199,12 @@ final class History {
         return !((try? strings("SELECT path FROM item WHERE path = ?", bind: { bind($0, 1, path) })) ?? []).isEmpty
     }
 
+    /// Copied again: an expiry can be taken away or renewed, but something
+    /// kept for good never starts to expire (review 2 #2).
+    func renewTTL(_ url: URL, _ ttl: TimeInterval?) {
+        if ttl == nil || self.ttl(of: url) != nil { setTTL(url, ttl) }
+    }
+
     func expired(at now: Date) -> [URL] {
         let paths = (try? strings("SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= ?", bind: { bind($0, 1, now.timeIntervalSince1970) })) ?? []
         return paths.map(absoluteURL)
