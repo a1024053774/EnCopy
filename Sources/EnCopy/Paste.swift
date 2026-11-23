@@ -43,7 +43,12 @@ final class Paster {
 
     func pastePicked() {
         guard let item = line.picked else { return }
-        line.copy(item.id)
+        paste(item.id)
+    }
+
+    /// One item into the front app: ⏎ on the pick, or a double click on a card.
+    func paste(_ id: UUID) {
+        line.copy(id)
         tuckAway()
         if isTrusted() {
             send(.commandV)

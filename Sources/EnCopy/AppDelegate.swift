@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
         searchBar.onEnd = { [weak self] in self?.endSearch(tuckAway: true) }
         paster = Paster(line: line)
+        line.onPaste = { [weak self] id in self?.paster.paste(id) }
         paster.tuckAway = { [weak self] in self?.endSearch(tuckAway: true) }
         paster.showHint = { [weak self] in
             guard let self else { return }

@@ -519,8 +519,15 @@ final class Line: ObservableObject {
         putOnClipboard(onClipboard.urls.map { $0 == url ? moved : $0 })
     }
 
-    /// A double click: a copied link opens in the browser, anything else in
-    /// its app.
+    /// A double click pastes the item into the front app (T-007); the app
+    /// sets this to its paster. Opening moved to the card's menu.
+    var onPaste: ((UUID) -> Void)?
+
+    func paste(_ id: UUID) {
+        if let onPaste { onPaste(id) } else { copy(id) }
+    }
+
+    /// Opens the item: a copied link in the browser, anything else in its app.
     func open(_ id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         if isText(item.url), let link = Note.cached(item.url)?.link {
