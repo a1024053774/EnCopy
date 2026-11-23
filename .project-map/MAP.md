@@ -34,7 +34,6 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 
 ## Not yet specified
 
-- 动画表余下的几行：麻绳回弹、滚动惯性、⏎ 飞向光标、取下的节奏、菜单栏小夹子晃一下（[T-038](tickets/T-038-motion-rest.md)）。
 - 真机：T-026、T-028、T-029、T-030、T-032、T-034、T-035 走了一部分（见各工单）；方向键、⌘P、Tab、↓、⇧⏎、⌘Y、双击、动画手感、菜单栏图标还没走，要用户离开电脑十分钟再走。
 - 下一版发布：`main` 上的这批功能还没进发布出去的 DMG；产品页 `docs/index.html` 跟发布走，现在写的是 0.1.0，发下一版时按 `main` 改。
 
@@ -50,8 +49,8 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 720b328 |
-| [README.md](../README.md) | `scripts/**`, `Package.swift` | 5f22e54 |
-| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 5f22e54 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**` | 5f22e54 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 720b328 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 04dc8dd |
+| [README.md](../README.md) | `scripts/**`, `Package.swift` | 04dc8dd |
+| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 04dc8dd |
+| [AGENTS.md](../AGENTS.md) | `scripts/**` | 04dc8dd |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 04dc8dd |

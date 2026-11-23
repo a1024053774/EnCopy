@@ -32,6 +32,8 @@ final class Paster {
     /// Without the Accessibility permission nothing can be sent: the item
     /// is only copied, and this says so.
     var showHint: () -> Void = {}
+    /// Sends the pasted paper flying to the pointer; set by the app.
+    var flyOut: ((UUID) -> Void)?
 
     init(line: Line,
          isTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
@@ -50,6 +52,8 @@ final class Paster {
     /// One item into the front app: ⏎ on the pick, or a double click on a card.
     func paste(_ id: UUID, plain: Bool = false) {
         line.copy(id, plain: plain)
+        // Seen while the line is still down: the paper flies to the pointer.
+        flyOut?(id)
         tuckAway()
         if isTrusted() {
             send(.commandV)

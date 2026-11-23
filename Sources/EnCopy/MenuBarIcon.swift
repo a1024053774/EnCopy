@@ -7,7 +7,9 @@ import AppKit
 enum MenuBarIcon {
     static let size = NSSize(width: 18, height: 12)
 
-    static func image(watching: Bool) -> NSImage {
+    /// `tilt`: degrees the pegs swing on the rope, for the sway when
+    /// something is copied while the line is tucked away (T-038).
+    static func image(watching: Bool, tilt: CGFloat = 0) -> NSImage {
         let image = NSImage(size: size, flipped: true) { _ in
             NSColor.black.set()
             let rope = NSBezierPath()
@@ -19,6 +21,13 @@ enum MenuBarIcon {
             rope.stroke()
             for x in [4.5, 11.5] as [CGFloat] {
                 let peg = NSBezierPath(roundedRect: NSRect(x: x, y: 3, width: 2, height: 5), xRadius: 0.6, yRadius: 0.6)
+                if tilt != 0 {
+                    // About the top of the peg, where it holds the rope.
+                    var turn = AffineTransform(translationByX: x + 1, byY: 3)
+                    turn.rotate(byDegrees: tilt)
+                    turn.translate(x: -(x + 1), y: -3)
+                    peg.transform(using: turn)
+                }
                 if watching {
                     peg.fill()
                 } else {

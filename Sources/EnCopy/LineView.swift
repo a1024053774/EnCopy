@@ -57,10 +57,11 @@ enum Layout {
         index < pinned ? index : pinned + (count - 1 - index)
     }
 
-    static func ropeY(x: CGFloat, width: CGFloat) -> CGFloat {
+    /// `sagScale`: 1 hangs at rest; less is pulled straighter (T-038).
+    static func ropeY(x: CGFloat, width: CGFloat, sagScale: CGFloat = 1) -> CGFloat {
         guard width > 0 else { return ropeTop }
         let f = x / width
-        return ropeTop + 4 * sag(width: width) * f * (1 - f)
+        return ropeTop + 4 * sag(width: width) * sagScale * f * (1 - f)
     }
 
     /// Photos hang `spacing` apart, centred, in the places `slot` gives.
@@ -100,7 +101,7 @@ struct LineView: View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .topLeading) {
-                Rope(width: width)
+                Rope(width: width, sagScale: line.sagScale)
 
                 if line.items.isEmpty && !line.isSearching {
                     Hint()
@@ -110,7 +111,7 @@ struct LineView: View {
 
                 if line.layoutPinned > 0, let x = knotX(width: width) {
                     Knot()
-                        .position(x: x, y: Layout.ropeY(x: x, width: width) + 0.5)
+                        .position(x: x, y: Layout.ropeY(x: x, width: width, sagScale: line.sagScale) + 0.5)
                         .transition(.opacity)
                 }
 
@@ -130,7 +131,7 @@ struct LineView: View {
                         let rest = firstLooseX(width: width) - Layout.cardWidth / 2
                         return min(1, max(0, (cardLeft - gone) / max(1, rest - gone)))
                     } ?? 1
-                    let ropeY = Layout.ropeY(x: x, width: width)
+                    let ropeY = Layout.ropeY(x: x, width: width, sagScale: line.sagScale)
                     PeggedView(item: item, line: line, sweepDelay: Motion.sweepDelay(x: x, width: width))
                         .frame(width: Layout.cardWidth, height: Layout.panelHeight - ropeY, alignment: .top)
                         // Photos scrolled towards an edge fade out before they reach it.
@@ -221,6 +222,28 @@ private struct Knot: View {
     }
 }
 
+/// The rope's curve. Its sag animates with the same spring that moves the
+/// pegs, so they stay on it while it bounces; when the spring settles,
+/// nothing is redrawn.
+struct RopeCurve: Shape {
+    let width: CGFloat
+    var sagScale: CGFloat
+    var animatableData: CGFloat {
+        get { sagScale }
+        set { sagScale = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        Path { p in
+            let top = Layout.ropeTop
+            p.move(to: CGPoint(x: -20, y: top))
+            p.addQuadCurve(
+                to: CGPoint(x: width + 20, y: top),
+                control: CGPoint(x: width / 2, y: top + 2 * Layout.sag(width: width) * sagScale))
+        }
+    }
+}
+
 private struct Hint: View {
     var body: some View {
         Text(L("Take a screenshot and it will hang here"))
@@ -237,17 +260,10 @@ private struct Hint: View {
 /// come from beyond the screen.
 struct Rope: View {
     let width: CGFloat
+    var sagScale: CGFloat = 1
     @Environment(\.colorScheme) private var scheme
 
-    private var path: Path {
-        Path { p in
-            let top = Layout.ropeTop
-            p.move(to: CGPoint(x: -20, y: top))
-            p.addQuadCurve(
-                to: CGPoint(x: width + 20, y: top),
-                control: CGPoint(x: width / 2, y: top + 2 * Layout.sag(width: width)))
-        }
-    }
+    private var path: RopeCurve { RopeCurve(width: width, sagScale: sagScale) }
 
     var body: some View {
         ZStack {

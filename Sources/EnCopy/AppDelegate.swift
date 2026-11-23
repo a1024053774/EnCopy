@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         paster = Paster(line: line)
         line.onPaste = { [weak self] id in self?.paster.paste(id) }
         paster.tuckAway = { [weak self] in self?.endSearch(tuckAway: true) }
+        paster.flyOut = { [weak self] id in self?.flyToPointer(id) }
         paster.showHint = { [weak self] in
             guard let self else { return }
             self.pasteHint.show(on: self.panel.screen)
@@ -415,7 +416,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateCapacity()
         wanted = true
         refresh()
-        if Self.peeksAtNew { reveal(peekFor: 2.5) }
+        if Self.peeksAtNew { reveal(peekFor: 2.5) } else if !isRevealed { swayMenuBarPegs() }
+    }
+
+    /// ⏎: the pasted paper leaves its peg and flies to the pointer,
+    /// shrinking, while the line tucks away. The paste itself does not wait.
+    private func flyToPointer(_ id: UUID) {
+        guard isPresent, isRevealed, !Self.reducesMotion, CaptureFlight.flightsInProgress < 2,
+              let screen = panel.screen, let item = line.items.first(where: { $0.id == id }),
+              let card = cardFrame(for: id),
+              let image = item.thumb.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let p = NSEvent.mouseLocation
+        let w = card.width * Motion.flyOutScale, h = card.height * Motion.flyOutScale
+        CaptureFlight.fly(image: image, from: card, to: CGRect(x: p.x - w / 2, y: p.y - h, width: w, height: h),
+                          tilt: CGFloat(item.tilt), on: screen, duration: Motion.flyOut) {}
+    }
+
+    /// Copied while the line stays tucked away: the pegs in the menu bar
+    /// sway once, and nothing comes down.
+    private func swayMenuBarPegs() {
+        guard !Self.reducesMotion, let button = statusItem.button else { return }
+        let step = Motion.menuBarSwayTotal / Double(Motion.menuBarSway.count)
+        for (i, tilt) in Motion.menuBarSway.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i + 1)) { [weak self] in
+                guard let self else { return }
+                if tilt == 0 { self.updateStatusIcon(); return }
+                let image = MenuBarIcon.image(watching: ClipboardWatcher.isEnabled, tilt: tilt)
+                image.accessibilityDescription = button.image?.accessibilityDescription
+                button.image = image
+            }
+        }
     }
 
     // MARK: The capture flying to the line

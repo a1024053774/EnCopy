@@ -105,7 +105,28 @@ final class Line: ObservableObject {
     func landed(bySummon: Bool) {
         cameBySummon = bySummon
         landing += 1
+        bounceRope(from: Motion.ropeTaut, bySummon ? Motion.ropeSummon : Motion.ropeSlide)
     }
+
+    /// How far the rope sags, 1 at rest; animated, it bounces (T-038).
+    @Published private(set) var sagScale: CGFloat = 1
+
+    /// The rope pulled to `taut`, then let go into its sag.
+    private func bounceRope(from taut: CGFloat, _ spring: Animation) {
+        guard !Motion.reduced else { return }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { sagScale = taut }
+        DispatchQueue.main.async { withAnimation(spring) { self.sagScale = 1 } }
+    }
+
+    /// The line slid to follow the pick: which way the papers swing, and a
+    /// count to tell one slide from the next.
+    struct Slide: Equatable { var count = 0; var degrees: Double = 0 }
+    @Published private(set) var slide = Slide()
+    /// When the arrows last moved the pick: a held key repeats faster than
+    /// `Motion.keyRepeat`, and slides without swinging.
+    var lastPickMove = Date.distantPast
     var isSearching: Bool { !SearchIndex.words(query).isEmpty }
 
     /// What the search found in the basket, oldest first: cards that are
@@ -140,7 +161,9 @@ final class Line: ObservableObject {
     /// ↓ goes one shelf further back, ↑ one nearer; stops at either end.
     func moveShelf(_ step: Int) {
         lastKeyAt = Date()
+        let was = shelf
         shelf = Shelf(rawValue: min(Shelf.allCases.count - 1, max(0, shelf.rawValue + step))) ?? .line
+        if shelf != was { bounceRope(from: Motion.shelfTaut, Motion.ropeSummon) }
     }
 
     /// The time span a shelf covers, by last use: today, yesterday, the rest
@@ -560,9 +583,15 @@ final class Line: ObservableObject {
     }
 
     /// -1 is ←, +1 is →, as they hang on screen; stops at either end, no wrap.
+    /// The last arrow press came as a held key's repeat.
+    private var held = false
+
     /// ← is -1 and → is +1: the pick moves the way the arrow points on screen.
     func movePick(_ step: Int) {
-        lastKeyAt = Date()
+        let now = Date()
+        held = now.timeIntervalSince(lastPickMove) < Motion.keyRepeat
+        lastPickMove = now
+        lastKeyAt = now
         let pool = pickableInPlace
         guard let current = picked, let i = pool.firstIndex(where: { $0.id == current.id }) else { return }
         pickedID = pool[min(pool.count - 1, max(0, i + step))].id
@@ -582,7 +611,12 @@ final class Line: ObservableObject {
         let low = max(0, place - CGFloat(visibleCount - 1)) * Layout.spacing
         let high = (place - CGFloat(anchored)) * Layout.spacing
         let next = min(max(scroll, low), high)
-        if next != scroll { withAnimation(Motion.slide) { scroll = next } }
+        guard next != scroll else { return }
+        // More scroll moves the papers left; they lag and swing right.
+        if !held && !Motion.reduced {
+            slide = Slide(count: slide.count + 1, degrees: next > scroll ? -Motion.slideSway : Motion.slideSway)
+        }
+        withAnimation(Motion.slide) { scroll = next }
     }
 
     // MARK: Actions on photos

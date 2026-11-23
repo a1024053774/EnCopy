@@ -28,7 +28,7 @@ func captureRect(of url: URL) -> CGRect? {
 /// its glass frame and clip, so there is nothing left to change on landing.
 @MainActor
 final class CaptureFlight {
-    static let duration: CFTimeInterval = 0.65
+    nonisolated static let duration: CFTimeInterval = 0.65
     /// How high the gentle arc rises halfway, in points.
     private static let arc: CGFloat = 30
 
@@ -60,8 +60,9 @@ final class CaptureFlight {
     ///   - to: the card's frame on the line, in screen coordinates, unrotated.
     ///   - tilt: the card's resting tilt in degrees, clockwise, as SwiftUI uses.
     static func fly(image: CGImage, from: CGRect, to: CGRect, tilt: CGFloat, on screen: NSScreen,
-                    completion: @escaping () -> Void) {
+                    duration: CFTimeInterval = CaptureFlight.duration, completion: @escaping () -> Void) {
         let flight = CaptureFlight(image: image, from: from, to: to, tilt: tilt, screen: screen)
+        flight.duration = duration
         current.append(flight)
         flight.completion = { [weak flight] in
             completion()
@@ -82,7 +83,7 @@ final class CaptureFlight {
                                   NSColor(white: 0.38, alpha: 1).cgColor, NSColor(white: 0.24, alpha: 1).cgColor]
             flight.clip.borderColor = NSColor(white: 1, alpha: 0.35).cgColor
         }
-        flight.duration = 0.55
+        flight.duration = Motion.fall
         current.append(flight)
         flight.completion = { [weak flight] in current.removeAll { $0 === flight } }
         flight.run()
@@ -173,12 +174,14 @@ final class CaptureFlight {
     }
 
     private func updateFall(_ raw: Double) {
-        let e = CGFloat(raw * raw * raw)
+        // It sinks at once, then falls under gravity (T-038).
+        let (sink, gravity) = Motion.fallProgress(raw)
+        let e = CGFloat(gravity)
         let origin = window.frame.origin
         let angle = tilt + (tilt * 7 + 20) * e
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        container.position = CGPoint(x: to.midX - origin.x, y: to.maxY - origin.y - 520 * e)
+        container.position = CGPoint(x: to.midX - origin.x, y: to.maxY - origin.y - sink - 520 * e)
         container.setAffineTransform(CGAffineTransform(rotationAngle: -angle * .pi / 180))
         container.opacity = Float(1 - e)
         CATransaction.commit()
