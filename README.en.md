@@ -2,7 +2,9 @@
 
 [简体中文](README.md) | English
 
-EnCopy is a clipboard app for macOS, being built toward this: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page.
+<p align="center"><a href="https://a1024053774.github.io/EnCopy/"><img src="promo/readme/en/hero.png" width="860" alt="The letters of EnCopy, each on a paper pegged to a twine line: clipboard history for Mac, hung on a line"></a></p>
+
+EnCopy is a clipboard app for macOS: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page and watch a 40-second demo. The demo is also a video: [EnCopy-intro.mp4](promo/EnCopy-intro.mp4) (39 seconds, with sound).
 
 It is a modified version of Alejandro Buján's [Tendedero](https://github.com/alejandrobujan/tendedero) (upstream `3c5b575`, 2.0.0, MIT license). EnCopy is an independent project with its own name and icon. It is not affiliated with or endorsed by Tendedero or its author.
 
@@ -12,23 +14,60 @@ The latest version is [0.2.0](https://github.com/a1024053774/EnCopy/releases/lat
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. To paste directly with ⏎, turn on EnCopy in System Settings → Privacy & Security → Accessibility.
 
-## Where it stands
+## Features
 
-v1 is still in progress. Since 0.1.0 it has its new name, icon and bundle id (`app.encopy.EnCopy`), and the interface keeps only Simplified Chinese and English. Press ⌥C and the line drops onto the screen the pointer is on and takes the keyboard; ← → picks an item, and ⏎ pastes it back into the front app. Pasting directly needs the Accessibility permission; without it, ⏎ only copies. ⌥C is the only global shortcut.
+### ⌥C, pick one, paste it back
 
-Text, links and code you copy are recorded out of the box, and you can pause recording from the menu bar. When the line is full, the oldest text item falls into the basket instead of the Trash. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result. An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first; copying the same content again adds no new item, and the existing one goes back to the head as well. Everything is still there after you quit and reopen. Screenshots and copied images that EnCopy keeps also fall into the basket when the line is full, and the text read from them finds them.
+<img src="promo/readme/en/summon.gif" width="720" alt="⌥C drops the line; → twice picks the link card; ⏎ pastes the link into the email being written">
 
-New in 0.2.0:
+Press ⌥C and the line drops onto the screen the pointer is on and takes the keyboard; ← → picks an item, and ⏎ pastes it back into the front app. Pasting directly needs the Accessibility permission; without it, ⏎ only copies, and you press ⌘V. Double-clicking a card pastes it too.
 
-- One kind of paper per kind of thing: text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Pinned items hang left of the knot, and the newest hangs first right of the knot, older ones further right.
-- Six themes: Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one in Settings → The line. Each card shows the icon of the app it was copied from, which you can turn off.
+⌥C is the only global shortcut. Every other key works only while the line has the keyboard: Tab shows one kind (text, links, images, files), ⇧⏎ pastes words only, ⌘Y opens Quick Look, ⌘P pins.
+
+### Copy, and it hangs: one paper per kind
+
+<img src="promo/readme/en/copy.png" width="720" alt="Five papers on the line: a folder, a polaroid, a kraft tag, tractor-feed paper and a receipt, above a Notes window and a PDF on the desktop">
+
+Text, links and code you copy are recorded out of the box, files copied in Finder hang on the line too, and you can pause recording from the menu bar. Screenshots can be handed to it as well: a screenshot hangs on the line the moment you take it.
+
+- Text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Each card shows the icon of the app it was copied from, which you can turn off.
+- Pinned items hang left of the knot; the newest hangs first right of the knot, older ones further right.
+- An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first. Copying the same content again adds no new item and brings the existing one back to the head; the same goes for copying the same picture again, which is not saved twice.
 - When something new is copied, the line peeks out for 1.5 seconds; set it from 0.8 to 4 seconds in Settings → The line, or turn it off.
-- After ⌥C: Tab shows one kind (text, links, images, files), ↓ walks the basket by day (today, yesterday, this week, earlier), ⇧⏎ pastes words only, ⌘Y opens Quick Look, ⌘P pins. Double-clicking a card pastes it.
-- Files copied in Finder hang on the line too, and pictures and videos from Finder are found by their file names. Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes, and one thrown away early is not left in the Trash. Copying the same picture again brings the earlier one back to the head instead of saving it twice.
-- Retention: text is kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass 1 GB in total, the oldest shrink first. Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
-- Motion follows the design's table: papers swing by weight, ⌥C and sliding down past the top edge each have their own spring, and a breeze passes now and then; with Reduce motion on, only fades remain. A new icon, and a menu bar glyph of a rope with two pegs.
+- Everything is still there after you quit and reopen.
 
-What is left is in the [project map](.project-map/MAP.md) and design details are in the [design proposal](design/encopy-design.html); both are in Chinese.
+### Type to search, the basket included
+
+<img src="promo/readme/en/search.png" width="720" alt="The search field reads invoice; the line now holds an invoice receipt and a screenshot with INVOICE in it, above the basket">
+
+When the line is full, the oldest item falls into the basket instead of the Trash; screenshots and copied images that EnCopy keeps do too. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result:
+
+- Pictures are found by the text read from them; pictures and videos from Finder by their file names.
+- ↓ walks the basket by day: today, yesterday, this week, earlier.
+
+### Six themes
+
+Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one in Settings → The line.
+
+| Paper | Pixel |
+| --- | --- |
+| <img src="docs/themes/paper.png" alt="Paper theme"> | <img src="docs/themes/pixel.png" alt="Pixel theme"> |
+| **Skeuomorphic** | **Minimal** |
+| <img src="docs/themes/skeuo.png" alt="Skeuomorphic theme"> | <img src="docs/themes/minimal.png" alt="Minimal theme"> |
+| **Neon** | **Journal** |
+| <img src="docs/themes/neon.png" alt="Neon theme"> | <img src="docs/themes/washi.png" alt="Journal theme"> |
+
+### What it keeps, and for how long
+
+<img src="promo/readme/en/privacy.png" width="720" alt="Three papers on the line: Stays on your Mac; Skips passwords; Codes expire">
+
+- Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes, and one thrown away early is not left in the Trash.
+- Text is kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass 1 GB in total, the oldest shrink first.
+- Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
+
+### Motion
+
+Motion follows the design's table: papers swing by weight, ⌥C and sliding down past the top edge each have their own spring, and a breeze passes now and then; with Reduce motion on, only fades remain. The menu bar glyph is a rope with two pegs.
 
 ## Build
 
@@ -61,6 +100,8 @@ scripts/make-signing-identity.sh
 
 It puts a self-signed code-signing certificate in a separate keychain (`~/Library/Keychains/encopy-signing.keychain-db`), and from then on `scripts/build-app.sh` signs with it, so the signature stays the same across rebuilds. It does not touch the login keychain or the keychain search list, and asks for no password. The keychain's password is empty so that builds can unlock it on their own; as a result, any program running as you can sign with it, and it only affects the permissions the system grants EnCopy on this Mac.
 
+The demo is [docs/intro.html](docs/intro.html); the product page plays it as is, and the video and the pictures above are captured from it. How: [promo/x-post.md](promo/x-post.md).
+
 ## Checks
 
 ```sh
@@ -81,3 +122,14 @@ GitHub's Contributors list counts commit authors only; co-authors are shown on e
 ## License
 
 MIT, see [LICENSE](LICENSE); the upstream copyright notice is kept as is. The note at the end of LICENSE applies too: the Tendedero name and icon are not covered by the license.
+
+## Not done yet
+
+v1 is still in progress. Still open:
+
+- Two copies within half a second: only the second one is recorded for now; both should be ([T-020](.project-map/tickets/T-020-fast-copies.md)).
+- Right after granting Accessibility, the first ⏎ once took over a second, while every later one landed within 0.3 seconds; it needs measuring again, and a fix if it is slow ([T-022](.project-map/tickets/T-022-first-paste-after-authorizing.md)).
+
+Not planned for now: pasting with ⌘1 to ⌘9 and number stickers, pasting several picks in order, quick replies, iCloud sync, Excel import and export, importing history from iCopy, and interface languages other than Simplified Chinese and English.
+
+The full plan is in the [project map](.project-map/MAP.md) and design details are in the [design proposal](design/encopy-design.html); both are in Chinese.
