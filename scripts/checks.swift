@@ -368,6 +368,7 @@ struct CheckFailed: Error { let message: String }
         try checkMotionRest()
         try checkDataFolder()
         try checkHistory()
+        try checkTakeDownSides()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1202,6 +1203,26 @@ struct CheckFailed: Error { let message: String }
         flyLine.pickNewest()
         flyer.pastePicked()
         try check(order == ["fly", "tuck", "send"], "⏎ sends the paper flying while the line is still down, then tucks and pastes")
+    }
+
+    /// Review #6: "take down everything to the right" takes the older ones,
+    /// which hang to the right since T-035; pinned ones never go.
+    func checkTakeDownSides() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let sides = line()
+        let urls = try (0..<5).map { try png("Side \($0).png", red: CGFloat($0) / 5) }
+        for url in urls { _ = sides.hang(url, quietly: true) }
+        func id(_ i: Int) -> UUID { sides.items.first { $0.url == urls[i] }!.id }
+        // On screen: 4 3 2 1 0, newest at the left.
+        try check(sides.neighbours(of: id(2), toTheLeft: false).map(\.url) == [urls[1], urls[0]],
+                  "Right of the middle one are the two older ones")
+        try check(sides.neighbours(of: id(2), toTheLeft: true).map(\.url) == [urls[3], urls[4]],
+                  "Left of the middle one are the two newer ones")
+        try check(sides.neighbours(of: id(4), toTheLeft: true).isEmpty, "Nothing is left of the newest")
+        try check(sides.neighbours(of: id(0), toTheLeft: false).isEmpty, "Nothing is right of the oldest")
+        sides.togglePin(id(0))
+        try check(sides.neighbours(of: id(4), toTheLeft: true).isEmpty, "A pinned one, left of the knot, is never taken down")
     }
 
     func checkShelves() throws {
