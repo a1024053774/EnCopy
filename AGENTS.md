@@ -40,6 +40,13 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 日常用的 EnCopy 在 `/Applications/EnCopy.app`，bundle id 是 `app.encopy.EnCopy`。`build/` 里的开发版是另一个 App：名字 EnCopy Dev，bundle id `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，真机验收写不进日常那份的历史（[T-017](.project-map/tickets/T-017-dev-copy-own-data.md)）。两份都要占 ⌥C、都会接管截图，不能同时开：真机验收前先退出日常那份（菜单栏图标 → 退出 EnCopy），验收完跑 `scripts/clean-dev.sh`，再打开日常那份。
 - 真机验收的截图和录屏放 `evidence/<工单号>/`，这个目录不进 git：仓库是公开的，截图可能带到屏幕上别的内容。工单的 Resolution 写步骤、结果和文件名。
 
+## 发布和产品页
+
+- 发一个版本：先把 `scripts/build-app.sh` 里的 `VERSION` 改好，合并进 `main`；在 `main` 上跑 `scripts/make-dmg.sh`，再 `gh release create v<版本> build/EnCopy-<版本>.dmg build/EnCopy.dmg --repo a1024053774/EnCopy --target <main 的提交>`。不带版本号的 `EnCopy.dmg` 每次都要传，产品页和 README 的下载链接 `releases/latest/download/EnCopy.dmg` 靠它。
+- 这台 Mac 没有 Developer ID，DMG 没有经过 Apple 公证；发布说明里要写第一次打开怎么点「仍要打开」。
+- 日常那份要装成发布出去的那一份时，从 DMG 里拷，不要重新构建：照 `scripts/install.sh` 的做法先退出正在运行的 EnCopy，再 `ditto` 进 `/Applications`。
+- 产品页是 `docs/index.html`，一个文件，GitHub Pages 从 `main` 的 `docs/` 发布到 <https://a1024053774.github.io/EnCopy/>。页上写的功能、版本号、DMG 大小都要和最新发布的一致；App 的行为变了，合并前看一眼它是不是还对。
+
 ## 真机走一遍
 
 用 `screencapture` 看屏幕，`cliclick` 动鼠标，再加 `evidence/tools/` 里几个小程序读辅助功能树、发按键（本地，不进 git）。走之前给 Devin 开「辅助功能」和「屏幕录制」。

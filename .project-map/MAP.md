@@ -12,6 +12,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
+- 已发布 0.1.0（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.1.0)，2026-11-22）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
 ## Decisions so far
@@ -56,3 +57,4 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 492048a |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 15d3923 |
 | [AGENTS.md](../AGENTS.md) | `scripts/**` | |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | |
