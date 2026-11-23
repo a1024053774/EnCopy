@@ -1029,15 +1029,35 @@ final class Line: ObservableObject {
 
     /// Long press: open the photo in the system Markup editor. Markup does
     /// not edit video, so a recording opens in the trimming editor instead.
+    /// What holding a card, or Markup, does (review #1). Only a picture is
+    /// marked up, in place; a PDF, a folder, an app or any other file from
+    /// Finder is shown in Quick Look, never rewritten or opened.
+    enum EditAction { case open, trim, markup, quickLook }
+
+    func editAction(for id: UUID) -> EditAction {
+        guard let item = items.first(where: { $0.id == id }) else { return .quickLook }
+        if isText(item.url) { return .open }
+        if item.isRecording { return .trim }
+        return isPicture(item.url) ? .markup : .quickLook
+    }
+
+    func canMarkUp(_ id: UUID) -> Bool { editAction(for: id) == .markup }
+
+    /// A picture Markup can draw on and save as it was: not a PDF, whose
+    /// pages it would flatten into one image.
+    private func isPicture(_ url: URL) -> Bool {
+        guard !isFile(url), let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .image) && !type.conforms(to: .pdf)
+    }
+
     func markup(_ id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        if isText(item.url) {
-            // Holding a note opens it to edit, as holding a photo marks it up.
-            NSWorkspace.shared.open(item.url)
-        } else if item.isRecording {
-            Trim.shared.edit(item.url, size: item.thumb.size)
-        } else {
-            Markup.shared.edit(item.url)
+        switch editAction(for: id) {
+        // Holding a note opens it to edit, as holding a photo marks it up.
+        case .open: NSWorkspace.shared.open(item.url)
+        case .trim: Trim.shared.edit(item.url, size: item.thumb.size)
+        case .markup: Markup.shared.edit(item.url)
+        case .quickLook: quickLook(id)
         }
     }
 

@@ -380,6 +380,7 @@ struct CheckFailed: Error { let message: String }
         try checkCodeScope()
         try checkPutBackKeepsBatch()
         try checkDragOperations()
+        try checkMarkupOnlyPictures()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1329,6 +1330,26 @@ struct CheckFailed: Error { let message: String }
         drag.query = "dragbasketword"
         guard let card = drag.basketCards.first(where: { $0.url == old }) else { throw CheckFailed(message: "The old note is not in the basket") }
         try check(drag.dragOperations(for: card.id) == .copy, "A basket card drags out as a copy: it stays in the history")
+    }
+
+    /// Review #1: holding a card, or Markup, never rewrites or opens a file
+    /// that is not a picture: a PDF, a folder or an app gets Quick Look.
+    func checkMarkupOnlyPictures() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let edit = line()
+        let pdf = root.appendingPathComponent("Markup contract.pdf"); try Data("%PDF".utf8).write(to: pdf)
+        let app = root.appendingPathComponent("Markup Tool.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let picture = try png("Markup picture.png")
+        let note = try adoptedNote("markup-note", "markup note words")
+        for url in [pdf, app, picture, note] { _ = edit.hang(url, quietly: true) }
+        func id(_ url: URL) -> UUID { edit.items.first { $0.url == url }!.id }
+        try check(edit.editAction(for: id(pdf)) == .quickLook, "Holding a PDF from Finder shows it; it is never rewritten")
+        try check(edit.editAction(for: id(app)) == .quickLook, "Holding an app shows it; it is never opened")
+        try check(edit.editAction(for: id(picture)) == .markup, "Holding a picture still opens Markup")
+        try check(edit.editAction(for: id(note)) == .open, "Holding a note still opens it to edit")
+        try check(!edit.canMarkUp(id(pdf)) && edit.canMarkUp(id(picture)), "The Markup menu item is only for pictures")
     }
 
     func checkShelves() throws {
