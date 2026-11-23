@@ -52,7 +52,7 @@ struct BasketListView: View {
                             HStack {
                                 Text(group.title)
                                 Spacer()
-                                Text(String(format: L("%d items"), group.rows.count)).monospacedDigit()
+                                Text(group.rows.count == 1 ? L("1 item") : String(format: L("%d items"), group.rows.count)).monospacedDigit()
                             }
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)

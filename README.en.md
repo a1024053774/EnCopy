@@ -10,7 +10,7 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 ## Download
 
-The latest version is [0.3.1](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+The latest version is [0.3.2](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. To paste directly with ⏎, turn on EnCopy in System Settings → Privacy & Security → Accessibility.
 
@@ -26,7 +26,7 @@ Press ⌥C and the line drops onto the screen the pointer is on and takes the ke
 
 ### Copy, and it hangs: one paper per kind
 
-<img src="promo/readme/en/copy.png" width="720" alt="Five papers on the line: a folder, a polaroid, a kraft tag, tractor-feed paper and a receipt, above a Notes window and a PDF on the desktop">
+<img src="docs/shots/line-en.png" width="860" alt="The line after ⌥C: receipts, tractor-feed paper and tags, each with a kind tag on its top edge (Text, Code, Link), and Basket 6 ↓ at the lower right">
 
 Text, links and code you copy are recorded out of the box, files copied in Finder hang on the line too, and you can pause recording from the menu bar. Screenshots can be handed to it as well: a screenshot hangs on the line the moment you take it.
 
@@ -38,7 +38,7 @@ Text, links and code you copy are recorded out of the box, files copied in Finde
 
 ### Type to search, the basket included
 
-<img src="promo/readme/en/search.png" width="720" alt="The search field reads invoice; the line now holds an invoice receipt and a screenshot with INVOICE in it, above the basket">
+<img src="docs/shots/basket-en.png" width="600" alt="The basket list: chips All 6, Text 2, Links 1, Images 3 on top; rows grouped Today, Yesterday, This week, October, each with a kind tag; image rows show a thumbnail and the words read from them">
 
 When the line is full, the oldest item falls into the basket instead of the Trash; screenshots and copied images that EnCopy keeps do too. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result:
 
@@ -51,11 +51,11 @@ Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope
 
 | Paper | Pixel |
 | --- | --- |
-| <img src="docs/themes/paper.png" alt="Paper theme"> | <img src="docs/themes/pixel.png" alt="Pixel theme"> |
+| <img src="docs/themes/en/paper.png" alt="Paper theme"> | <img src="docs/themes/en/pixel.png" alt="Pixel theme"> |
 | **Skeuomorphic** | **Minimal** |
-| <img src="docs/themes/skeuo.png" alt="Skeuomorphic theme"> | <img src="docs/themes/minimal.png" alt="Minimal theme"> |
+| <img src="docs/themes/en/skeuo.png" alt="Skeuomorphic theme"> | <img src="docs/themes/en/minimal.png" alt="Minimal theme"> |
 | **Neon** | **Journal** |
-| <img src="docs/themes/neon.png" alt="Neon theme"> | <img src="docs/themes/washi.png" alt="Journal theme"> |
+| <img src="docs/themes/en/neon.png" alt="Neon theme"> | <img src="docs/themes/en/washi.png" alt="Journal theme"> |
 
 ### What it keeps, and for how long
 

@@ -191,6 +191,11 @@ kbd {
 .shot { border-radius: 3px; background: linear-gradient(180deg, #e8edf2 0 18%, #ffffff 18%); position: relative; overflow: hidden; }
 .shot::before { content: ""; position: absolute; left: 10%; right: 10%; top: 30%; height: 46%; background: repeating-linear-gradient(180deg, #cfd6de 0 3px, transparent 3px 8px); }
 .shot::after { content: ""; position: absolute; left: 6%; top: 6%; width: 20%; height: 6%; border-radius: 2px; background: #f08a7e; box-shadow: 9px 0 0 #f3c86a, 18px 0 0 #7fc489; }
+/* What a card is, on its top edge left of the clip, as in the app (0.3.1). */
+.ktag { position: absolute; z-index: 3; left: 8px; top: -8px; padding: 1px 7px; border-radius: 999px; font: 700 9.5px/1.5 var(--f-body); color: #fff; background: #db8519; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); pointer-events: none; }
+.card[data-kind="code"] .ktag { background: #2e9457; }
+.card[data-kind="link"] .ktag { background: #2970db; }
+.card[data-kind="shot"] .ktag { background: #8f57db; }
 .card.mine .face { box-shadow: 0 0 0 2px var(--sun), 0 12px 20px -9px rgba(5, 10, 40, .6); }
 .card.picked { z-index: 4; }
 .card.picked .face { transform: translateY(5px) scale(1.07); box-shadow: 0 0 0 2.5px var(--pick), 0 14px 22px -8px rgba(5, 10, 40, .6); }
@@ -316,6 +321,12 @@ html[lang="en"] .hchar { --s: clamp(40px, 5.6vw, 78px); }
 .paper.sunny { background: var(--sun); }
 .paper.polaroid { background: #fffefa; padding-bottom: 54px; }
 .ride-hint { margin-top: 6px; font: 500 13px/1 var(--f-mono); opacity: .7; }
+/* Real screenshots of the app under the ride: the line with its kind tags, and the basket list. */
+.shots { display: grid; gap: 34px; padding-top: 46px; }
+.shots figure { margin: 0; display: grid; gap: 10px; justify-items: center; }
+.shots img { display: block; width: 100%; height: auto; }
+.shot-basket img { max-width: 600px; border-radius: 16px; box-shadow: 0 30px 50px -24px rgba(5, 10, 40, .7); }
+.shots figcaption { font: 600 14.5px/1.45 var(--f-body); opacity: .85; text-align: center; }
 
 /* One key */
 .keyband { padding-block: 90px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; }
@@ -422,7 +433,7 @@ footer { padding-block: 40px 52px; }
         <svg class="moon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.6 10.2A6 6 0 0 1 5.8 2.4a6 6 0 1 0 7.8 7.8Z" fill="currentColor"/></svg>
         <svg class="sunicon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M13 3l-1.4 1.4M4.4 11.6 3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
-      <a class="pill" href="https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg"><span data-i18n="nav.dl">下载</span><span class="ver"> 0.3.1</span></a>
+      <a class="pill" href="https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg"><span data-i18n="nav.dl">下载</span><span class="ver"> 0.3.2</span></a>
     </div>
   </div>
 </header>
@@ -443,7 +454,7 @@ footer { padding-block: 40px 52px; }
     <div class="line-room" aria-hidden="true"></div>
     <div class="inner hero-grid">
       <div class="hero-left">
-        <p class="kicker" data-i18n="hero.kicker">Mac 上的剪贴板历史 · 0.3.1 · 这一页就是它</p>
+        <p class="kicker" data-i18n="hero.kicker">Mac 上的剪贴板历史 · 0.3.2 · 这一页就是它</p>
         <h1 id="hero-title" class="sr" data-i18n="hero.h1">复制过的，都挂在绳上</h1>
         <div aria-hidden="true">
           <div class="hang-row" data-hang data-hang-row="0">
@@ -535,6 +546,10 @@ footer { padding-block: 40px 52px; }
       </div>
     </div>
     <p class="inner ride-hint" data-i18n="ride.hint">← 拖动或滚动 →</p>
+    <div class="inner shots">
+      <figure class="shot-line"><img src="shots/line-zh.png" width="2400" height="286" loading="lazy" alt="⌥C 后的绳：小票、打孔纸、吊牌一张张挂着，每张纸上沿有种类标签，右下角是「篮子 6 件」" data-i18n-attr="src:shot.line.src,alt:shot.line.alt"><figcaption data-i18n="shot.line">⌥C 后的绳：每张纸上沿标着它是什么，右下角挂着篮子。</figcaption></figure>
+      <figure class="shot-basket"><img src="shots/basket-zh.png" width="1200" height="960" loading="lazy" alt="篮子列表：上方全部、文字、链接、图片标签带件数，下面按天和月分组，每行前有种类标签" data-i18n-attr="src:shot.basket.src,alt:shot.basket.alt"><figcaption data-i18n="shot.basket">按 ↓ 展开篮子：上方按种类筛，一行一条纸。</figcaption></figure>
+    </div>
   </section>
 </div>
 
@@ -558,12 +573,12 @@ footer { padding-block: 40px 52px; }
       <p data-i18n="th.p">纸、夹子和绳子一起换。在设置 → 晾衣绳里挑一套，马上生效。</p>
     </div>
     <div class="theme-grid">
-      <figure><img src="themes/paper.png" width="880" height="160" loading="lazy" alt="纸主题：小票、打孔纸、吊牌、拍立得和文件夹挂在麻绳上" data-i18n-attr="alt:th.paper.alt"><figcaption data-i18n="th.paper">纸</figcaption></figure>
-      <figure><img src="themes/pixel.png" width="880" height="160" loading="lazy" alt="像素主题：像素描边的纸和夹子" data-i18n-attr="alt:th.pixel.alt"><figcaption data-i18n="th.pixel">像素</figcaption></figure>
-      <figure><img src="themes/skeuo.png" width="880" height="160" loading="lazy" alt="拟物主题：有厚度和阴影的纸" data-i18n-attr="alt:th.skeuo.alt"><figcaption data-i18n="th.skeuo">拟物</figcaption></figure>
-      <figure><img src="themes/minimal.png" width="880" height="160" loading="lazy" alt="极简主题：细线和白纸" data-i18n-attr="alt:th.minimal.alt"><figcaption data-i18n="th.minimal">极简</figcaption></figure>
-      <figure><img src="themes/neon.png" width="880" height="160" loading="lazy" alt="霓虹主题：深色底上的发光边" data-i18n-attr="alt:th.neon.alt"><figcaption data-i18n="th.neon">霓虹</figcaption></figure>
-      <figure><img src="themes/washi.png" width="880" height="160" loading="lazy" alt="手账主题：和纸胶带贴住的方格纸" data-i18n-attr="alt:th.washi.alt"><figcaption data-i18n="th.washi">手账</figcaption></figure>
+      <figure><img src="themes/paper.png" width="1900" height="320" loading="lazy" alt="纸主题：小票、打孔纸、吊牌、拍立得和文件夹挂在麻绳上" data-i18n-attr="alt:th.paper.alt,src:th.paper.src"><figcaption data-i18n="th.paper">纸</figcaption></figure>
+      <figure><img src="themes/pixel.png" width="1900" height="320" loading="lazy" alt="像素主题：像素描边的纸和夹子" data-i18n-attr="alt:th.pixel.alt,src:th.pixel.src"><figcaption data-i18n="th.pixel">像素</figcaption></figure>
+      <figure><img src="themes/skeuo.png" width="1900" height="320" loading="lazy" alt="拟物主题：有厚度和阴影的纸" data-i18n-attr="alt:th.skeuo.alt,src:th.skeuo.src"><figcaption data-i18n="th.skeuo">拟物</figcaption></figure>
+      <figure><img src="themes/minimal.png" width="1900" height="320" loading="lazy" alt="极简主题：细线和白纸" data-i18n-attr="alt:th.minimal.alt,src:th.minimal.src"><figcaption data-i18n="th.minimal">极简</figcaption></figure>
+      <figure><img src="themes/neon.png" width="1900" height="320" loading="lazy" alt="霓虹主题：深色底上的发光边" data-i18n-attr="alt:th.neon.alt,src:th.neon.src"><figcaption data-i18n="th.neon">霓虹</figcaption></figure>
+      <figure><img src="themes/washi.png" width="1900" height="320" loading="lazy" alt="手账主题：和纸胶带贴住的方格纸" data-i18n-attr="alt:th.washi.alt,src:th.washi.src"><figcaption data-i18n="th.washi">手账</figcaption></figure>
     </div>
   </section>
 </div>
@@ -577,7 +592,7 @@ footer { padding-block: 40px 52px; }
       <li class="tag" style="--tilt:-1deg"><i class="peg"></i><div class="swing"><div class="paper"><span class="n">3</span><p data-i18n="ins.3">想按 ⏎ 直接贴，在「系统设置 → 隐私与安全性 → 辅助功能」里打开 EnCopy。不开也能用，⏎ 只复制，再按 ⌘V。</p></div></div></li>
     </ol>
     <div class="later">
-      <h3 data-i18n="later.h">0.3.1 还没有的</h3>
+      <h3 data-i18n="later.h">0.3.2 还没有的</h3>
       <ul>
         <li data-i18n="later.3">半秒内连着复制两次，只记得住后一次</li>
       </ul>
@@ -618,7 +633,7 @@ footer { padding-block: 40px 52px; }
     "ui.lang": "中文", "ui.lang.aria": "切换到中文", "ui.theme": "Switch between light and dark",
     "line.aria": "EnCopy's line: what you copy on this page hangs here",
     "search.ph": "Search all history", "search.aria": "Search the text on the line and in the basket",
-    "hero.kicker": "Clipboard history for Mac · 0.3.1 · This page works like it",
+    "hero.kicker": "Clipboard history for Mac · 0.3.2 · This page works like it",
     "hero.h1": "Copy it, and it hangs on the line",
     "s1.a": "Select this and press", "s1.colon": ": ", "sample": "Design review with the team, tomorrow at 10", "s1.copy": "Copy",
     "s1.b": "Any text on this page works. Copy it and it hangs on the line at the top.",
@@ -651,12 +666,18 @@ footer { padding-block: 40px 52px; }
     "th.paper": "Paper", "th.pixel": "Pixel", "th.skeuo": "Skeuomorphic", "th.minimal": "Minimal", "th.neon": "Neon", "th.washi": "Journal",
     "th.paper.alt": "Paper theme: receipts, tractor paper, a tag, a Polaroid and a folder on a twine rope", "th.pixel.alt": "Pixel theme: papers and pegs with pixel outlines",
     "th.skeuo.alt": "Skeuomorphic theme: papers with depth and shadows", "th.minimal.alt": "Minimal theme: thin lines and white paper",
+    "th.paper.src": "themes/en/paper.png", "th.pixel.src": "themes/en/pixel.png", "th.skeuo.src": "themes/en/skeuo.png",
+    "th.minimal.src": "themes/en/minimal.png", "th.neon.src": "themes/en/neon.png", "th.washi.src": "themes/en/washi.png",
+    "shot.line": "The line after ⌥C: every paper is tagged with what it is, and the basket hangs at the lower right.",
+    "shot.line.alt": "The line after ⌥C: receipts, tractor-feed paper and tags, each with a kind tag on its top edge, and Basket 6 at the lower right", "shot.line.src": "shots/line-en.png",
+    "shot.basket": "↓ opens the basket: chips on top narrow it by kind, one strip of paper per row.",
+    "shot.basket.alt": "The basket list: chips All, Text, Links, Images with counts; rows grouped by day and month, each with a kind tag", "shot.basket.src": "shots/basket-en.png",
     "th.neon.alt": "Neon theme: glowing edges on a dark ground", "th.washi.alt": "Journal theme: grid paper held by washi tape",
     "ins.h": "Three steps",
     "ins.1": "Download <a href=\"https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg\">EnCopy.dmg</a> and drag EnCopy into Applications. Requires macOS 14 or later.",
     "ins.2": "The first time you open it, macOS blocks it, because this version isn't notarized by Apple yet. Go to System Settings → Privacy &amp; Security and click Open Anyway.",
     "ins.3": "To paste straight in with ⏎, turn on EnCopy in System Settings → Privacy &amp; Security → Accessibility. It works without it too: ⏎ only copies, then you press ⌘V.",
-    "later.h": "Not in 0.3.1 yet",
+    "later.h": "Not in 0.3.2 yet",
     "later.3": "Two copies within half a second: only the second one is recorded",
     "foot.p": "EnCopy is a modified version of Alejandro Buján's <a href=\"https://github.com/alejandrobujan/tendedero\">Tendedero</a> (MIT license). It is an independent project, not affiliated with Tendedero or its author.",
     "foot.all": "All releases",
@@ -672,11 +693,13 @@ footer { padding-block: 40px 52px; }
     zh: { hungTop: "挂上了：它在最上面那根绳的最右边", hungFar: "挂上了：看最上面那根绳", pasted: "贴进了「笔记」，这件回到了绳头", pastedFar: "贴进了页首的「笔记」，这件回到了绳头",
           copied: "已复制，这件回到了绳头", again: "同样的内容：原来那件回到了绳头，没有多出一件", turn: "轮到你了：选中这页上任何一句话，按 ⌘C，再按 ⌥C",
           vPlay: "播放", vPause: "暂停", vReplay: "再看一遍", vSoundOn: "打开声音", vSoundOff: "关掉声音",
+          "tag.text": "文字", "tag.code": "代码", "tag.link": "链接", "tag.shot": "图片",
           now: "刚刚", copiedFlag: "已复制", basketFlag: "篮子", shot: "截图，", shotPaste: "［截图 14.31］",
           title: "EnCopy · Mac 上的剪贴板历史", desc: "EnCopy 是 macOS 上的剪贴板历史：复制过的东西挂在屏幕顶部的一根绳上，按 ⌥C 挑一件，⏎ 贴回正在打字的地方。" },
     en: { hungTop: "Hung: it is at the right end of the line at the top", hungFar: "Hung: look at the line at the top", pasted: "Pasted into Notes. That item went back to the head of the line.", pastedFar: "Pasted into Notes at the top of the page. That item went back to the head.",
           copied: "Copied. That item went back to the head of the line.", again: "Same content: the existing item went back to the head, no duplicate.", turn: "Your turn: select any sentence on this page, press ⌘C, then ⌥C.",
           vPlay: "Play", vPause: "Pause", vReplay: "Replay", vSoundOn: "Sound on", vSoundOff: "Sound off",
+          "tag.text": "Text", "tag.code": "Code", "tag.link": "Link", "tag.shot": "Image",
           now: "just now", copiedFlag: "Copied", basketFlag: "Basket", shot: "Screenshot, ", shotPaste: "[Screenshot 14.31]",
           title: "EnCopy · Clipboard history for Mac", desc: "EnCopy is clipboard history for macOS: what you copy hangs on a line at the top of the screen. Press ⌥C, pick one, and ⏎ pastes it back where you were typing." },
   };
@@ -837,10 +860,11 @@ footer { padding-block: 40px 52px; }
     if (c) return c;
     const el = document.createElement("button");
     el.type = "button"; el.className = "card gone" + (item.mine ? " mine" : ""); el.dataset.kind = item.kind; el.tabIndex = -1;
-    el.innerHTML = '<span class="swing" style="--tilt:' + tilt(item.id) + 'deg"><span class="clip"></span><span class="face"><span class="band-top"></span>' +
+    el.innerHTML = '<span class="swing" style="--tilt:' + tilt(item.id) + 'deg"><span class="clip"></span><span class="ktag"></span><span class="face"><span class="band-top"></span>' +
       (item.kind === "shot" ? '<span class="shot"></span>' : '<span class="words"></span>') + '<span class="when"><span></span><i></i></span></span></span>';
     if (item.kind !== "shot") el.querySelector(".words").textContent = item.text;
     el.querySelector(".when span").textContent = item.when;
+    el.querySelector(".ktag").textContent = say_("tag." + item.kind);
     el.setAttribute("aria-label", (item.kind === "shot" ? say_("shot") : "") + item.text + ", " + item.when);
     el.addEventListener("click", () => use(item.id, "copy"));
     holder.appendChild(el);
