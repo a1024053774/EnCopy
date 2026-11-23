@@ -370,6 +370,7 @@ struct CheckFailed: Error { let message: String }
         try checkHistory()
         try checkTakeDownSides()
         try checkCodeScope()
+        try checkPutBackKeepsBatch()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1257,6 +1258,43 @@ struct CheckFailed: Error { let message: String }
         try check(FileManager.default.fileExists(atPath: hung[0].path) && pin.items.contains { $0.url == hung[0] && $0.kept },
                   "A pinned code is not cleared when its ten minutes are up")
         try check(FileManager.default.fileExists(atPath: hung[1].path), "The other one, no longer a code, stays too")
+    }
+
+    /// Review #2: putting a batch back never loses a file: a name taken in
+    /// the meantime gets the next free one, and what cannot go back stays
+    /// in the batch.
+    func checkPutBackKeepsBatch() throws {
+        let history = History(file: root.appendingPathComponent("putback.sqlite"))
+        let clearing = Clearing(folder: root.appendingPathComponent("cleared-putback", isDirectory: true))
+        let a = try adoptedNote("putback-a", "first words of a"), b = try adoptedNote("putback-b", "words of b")
+        for url in [a, b] { history.record(url, text: try String(contentsOf: url, encoding: .utf8)) }
+        guard let batch = clearing.clear([a, b], reason: "manual", history: history) else { throw CheckFailed(message: "Nothing was cleared") }
+        // Meanwhile a new note takes a's name.
+        try "a newer note in the same place".write(to: a, atomically: true, encoding: .utf8)
+        let back = clearing.putBack(batch.id, history: history)
+        let fm = FileManager.default
+        try check(back.count == 2 && (try String(contentsOf: a, encoding: .utf8)) == "a newer note in the same place",
+                  "The newer file in the old place is left as it is")
+        let renamed = back.first { $0 != b }!
+        try check(renamed != a && (try String(contentsOf: renamed, encoding: .utf8)) == "first words of a"
+                  && fm.fileExists(atPath: b.path), "The cleared one comes back under the next free name")
+        try check(clearing.batches().allSatisfy { $0.id != batch.id }, "A batch that all came back is gone")
+
+        // One cannot go back: its folder's place is taken by a file.
+        let sub = DataFolder.url.appendingPathComponent("putback-sub", isDirectory: true)
+        try fm.createDirectory(at: sub, withIntermediateDirectories: true)
+        let c = sub.appendingPathComponent("c.png"), d = DataFolder.url.appendingPathComponent("putback-d.png")
+        try fm.copyItem(at: try png("putback-c-src.png"), to: c)
+        try fm.copyItem(at: try png("putback-d-src.png"), to: d)
+        history.recordImage(c, text: ""); history.recordImage(d, text: "")
+        guard let second = clearing.clear([c, d], reason: "manual", history: history) else { throw CheckFailed(message: "Nothing was cleared") }
+        try fm.removeItem(at: sub)
+        try "in the way".write(to: sub, atomically: true, encoding: .utf8)
+        let some = clearing.putBack(second.id, history: history)
+        try fm.removeItem(at: sub)
+        let left = clearing.batches().first { $0.id == second.id }
+        try check(some == [d] && left?.entries.count == 1 && left.map { fm.fileExists(atPath: clearing.folder.appendingPathComponent($0.id).appendingPathComponent($0.entries[0].path).path) } == true,
+                  "What could not go back stays in the batch, file and all")
     }
 
     func checkShelves() throws {
