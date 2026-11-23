@@ -34,7 +34,7 @@ struct GrabArea: NSViewRepresentable {
             // line card would get is reset here.
             view.url = item.url
             view.dragImage = item.thumb
-            view.dragOperations = line.dragOperations(for: id)
+            view.dragOperations = { line.dragOperations(for: id) }
             view.isHeld = false
             view.toolTip = nil
             view.onSelect = {}
@@ -63,7 +63,6 @@ struct GrabArea: NSViewRepresentable {
         let isRecording = item.isRecording
         view.url = item.url
         view.dragImage = item.thumb
-        view.dragOperations = line.dragOperations(for: id)
         view.isHeld = item.held
         view.toolTip = L("Shift-click to select photos")
         view.onSelect = { line.toggleSelection(id) }
@@ -84,6 +83,8 @@ struct GrabArea: NSViewRepresentable {
         // Trash together.
         let inGroup = { line.selectedIDs.contains(id) && line.selectedIDs.count > 1 }
         view.dragGroup = { inGroup() ? line.selectedItems.map { ($0.url, $0.thumb) } : [] }
+        // A group drags out only as far as every card in it may (review 2, on #10).
+        view.dragOperations = { inGroup() ? line.dragOperations(for: line.selectedItems.map(\.id)) : line.dragOperations(for: id) }
         view.onTrash = {
             if inGroup() { line.trash(line.selectedItems.map(\.id)) } else { line.trash(id) }
         }
@@ -220,7 +221,8 @@ final class GrabView: NSView, NSDraggingSource {
     var url: URL?
     var dragImage: NSImage?
     /// What a drag out of the app may do with the file: see `Line.dragOperations`.
-    var dragOperations: NSDragOperation = .copy
+    /// Asked when the drag starts, since what is selected may have changed.
+    var dragOperations: () -> NSDragOperation = { .copy }
     /// Every photo that drags along with this one, when it is selected with
     /// others. Empty for a drag of its own.
     var dragGroup: () -> [(URL, NSImage)] = { [] }
@@ -415,7 +417,7 @@ final class GrabView: NSView, NSDraggingSource {
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         // Apps pick copy. Finder picks move, so a folder or the Desktop keeps
         // the file. Delete is what lets the Dock's Trash accept it.
-        context == .outsideApplication ? dragOperations : []
+        context == .outsideApplication ? dragOperations() : []
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {

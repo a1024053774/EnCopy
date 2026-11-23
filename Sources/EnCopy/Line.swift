@@ -969,6 +969,11 @@ final class Line: ObservableObject {
         return isInInbox(id) ? [.copy, .move, .delete] : .copy
     }
 
+    /// Several dragged together may only do what each of them may.
+    func dragOperations(for ids: [UUID]) -> NSDragOperation {
+        ids.reduce([.copy, .move, .delete]) { $0.intersection(dragOperations(for: $1)) }
+    }
+
     func isOnDesktop(_ id: UUID) -> Bool {
         guard let item = items.first(where: { $0.id == id }) else { return false }
         return item.url.deletingLastPathComponent().standardizedFileURL == desktop.standardizedFileURL
