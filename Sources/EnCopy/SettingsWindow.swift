@@ -92,6 +92,12 @@ final class SettingsModel: ObservableObject {
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
+    @State private var tab: Int
+
+    init(model: SettingsModel, initialTab: Int = 0) {
+        self.model = model
+        _tab = State(initialValue: initialTab)
+    }
 
     /// A setting's name with one line on what it does.
     private func described(_ title: String, _ detail: String) -> some View {
@@ -102,11 +108,11 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        TabView {
-            general.tabItem { Label(L("General"), systemImage: "gearshape") }
-            recording.tabItem { Label(L("Hang what you copy"), systemImage: "doc.on.clipboard") }
-            screenshots.tabItem { Label(L("Screenshots"), systemImage: "camera.viewfinder") }
-            lineTab.tabItem { Label(L("The line"), systemImage: "line.diagonal") }
+        TabView(selection: $tab) {
+            general.tabItem { Label(L("General"), systemImage: "gearshape") }.tag(0)
+            recording.tabItem { Label(L("Hang what you copy"), systemImage: "doc.on.clipboard") }.tag(1)
+            screenshots.tabItem { Label(L("Screenshots"), systemImage: "camera.viewfinder") }.tag(2)
+            lineTab.tabItem { Label(L("The line"), systemImage: "line.diagonal") }.tag(3)
         }
         .padding(16)
         .frame(width: 520, height: 460)
