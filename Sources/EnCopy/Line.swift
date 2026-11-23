@@ -1125,6 +1125,9 @@ final class Line: ObservableObject {
     func editAction(for id: UUID) -> EditAction {
         guard let item = items.first(where: { $0.id == id }) else { return .quickLook }
         if isText(item.url) { return .open }
+        // Marking up or trimming saves over the file: only EnCopy's own, or a
+        // screenshot left on the Desktop. Anyone else's is shown (review 2, on #1).
+        guard isInInbox(id) || isOnDesktop(id) else { return .quickLook }
         if item.isRecording { return .trim }
         return isPicture(item.url) ? .markup : .quickLook
     }
