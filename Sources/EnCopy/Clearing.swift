@@ -79,21 +79,46 @@ final class Clearing {
         guard let batch = batches().first(where: { $0.id == id }) else { return [] }
         let fm = FileManager.default
         var back: [URL] = []
+        var left: [Entry] = []
         for entry in batch.entries {
             let from = dir.appendingPathComponent(entry.path)
-            let to = history.absolute(entry.path)
-            guard fm.fileExists(atPath: from.path), !fm.fileExists(atPath: to.path) else { continue }
+            guard fm.fileExists(atPath: from.path) else { continue }
+            // A name taken in the meantime: the next free one, never over it.
+            let to = Self.free(history.absolute(entry.path))
             do {
                 try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fm.moveItem(at: from, to: to)
-            } catch { continue }
+            } catch {
+                // It stays in the batch, to try again (review #2).
+                left.append(entry)
+                log.error("Could not put back \(entry.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                continue
+            }
             if isText(to) { history.record(to, app: entry.app) } else { history.recordImage(to, text: entry.words ?? "") }
             history.setUsed(to, Date(timeIntervalSince1970: entry.used))
             if entry.shrunk { history.setShrunk(to, true) }
             back.append(to)
         }
-        try? fm.removeItem(at: dir)
+        if left.isEmpty {
+            try? fm.removeItem(at: dir)
+        } else {
+            var rest = batch
+            rest.entries = left
+            try? JSONEncoder().encode(rest).write(to: dir.appendingPathComponent("batch.json"), options: .atomic)
+        }
         return back
+    }
+
+    /// `url`, or the same name with " 2", " 3"… when that is taken.
+    private static func free(_ url: URL) -> URL {
+        let folder = url.deletingLastPathComponent(), name = url.lastPathComponent
+        let base = (name as NSString).deletingPathExtension, ext = (name as NSString).pathExtension
+        var candidate = url, n = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = folder.appendingPathComponent(ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)")
+            n += 1
+        }
+        return candidate
     }
 
     /// Batches older than seven days are deleted for good.
