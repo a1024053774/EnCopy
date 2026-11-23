@@ -39,8 +39,22 @@ enum Layout {
     /// scrolling behind them should have faded out. Nil otherwise.
     static func pinnedEdge(count: Int, width: CGFloat, visible: Int, pinned: Int) -> CGFloat? {
         guard Line.keepOnLine != nil, count > visible, anchorsPinned(pinned, visible: visible) else { return nil }
-        let newest = width / 2 + CGFloat(visible - 1) * spacing / 2
-        return newest - CGFloat(visible - pinned) * spacing
+        return first(width: width, visible: visible) + CGFloat(pinned - 1) * spacing
+    }
+
+    /// The leftmost place on a line that scrolls.
+    static func first(width: CGFloat, visible: Int) -> CGFloat {
+        width / 2 - CGFloat(visible - 1) * spacing / 2
+    }
+
+    /// Which place, counting from the left, the item at `index` hangs in.
+    /// Items are stored oldest first with the pinned ones at the front; on
+    /// the line the pinned ones keep their order left of the knot, and the
+    /// rest hang newest first from the knot, older ones further right.
+    /// The mapping is its own inverse: the item in place `p` is at index
+    /// `slot(p, …)`.
+    static func slot(_ index: Int, count: Int, pinned: Int) -> Int {
+        index < pinned ? index : pinned + (count - 1 - index)
     }
 
     static func ropeY(x: CGFloat, width: CGFloat) -> CGFloat {
@@ -49,27 +63,26 @@ enum Layout {
         return ropeTop + 4 * sag(width: width) * f * (1 - f)
     }
 
-    /// Photos hang `spacing` apart, centred. When there are more than the
-    /// `visible` that fit: with Keep on line set, they keep their spacing,
-    /// the newest stays where the last one would hang on a full line, and
-    /// `scroll` brings older ones in from the left. Otherwise (a line hung
-    /// on a wider screen) they move closer together so none is past the edge.
+    /// Photos hang `spacing` apart, centred, in the places `slot` gives.
+    /// When there are more than the `visible` that fit: with Keep on line
+    /// set, they keep their spacing, the newest stays in the first place
+    /// past the knot, and `scroll` brings older ones in from the right.
+    /// Otherwise (a line hung on a wider screen) they move closer together
+    /// so none is past the edge.
     ///
-    /// The first `pinned` photos are the pinned ones. On a line that
-    /// scrolls they stay put at its left end, and the rest scroll behind
-    /// them, unless they would leave almost no room for the rest.
+    /// On a line that scrolls the pinned photos stay put at its left end,
+    /// and the rest scroll behind them, unless they would leave almost no
+    /// room for the rest.
     static func x(index: Int, count: Int, width: CGFloat, visible: Int, scroll: CGFloat,
                   pinned: Int = 0) -> CGFloat {
+        let place = CGFloat(slot(index, count: count, pinned: pinned))
         if Line.keepOnLine != nil && count > visible {
-            let newest = width / 2 + CGFloat(visible - 1) * spacing / 2
-            if anchorsPinned(pinned, visible: visible), index < pinned {
-                return newest - CGFloat(visible - 1 - index) * spacing
-            }
-            return newest - CGFloat(count - 1 - index) * spacing + scroll
+            let stays = anchorsPinned(pinned, visible: visible) && index < pinned
+            return first(width: width, visible: visible) + place * spacing - (stays ? 0 : scroll)
         }
         let gaps = CGFloat(max(count - 1, 0))
         let step = gaps > 0 ? min(spacing, max(0, width - 200) / gaps) : spacing
-        return width / 2 - gaps * step / 2 + CGFloat(index) * step
+        return width / 2 - gaps * step / 2 + place * step
     }
 }
 
@@ -79,7 +92,7 @@ struct LineView: View {
     /// While searching, only what matches hangs, from the left as on any
     /// line: no knot, no pinned end, no scroll.
     private var shown: [Pegged] { line.shown }
-    private var pinned: Int { line.isSearching ? 0 : line.pinnedLead }
+    private var pinned: Int { line.layoutPinned }
     private var scroll: CGFloat { line.isSearching ? 0 : line.scroll }
 
     var body: some View {
@@ -94,7 +107,7 @@ struct LineView: View {
                         .transition(.opacity)
                 }
 
-                if !line.isSearching, let x = knotX(width: width) {
+                if line.layoutPinned > 0, let x = knotX(width: width) {
                     Knot()
                         .position(x: x, y: Layout.ropeY(x: x, width: width) + 0.5)
                         .transition(.opacity)
@@ -148,10 +161,8 @@ struct LineView: View {
     /// Where the first photo past the pinned ones hangs at rest on a
     /// scrolling line: the first place, or the one just past the knot.
     private func firstLooseX(width: CGFloat) -> CGFloat {
-        let newest = width / 2 + CGFloat(line.visibleCount - 1) * Layout.spacing / 2
-        let first = newest - CGFloat(line.visibleCount - 1) * Layout.spacing
         let lead = Layout.anchorsPinned(pinned, visible: line.visibleCount) ? pinned : 0
-        return first + CGFloat(lead) * Layout.spacing
+        return Layout.first(width: width, visible: line.visibleCount) + CGFloat(lead) * Layout.spacing
     }
 
     /// Where a photo on a scrolling line stops being whole in view: the
@@ -165,19 +176,20 @@ struct LineView: View {
         return start...width
     }
 
-    /// Halfway between the last pinned photo and the next one, or half a
-    /// step past it when nothing hangs loose. The empty place a pinned photo
-    /// leaves still counts, so the knot stays put until the gaps close.
+    /// Halfway between the last pinned photo and the place past it, where
+    /// the newest hangs. The empty place a pinned photo leaves still counts,
+    /// so the knot stays put until the gaps close.
     private func knotX(width: CGFloat) -> CGFloat? {
-        guard let last = line.items.lastIndex(where: \.kept) else { return nil }
-        let x = { (i: Int) in Layout.x(index: i, count: line.items.count, width: width,
-                                       visible: line.visibleCount, scroll: line.scroll, pinned: line.pinnedLead) }
+        guard pinned > 0 else { return nil }
+        let last = pinned - 1
+        let count = shown.count
+        let x = { (i: Int) in Layout.x(index: i, count: count, width: width,
+                                       visible: line.visibleCount, scroll: scroll, pinned: pinned) }
         // On a line that scrolls, the pinned photos stay put, and the knot with them.
-        if Layout.pinnedEdge(count: line.items.count, width: width,
-                             visible: line.visibleCount, pinned: line.pinnedLead) != nil {
+        if Layout.pinnedEdge(count: count, width: width, visible: line.visibleCount, pinned: pinned) != nil {
             return x(last) + Layout.spacing / 2
         }
-        let next = last + 1 < line.items.count ? x(last + 1) : x(last) + Layout.spacing
+        let next = pinned < count ? x(Layout.slot(pinned, count: count, pinned: pinned)) : x(last) + Layout.spacing
         return (x(last) + next) / 2
     }
 }

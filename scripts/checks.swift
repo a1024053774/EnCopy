@@ -362,6 +362,7 @@ struct CheckFailed: Error { let message: String }
         try checkRetention()
         try checkCleanup()
         try checkShelves()
+        try checkNewestByKnot()
         try checkDataFolder()
         try checkHistory()
     }
@@ -395,25 +396,25 @@ struct CheckFailed: Error { let message: String }
         _ = pickLine.hang(pc, quietly: true)
         pickLine.pickNewest()
         try check(pickLine.picked?.url == pc, "Summoning picks the newest item")
-        pickLine.movePick(-1)
-        try check(pickLine.picked?.url == pb, "Left moves the pick one older")
-        pickLine.movePick(-1)
-        try check(pickLine.picked?.url == pa, "Left again reaches the oldest")
-        pickLine.movePick(-1)
+        pickLine.movePick(1)
+        try check(pickLine.picked?.url == pb, "Right moves the pick one older")
+        pickLine.movePick(1)
+        try check(pickLine.picked?.url == pa, "Right again reaches the oldest")
+        pickLine.movePick(1)
         try check(pickLine.picked?.url == pa, "The pick stops at the oldest, no wrap")
-        pickLine.movePick(1)
-        try check(pickLine.picked?.url == pb, "Right moves the pick one newer")
-        pickLine.movePick(1)
-        pickLine.movePick(1)
+        pickLine.movePick(-1)
+        try check(pickLine.picked?.url == pb, "Left moves the pick one newer")
+        pickLine.movePick(-1)
+        pickLine.movePick(-1)
         try check(pickLine.picked?.url == pc, "The pick stops at the newest, no wrap")
         pickLine.clearPick()
         try check(pickLine.picked == nil, "Clearing leaves nothing picked")
-        pickLine.movePick(1)
+        pickLine.movePick(-1)
         try check(pickLine.picked == nil, "Moving with nothing picked picks nothing")
 
         // What is taken down while picked yields the newest remaining.
         pickLine.pickNewest()
-        pickLine.movePick(-1)
+        pickLine.movePick(1)
         let pbID = pickLine.items.first { $0.url == pb }!.id
         pickLine.discard(pbID)
         try check(pickLine.picked?.url == pc, "A picked item taken down leaves the newest picked")
@@ -441,7 +442,7 @@ struct CheckFailed: Error { let message: String }
         _ = pasteLine.hang(qb, quietly: true)
         _ = pasteLine.hang(qc, quietly: true)
         pasteLine.pickNewest()
-        pasteLine.movePick(-1)
+        pasteLine.movePick(1)
         let trusted = Paster(line: pasteLine, isTrusted: { true }, send: { key in
             sent.append(key)
             order.append("send")
@@ -497,9 +498,9 @@ struct CheckFailed: Error { let message: String }
         }
         scrollLine.pickNewest()
         try check(scrollLine.scroll == 0, "The newest pick shows the newest end")
-        for _ in 0..<8 { scrollLine.movePick(-1) }
-        try check(scrollLine.scroll == Layout.spacing, "Picking older scrolls the line one place")
         for _ in 0..<8 { scrollLine.movePick(1) }
+        try check(scrollLine.scroll == Layout.spacing, "Picking older scrolls the line one place")
+        for _ in 0..<8 { scrollLine.movePick(-1) }
         try check(scrollLine.scroll == 0, "Picking back to the newest scrolls home")
 
         // ← and → belong to the pick; everything else stays with the field.
@@ -535,10 +536,10 @@ struct CheckFailed: Error { let message: String }
         func order() -> [URL] { use.items.filter { !$0.falling }.map(\.url) }
         func id(_ url: URL) -> UUID { use.items.first { $0.url == url && !$0.falling }!.id }
 
-        // ⌥C, ← ←, ⏎: the third newest is pasted and goes to the head.
+        // ⌥C, → →, ⏎: the third newest is pasted and goes to the head.
         use.pickNewest()
-        use.movePick(-1)
-        use.movePick(-1)
+        use.movePick(1)
+        use.movePick(1)
         var sent = 0
         let paster = Paster(line: use, isTrusted: { true }, send: { _ in sent += 1 })
         paster.tuckAway = { use.clearPick() }
@@ -623,7 +624,7 @@ struct CheckFailed: Error { let message: String }
         _ = keys.hang(other, quietly: true)
         var sent = 0
         let paster = Paster(line: keys, isTrusted: { true }, send: { _ in sent += 1 })
-        keys.pickNewest(); keys.movePick(-1)
+        keys.pickNewest(); keys.movePick(1)
         paster.pastePicked()
         try check(pasteboard.data(forType: .rtf) != nil, "⏎ on a styled note keeps its styling")
         keys.pickNewest()
@@ -1009,6 +1010,56 @@ struct CheckFailed: Error { let message: String }
 
     /// T-033: ↓ while summoned walks the basket by last use — today,
     /// yesterday, this week, earlier — and what is used comes back.
+    /// T-035: the newest hangs right of the knot, older ones further right,
+    /// pinned ones left of it; ← and → move the pick the way they point.
+    func checkNewestByKnot() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let knot = line()
+        let urls = try (0..<4).map { try png("Knot \($0).png", red: CGFloat($0) / 4) }
+        for url in urls { _ = knot.hang(url, quietly: true) }
+        knot.togglePin(knot.items.first { $0.url == urls[0] }!.id)
+        try check(knot.pinnedLead == 1 && knot.items.first?.url == urls[0], "The pinned one is first in the store")
+        let count = knot.items.count, width: CGFloat = 1400
+        let xs = (0..<count).map { Layout.x(index: $0, count: count, width: width, visible: 8, scroll: 0, pinned: 1) }
+        func x(_ url: URL) -> CGFloat { xs[knot.items.firstIndex { $0.url == url }!] }
+        try check(x(urls[0]) < x(urls[3]) && x(urls[3]) < x(urls[2]) && x(urls[2]) < x(urls[1]),
+                  "Left to right: pinned, then the newest, then older ones")
+        try check(abs(x(urls[3]) - x(urls[0]) - Layout.spacing) < 0.5, "The newest hangs in the first place past the knot")
+        try check((0..<count).allSatisfy { Layout.slot(Layout.slot($0, count: count, pinned: 1), count: count, pinned: 1) == $0 },
+                  "Place and index map back to each other")
+
+        knot.pickNewest()
+        try check(knot.picked?.url == urls[3], "Summoning still picks the newest")
+        knot.movePick(1)
+        try check(knot.picked?.url == urls[2], "→ moves right, to the next older")
+        knot.movePick(-1); knot.movePick(-1)
+        try check(knot.picked?.url == urls[0], "← from the newest crosses the knot to the pinned one")
+        knot.movePick(-1)
+        try check(knot.picked?.url == urls[0], "← stops at the left end")
+        for _ in 0..<5 { knot.movePick(1) }
+        try check(knot.picked?.url == urls[1], "→ stops at the oldest, the right end")
+
+        // While searching there is no knot: the newest match is leftmost.
+        knot.query = "zzznomatch"
+        try check(knot.layoutPinned == 0, "A search has no pinned end")
+        knot.query = ""
+        try check(knot.layoutPinned == 1, "Back on the line the pinned end returns")
+
+        // On a long line, older ones come in from the right: scroll grows.
+        let long = line()
+        Line.keepOnLine = 25
+        long.maxItems = 25; long.visibleCount = 4
+        defer { Line.keepOnLine = nil }
+        for i in 0..<6 { _ = long.hang(try png("Long \(i).png", red: CGFloat(i) / 6), quietly: true) }
+        let lc = long.items.count
+        let newestX = Layout.x(index: lc - 1, count: lc, width: width, visible: 4, scroll: 0)
+        try check(abs(newestX - Layout.first(width: width, visible: 4)) < 0.5, "On a long line the newest is in the first place")
+        let oldX = Layout.x(index: 0, count: lc, width: width, visible: 4, scroll: Layout.spacing)
+        let oldX0 = Layout.x(index: 0, count: lc, width: width, visible: 4, scroll: 0)
+        try check(oldX < oldX0, "Scrolling brings older ones in from the right")
+    }
+
     func checkShelves() throws {
         UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
         UserDefaults.standard.set(true, forKey: "soundOff")
