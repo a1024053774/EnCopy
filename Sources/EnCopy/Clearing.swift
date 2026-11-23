@@ -39,7 +39,9 @@ final class Clearing {
         let kept = Dictionary(history.kept().map { ($0.url.standardizedFileURL.path, $0) }, uniquingKeysWith: { a, _ in a })
         var entries: [Entry] = []
         for url in urls {
-            guard let path = history.relative(url), fm.fileExists(atPath: url.path) else { continue }
+            guard let path = history.relative(url) else { continue }
+            // Already gone, deleted in Finder say: only its row is left to clear.
+            guard fm.fileExists(atPath: url.path) else { history.remove(url); continue }
             let target = dir.appendingPathComponent(path)
             do {
                 try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
