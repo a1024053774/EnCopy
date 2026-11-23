@@ -1084,7 +1084,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             changeShortcut: { [weak self] in self?.changeShortcut() },
             toggleLaunchAtLogin: { AppDelegate.toggleLaunchAtLogin() },
             soundOn: { [weak self] in self?.line.soundOn ?? false },
-            setSoundOn: { [weak self] in self?.line.soundOn = $0 }
+            setSoundOn: { [weak self] in self?.line.soundOn = $0 },
+            theme: { [weak self] in self?.line.theme ?? .paper },
+            setTheme: { [weak self] in self?.line.theme = $0 }
         ), frontApp: front)
     }
 

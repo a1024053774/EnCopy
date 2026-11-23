@@ -29,7 +29,7 @@ struct PeggedView: View {
 
     var body: some View {
         VStack(spacing: -12) {
-            Clothespin(pinned: item.kept)
+            ThemePeg(theme: line.theme, pinned: item.kept)
                 // A new paper: the peg opens, then clamps (T-038).
                 .scaleEffect(x: pegOpen ? Motion.pegOpen : 1, y: 1, anchor: .top)
                 .zIndex(1)
@@ -83,7 +83,9 @@ struct PeggedView: View {
     /// the same card size, so the line's layout and flights are unchanged.
     @ViewBuilder private var paper: some View {
         if isText(item.url), let note = Note.cached(item.url) {
-            NoteSheet(note: note, width: cardSize.width, height: cardSize.height)
+            NoteSheet(note: note, width: cardSize.width, height: cardSize.height, theme: line.theme)
+        } else if isFile(item.url), line.theme != .paper {
+            ThemeFileCard(theme: line.theme, url: item.url, size: cardSize)
         } else if isFile(item.url) {
             Image(nsImage: item.thumb).resizable().interpolation(.high)
                 .frame(width: cardSize.width, height: cardSize.height)
@@ -108,14 +110,17 @@ struct PeggedView: View {
                     .padding(.top, 5)
                 Spacer(minLength: 0)
                 Text(polaroidCaption)
-                    .font(.system(size: 7.5, design: .monospaced))
-                    .foregroundStyle(Color(red: 0.463, green: 0.412, blue: 0.353))
+                    .font(line.theme == .paper ? .system(size: 7.5, design: .monospaced) : line.theme.font(7.5))
+                    .foregroundStyle(line.theme == .paper ? Color(red: 0.463, green: 0.412, blue: 0.353) : line.theme.soft(.image))
                     .lineLimit(1)
                     .padding(.bottom, 5)
             }
             .frame(width: cardSize.width, height: cardSize.height)
-            .background(Color(red: 0.992, green: 0.992, blue: 0.98))
-            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+            .background {
+                if line.theme == .paper { Color(red: 0.992, green: 0.992, blue: 0.98) }
+                else { ThemeCardBackground(theme: line.theme, card: .image) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: line.theme == .paper ? 2 : line.theme.corner, style: .continuous))
         }
     }
 
@@ -161,8 +166,8 @@ struct PeggedView: View {
             .overlay {
                 // Picked or selected: an amber edge, and the paper sinks and grows a little.
                 if selected {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .strokeBorder(Color(red: 0.827, green: 0.541, blue: 0.133), lineWidth: 2.5)
+                    RoundedRectangle(cornerRadius: max(3, line.theme.corner), style: .continuous)
+                        .strokeBorder(line.theme.picked, lineWidth: line.theme.pickedWidth)
                         .allowsHitTesting(false)
                 }
             }
@@ -170,7 +175,10 @@ struct PeggedView: View {
             .scaleEffect(selected && line.picked?.id == item.id && !Motion.reduced ? 1.06 : 1, anchor: .top)
             .offset(y: selected && line.picked?.id == item.id && !Motion.reduced ? 4 : 0)
             .animation(Motion.pick, value: selected)
-            .shadow(color: .black.opacity(hovering ? 0.26 : 0.18), radius: hovering ? 14 : 10, y: hovering ? 8 : 5)
+            // One shadow for the whole card, not one per word on it.
+            .compositingGroup()
+            .shadow(color: line.theme.shadow(hovering: hovering).0, radius: line.theme.shadow(hovering: hovering).1,
+                    x: line.theme.shadow(hovering: hovering).2, y: line.theme.shadow(hovering: hovering).3)
             // Holding presses the photo in slowly, so a long press feels like
             // it is building up to something.
             .scaleEffect(pressed ? 0.95 : (hovering ? 1.035 : 1), anchor: .top)

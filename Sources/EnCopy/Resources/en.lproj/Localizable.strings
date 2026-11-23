@@ -171,3 +171,10 @@
 "Show it for" = "Show it for";
 "%@ seconds" = "%@ seconds";
 "Show the app it came from" = "Show the app it came from";
+"Theme" = "Theme";
+"Paper" = "Paper";
+"Pixel" = "Pixel";
+"Skeuomorphic" = "Skeuomorphic";
+"Minimal" = "Minimal";
+"Neon" = "Neon";
+"Journal" = "Journal";

@@ -101,7 +101,7 @@ struct LineView: View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .topLeading) {
-                Rope(width: width, sagScale: line.sagScale)
+                Rope(width: width, sagScale: line.sagScale, theme: line.theme)
 
                 if line.items.isEmpty && !line.isSearching {
                     Hint()
@@ -261,11 +261,27 @@ private struct Hint: View {
 struct Rope: View {
     let width: CGFloat
     var sagScale: CGFloat = 1
+    var theme: Theme = .paper
     @Environment(\.colorScheme) private var scheme
 
     private var path: RopeCurve { RopeCurve(width: width, sagScale: sagScale) }
 
     var body: some View {
+        if theme != .paper {
+            ThemeRopeStroke(theme: theme, curve: path, scheme: scheme)
+                .mask(LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black, location: 0.08),
+                    .init(color: .black, location: 0.92),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing))
+                .allowsHitTesting(false)
+        } else {
+            paperRope
+        }
+    }
+
+    private var paperRope: some View {
         ZStack {
             path.stroke(Color.black.opacity(0.24), lineWidth: 2.4).offset(y: 1.4).blur(radius: 1.3)
             path.stroke(scheme == .dark ? Color(red: 0.663, green: 0.541, blue: 0.369) : Color(red: 0.541, green: 0.427, blue: 0.271), lineWidth: 2.2)
