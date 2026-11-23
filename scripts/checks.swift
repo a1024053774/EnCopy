@@ -356,6 +356,7 @@ struct CheckFailed: Error { let message: String }
         try checkTabFilter()
         try checkSourceApp()
         try checkAppRules()
+        try checkVerificationCodes()
         try checkDataFolder()
         try checkHistory()
     }
@@ -767,6 +768,38 @@ struct CheckFailed: Error { let message: String }
         try check(hung.count == 2 && history.ttl(of: hung[1]) == nil, "Set to record normally, that app's copies are kept for good")
         Note.clearsOf = nil
         UserDefaults.standard.removeObject(forKey: "appRules")
+    }
+
+    /// T-028: verification codes stay ten minutes, then go for good.
+    func checkVerificationCodes() throws {
+        let yes: [(String, String?)] = [("482913", "com.apple.MobileSMS"), (" 7031 ", "com.apple.mail"),
+                                        ("您的验证码是 553201，5 分钟内有效", nil), ("Your code: 90817264", "com.apple.Safari"), ("Use code 4821 to sign in", nil)]
+        let no: [(String, String?)] = [("482913", "com.apple.finder"), ("订单号 20261122 0458", nil), ("123", "com.apple.MobileSMS"),
+                                       ("code review at 10", nil), ("验证码", nil), ("1234567890 code", nil)]
+        try check(yes.allSatisfy { ClipboardWatcher.isCode($0.0, app: $0.1) }, "Codes from Messages, Mail and texts that say code are recognised")
+        try check(no.allSatisfy { !ClipboardWatcher.isCode($0.0, app: $0.1) }, "Order numbers, short numbers and long numbers are not codes")
+
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("codes.sqlite"))
+        let codes = Line(pasteboard: pasteboard, desktop: root, history: history)
+        codes.maxItems = 100; codes.visibleCount = 8; codes.revealed = true
+        var hung: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.MobileSMS" },
+                                       onNew: { hung.append($0); _ = codes.hang($0, quietly: true) }, onAgain: { _ in })
+        let start = Date()
+        pasteboard.clearContents(); pasteboard.setString("663104", forType: .string); watcher.check()
+        pasteboard.clearContents(); pasteboard.setString("see you at the cafe", forType: .string); watcher.check()
+        try check(hung.count == 2 && history.ttl(of: hung[0]) == ClipboardWatcher.codeLife && history.ttl(of: hung[1]) == nil,
+                  "A code from Messages gets ten minutes; a message that is not a code stays")
+        try check(Line.clearsText(ClipboardWatcher.codeLife) != Line.clearsText(ClipboardWatcher.hourly), "A code's card says ten minutes, not an hour")
+        codes.clearExpired(now: start.addingTimeInterval(540))
+        try check(codes.liveCount == 2, "Nine minutes later the code is still there")
+        codes.clearExpired(now: start.addingTimeInterval(660))
+        pump(0.7); codes.closeGaps()
+        try check(codes.liveCount == 1 && !FileManager.default.fileExists(atPath: hung[0].path)
+                  && history.search(SearchIndex.words("663104"), onLine: [], limit: 5).basketTotal == 0,
+                  "Eleven minutes later the code is gone from the line, the disk and the index")
     }
 
     func checkDesktopCopies() throws {
