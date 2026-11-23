@@ -402,6 +402,7 @@ struct CheckFailed: Error { let message: String }
         try checkFinderPicturesWithoutFiles()
         try checkPutBackKeepsApp()
         try checkQuickLookWithFallingPin()
+        try checkGroupDragOperations()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1841,6 +1842,21 @@ struct CheckFailed: Error { let message: String }
         try check(look.items.contains { $0.url == urls[0] && $0.falling }, "The pinned card is falling")
         let found = look.quickLookItems(for: id(urls[2]))
         try check(found?.urls == [urls[2], urls[1]] && found?.index == 0, "Quick Look still goes newest first, as on screen")
+    }
+
+    /// Review 2, on #10: several cards dragged together may only do what
+    /// every one of them may: a Finder file among them makes it a copy.
+    func checkGroupDragOperations() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let drag = line()
+        let outside = root.appendingPathComponent("Group contract.pdf"); try Data("%PDF".utf8).write(to: outside)
+        let note = try adoptedNote("group-note", "group words")
+        let other = try adoptedNote("group-other", "other words")
+        for url in [outside, note, other] { _ = drag.hang(url, quietly: true) }
+        func id(_ url: URL) -> UUID { drag.items.first { $0.url == url }!.id }
+        try check(drag.dragOperations(for: [id(note), id(outside)]) == .copy, "A group with a Finder file in it drags out as a copy")
+        try check(drag.dragOperations(for: [id(note), id(other)]) == [.copy, .move, .delete], "A group of EnCopy's own can still be moved")
     }
 
     func checkShelves() throws {
