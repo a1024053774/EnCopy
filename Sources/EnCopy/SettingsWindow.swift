@@ -224,6 +224,8 @@ struct SettingsView: View {
                     Text(L("Medium")).tag(Layout.Size.medium)
                     Text(L("Large")).tag(Layout.Size.large)
                 }
+                Toggle(L("Show the app it came from"),
+                       isOn: model.binding({ Line.showsSourceApp }, { Line.showsSourceApp = $0 }))
                 Toggle(L("Zoom on hover"), isOn: model.binding({ Zoom.isEnabled }, { Zoom.isEnabled = $0 },
                                                                then: { if !Zoom.isEnabled { model.actions.hideZoom() } }))
             }
