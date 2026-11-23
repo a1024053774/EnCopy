@@ -732,7 +732,9 @@ footer { padding-block: 40px 52px; }
       { transform: "translate(0, 0) rotate(0deg) scale(1)", opacity: 1 },
       { transform: `translate(${dx * 0.55}px, ${dy * 0.35}px) rotate(-8deg) scale(.8)`, opacity: 1, offset: .55 },
       { transform: `translate(${dx}px, ${dy}px) rotate(-14deg) scale(.22)`, opacity: 0 },
-    ], { duration: 620, easing: "cubic-bezier(.5, 0, .3, 1)" }).finished.then(() => { ghost.remove(); write(); });
+    ], { duration: 620, easing: "cubic-bezier(.5, 0, .3, 1)", fill: "forwards" });
+    // The words land on a timer, not when the animation ends: a tab that draws no frames never ends it.
+    setTimeout(() => { ghost.remove(); write(); }, 620);
   }
 
   function paste() { keyCap("return"); if (summoned && pickedId != null) use(pickedId, "paste"); }
