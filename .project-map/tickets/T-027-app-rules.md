@@ -24,3 +24,5 @@ supersedes:
 完成，2026-11-23。`ClipboardWatcher.AppRule`、`appRules`、`rule(for:)`，检查剪贴板时先看前台 App 的规则；`History` 加 `ttl` 列，`ttl(of:)`、`expired(at:)`；`Line.clearExpired(now:)`，App 启动时和每分钟清一次（绳子拿着键盘时不清）；菜单「按 App 记录」。`scripts/check.sh`：`96 strings`、`209 checks passed`，新增 7 项；不记规则失效的变异被抓到。
 
 留下的事：图片还不进历史，一小时后清对复制的图片不起作用，等图片进篮子时一起做。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：菜单「按 App 记录」里，第一个是当时在前台的 App，下面有预设的「密码」（`app-rules-menu.txt`）。设成不记 / 一小时后清的效果没在真机上试。

@@ -23,3 +23,5 @@ supersedes:
 ## Resolution
 
 完成，2026-11-23。`Line.isKeptImage`、`Line.keep`；`History.recordImage(_:text:)`（识别出的字到了再写进索引）；`SearchIndex.onRead` 把识别结果交给历史；挂满时文字和自己的图片都只从绳上落下。`scripts/check.sh`：`232 checks passed`，新增 7 项；挂满又进废纸篓的变异被抓到。README 两份跟着改。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：开发版里「图片」默认没勾（和上游一样）；从菜单勾上后复制一张 PNG，存进开发版的 Screenshots 文件夹，挂成拍立得，写着时间。掉进篮子、缩小没在真机上走。

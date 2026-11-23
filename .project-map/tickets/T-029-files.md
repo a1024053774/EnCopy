@@ -25,3 +25,5 @@ supersedes:
 完成，2026-11-23。`isFile(_:)`、`fileCard`（文件夹形状的纸）、`Line.Kind.file`；`ClipboardWatcher.copiedFiles`、`filesEnabled`；搜索对文件用文件名加文件夹名，不做文字识别；从绳上复制的照片和文件也标成 EnCopy 自己的，不再被挂一次。`scripts/check.sh`：`99 strings`、`225 checks passed`，新增 9 项；关掉文件分支的变异被抓到。
 
 留下的事：原文件被删或挪走时现在直接从绳上掉下（设计里是标「已不在原处」7 天后清）；文件还不进历史和篮子，等图片进篮子时一起做。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：用和访达一样的文件 URL 把一个 PDF 放上剪贴板，它挂上绳，是文件夹纸，写着文件名和所在文件夹（`02-summon-left.png`）。

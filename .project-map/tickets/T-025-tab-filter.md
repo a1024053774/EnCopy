@@ -22,3 +22,5 @@ supersedes:
 ## Resolution
 
 完成，2026-11-23。`Line.kindFilter`、`Line.kind(of:)`、`Line.cycleKind`；`SearchBar` 认 Tab 和 ⇧Tab，搜索框前面显示类型标签；收起时清掉筛选。`scripts/check.sh`：`196 checks passed`，新增 9 项；没打字时不管筛选的变异被抓到。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：Tab 筛选。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。

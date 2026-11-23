@@ -25,3 +25,5 @@ supersedes:
 完成，2026-11-23。新增 `Sources/EnCopy/Clearing.swift`：`Clearing`（「最近清掉」，数据文件夹里的 `Recently Cleared`，每批一个文件夹加一份清单）和 `Retention`（`plan` 只算不做，`run` 照做，`shrink` 原地换成 640 像素的缩略图）；`History` 加 `shrunk` 列和 `kept()`、`markShrunk`、`words(of:)`、`setUsed`；App 启动时和之后每天跑一次。`scripts/check.sh`：`242 checks passed`，新增 10 项；不放过绳上东西的变异被抓到。
 
 留下的事：上限现在固定 1 GB，设置里改上限、看下一次会清什么，放在清理面板那张单里。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：保留规则的到期和缩小。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。

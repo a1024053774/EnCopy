@@ -24,3 +24,5 @@ supersedes:
 完成，2026-11-23。`SearchBar.takes` 认 ⇧⏎、⌘P、⌘Y；`Paster.pastePicked(plain:)`、`Line.copy(_:plain:)` 去掉 RTF 只留字；`Line.togglePin`。`scripts/check.sh`：`187 checks passed`，新增 11 项；让 ⇧⏎ 照样带样式时检查报错。
 
 留下的事：⌘Y 打开快速查看后，快速查看拿走了键盘，搜索框随之结束，绳子收起。真机走一遍和这一批键盘鼠标功能一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：没走到：⇧⏎、⌘P、⌘Y。用户这段时间在用鼠标（8 秒里 170 次硬件移动），按键和指针会抢，停在这里；自动检查是这一项现有的证据。

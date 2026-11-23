@@ -22,3 +22,5 @@ supersedes:
 ## Resolution
 
 完成，2026-11-23。`History` 加 `app` 列（旧库打开时 `ALTER TABLE` 补上），`record(_:text:app:)`、`app(of:)`、`appName(_:)`；`ClipboardWatcher` 记下前台 App 的 bundle id；`Note.app`、`Note.caption`，纸上用 caption。`scripts/check.sh`：`202 checks passed`，新增 6 项；不补列的变异让检查报错。真机走一遍和这一批一起走。
+
+真机（2026-11-23，开发版，虚拟屏 + 外接屏；证据在本地 `evidence/walk-v1/`，不进 git）：复制时前台是 Paste Target（走查用的小程序），历史的 app 列记成 `local.encopy.pastetarget`。纸上的时间后面没有写 App 名字：这个小程序直接从可执行文件启动，系统查不到它的名字，所以没写；拿一个系统认识的 App（访达）复制、看纸上是不是写「访达」，这一步没走到。
