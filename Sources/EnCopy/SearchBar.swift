@@ -129,7 +129,7 @@ private struct SearchField: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             if let kind = line.kindFilter {
-                Text(kind == .text ? L("Text") : kind == .link ? L("Links") : L("Images"))
+                Text(kind == .text ? L("Text") : kind == .link ? L("Links") : kind == .image ? L("Images") : L("Files"))
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 7).padding(.vertical, 2)
                     .background(Capsule().fill(Color.accentColor.opacity(0.18)))

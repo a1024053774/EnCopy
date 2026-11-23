@@ -121,3 +121,7 @@
 "Don't record" = "不记";
 "Clears in an hour" = "一小时后清";
 "Clears in 10 minutes" = "10 分钟后清";
+
+/* Files (T-029) */
+"Files" = "文件";
+"Files you copy in Finder hang on the line, where they are" = "在访达里复制的文件也挂上绳，文件留在原处";
