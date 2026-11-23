@@ -21,6 +21,8 @@ final class SearchIndex {
     private let queue = DispatchQueue(label: "app.encopy.read-text", qos: .utility)
     /// Called when new words arrive, so a search under way sees them.
     var onChange: () -> Void = {}
+    /// The words read from one picture, when they are ready.
+    var onRead: (URL, String) -> Void = { _, _ in }
 
     private static let file = DataFolder.url.appendingPathComponent("SearchIndex.json")
 
@@ -53,6 +55,7 @@ final class SearchIndex {
                     guard let self else { return }
                     self.reading.remove(path)
                     self.entries[path] = Entry(modified: modified, text: Self.fold(text ?? ""))
+                    self.onRead(url, text ?? "")
                     self.scheduleSave()
                     self.onChange()
                 }
