@@ -1,5 +1,7 @@
 # EnCopy
 
+简体中文 | [English](README.en.md)
+
 EnCopy 是 macOS 上的剪贴板 App，正在做成这样：复制的东西和截图挂在屏幕顶部的一根绳上，按 ⌥C 把绳子叫下来，用键盘挑一件，贴回正在打字的地方。产品页：<https://a1024053774.github.io/EnCopy/>，网页上就能按 ⌥C 试。
 
 它基于 Alejandro Buján 的 [Tendedero](https://github.com/alejandrobujan/tendedero) 修改而来（上游 `3c5b575`，2.0.0，MIT 许可）。EnCopy 是独立的项目，有自己的名字和图标，与 Tendedero 及其作者没有关联，也没有得到其认可。
@@ -56,6 +58,15 @@ scripts/check.sh
 ```
 
 依次检查五件事：代码和脚本里没有上游的名字；全局快捷键只在一处注册；数据文件夹只在一处决定；每句界面文字在简体中文和英文里都有；再用真实的模型和视图代码跑一遍本地检查。本地检查不依赖 XCTest，用私有剪贴板和一个临时的 home 目录，不碰系统剪贴板，不读写你的 EnCopy 数据，也不看你的截图。
+
+## 贡献者
+
+- [LuckyE](https://github.com/a1024053774)：维护者。定方向、拍板每个决定、发布版本。
+- Claude（Anthropic 的 AI）：结对写代码和文档。和维护者一起做了 ⌥C 跟着指针换屏、用过的一件回到绳头、0.1.0 的发布和产品页，这些提交里署名为 `Co-Authored-By: Claude`。
+- Devin（Cognition 的 AI）：结对写代码和文档。和维护者一起做了改名换图标、⌥C 叫它来并贴回前台 App、文字进篮子、开发版独立、固定签名，这些提交里署名为 `Co-Authored-By: Devin`。
+- [Tendedero](https://github.com/alejandrobujan/tendedero) 的作者 Alejandro Buján 和[上游的贡献者们](https://github.com/alejandrobujan/tendedero/graphs/contributors)：EnCopy 在他们的代码上修改而来。
+
+GitHub 页面上的 Contributors 只统计提交的作者；共同作者显示在每个提交上，不在那一栏里。
 
 ## 许可
 
