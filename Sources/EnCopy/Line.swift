@@ -566,9 +566,10 @@ final class Line: ObservableObject {
 
     /// T-004's daily rules: see `Retention`. Nothing on the line is touched.
     @discardableResult
-    func runRetention(now: Date = Date(), cap: Int64 = Line.originalsCap) -> Retention.Result {
+    func runRetention(now: Date = Date(), cap: Int64 = Line.originalsCap, inBackground: Bool = false) -> Retention.Result {
         let onLine = Set(items.filter { !$0.falling }.map { $0.url.standardizedFileURL.path })
-        let result = Retention.run(history: history, clearing: clearing, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
+        let result = Retention.run(history: history, clearing: clearing, onLine: onLine, isKeptImage: isKeptImage,
+                                   now: now, cap: cap, inBackground: inBackground)
         if isSearching { recomputeSearch() }
         return result
     }
@@ -1466,10 +1467,19 @@ func isRecording(_ url: URL) -> Bool {
 func isFile(_ url: URL) -> Bool {
     guard !isText(url), !isRecording(url) else { return false }
     if url.hasDirectoryPath { return true }
+    // Asked on every redraw of a card: the disk is looked at once per path,
+    // so a sleeping external disk does not stall the line (review #15).
+    let key = url.path as NSString
+    if let known = fileKinds.object(forKey: key) { return known.boolValue }
     var isDir: ObjCBool = false
-    if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue { return true }
-    return !(UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false)
+    let answer = (FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue)
+        || !(UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false)
+    fileKinds.setObject(NSNumber(value: answer), forKey: key)
+    return answer
 }
+
+/// What `isFile` found for each path. NSCache is safe from any thread.
+private let fileKinds = NSCache<NSString, NSNumber>()
 
 /// Copied text: plain text is saved as .txt, styled text as .rtf.
 func isText(_ url: URL) -> Bool {

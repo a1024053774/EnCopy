@@ -32,7 +32,17 @@ final class CleanupPanel {
 @MainActor
 final class CleanupModel: ObservableObject {
     let line: Line
-    @Published var filter = CleanupFilter(olderThanDays: 30) { didSet { refresh() } }
+    @Published var filter = CleanupFilter(olderThanDays: 30) {
+        didSet {
+            // Typing waits for a pause before the list is worked out again.
+            pendingRefresh?.cancel()
+            guard filter.text != oldValue.text else { refresh(); return }
+            let work = DispatchWorkItem { [weak self] in self?.refresh() }
+            pendingRefresh = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        }
+    }
+    private var pendingRefresh: DispatchWorkItem?
     @Published private(set) var candidates: [URL] = []
     @Published private(set) var batches: [Clearing.Batch] = []
     @Published private(set) var plan = Retention.Result()

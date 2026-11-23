@@ -1056,10 +1056,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let now = Date()
         guard now.timeIntervalSince1970 - last >= 86400 else { return }
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "retentionLastRun")
-        line.runRetention(now: now)
+        line.runRetention(now: now, inBackground: true)
     }
 
-    /// By app: each app with a rule, and the app in front, gets three choices.
     /// EnCopy's releases on GitHub.
     static let updatesURL = URL(string: "https://github.com/a1024053774/EnCopy/releases")!
 

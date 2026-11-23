@@ -390,6 +390,7 @@ struct CheckFailed: Error { let message: String }
         try checkKindBeforeLimit()
         try checkKeptImageSearchOnLine()
         try checkQuickLookOrder()
+        try checkShrinkOffMain()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1593,6 +1594,34 @@ struct CheckFailed: Error { let message: String }
         let found = look.quickLookItems(for: basketCard.id)
         try check(found.map { $0.urls.contains(notes[0]) && $0.urls[$0.index] == notes[0] } == true, "A basket card found by a search opens in Quick Look")
         look.query = ""
+    }
+
+    /// Review #15: shrinking keeps a picture's own format, and the daily run
+    /// does the decoding off the main thread.
+    func checkShrinkOffMain() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Shrink format shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("shrink-format.sqlite"))
+        let keep = Line(pasteboard: pasteboard, desktop: root, history: history)
+        keep.clearing = Clearing(folder: root.appendingPathComponent("cleared-shrink-format", isDirectory: true))
+        let png = try bigShot("Shrink me.png")
+        let jpg = Inbox.folder.appendingPathComponent("Shrink me.jpg")
+        let source = CGImageSourceCreateWithURL(png as CFURL, nil)!
+        let output = CGImageDestinationCreateWithURL(jpg as CFURL, UTType.jpeg.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImageFromSource(output, source, 0, nil)
+        guard CGImageDestinationFinalize(output) else { throw CheckFailed(message: "Could not write the JPEG") }
+        try FileManager.default.removeItem(at: png)
+        history.recordImage(jpg, text: "jpeg words")
+        history.setUsed(jpg, Date().addingTimeInterval(-40 * 86400))
+        let before = (try FileManager.default.attributesOfItem(atPath: jpg.path)[.size] as? Int) ?? 0
+        keep.runRetention(inBackground: true)
+        try check(!history.kept().contains { $0.url == jpg && $0.shrunk }, "The daily run returns before the picture is shrunk")
+        pump(3)
+        let data = try Data(contentsOf: jpg)
+        try check(history.kept().contains { $0.url == jpg && $0.shrunk } && data.count < before, "Then it is shrunk and marked")
+        try check(data.prefix(2) == Data([0xFF, 0xD8]), "A JPEG stays a JPEG when shrunk")
     }
 
     func checkShelves() throws {
