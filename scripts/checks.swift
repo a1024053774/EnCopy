@@ -399,9 +399,9 @@ struct CheckFailed: Error { let message: String }
         try checkImagesInBasket()
         try checkRetention()
         try checkCleanup()
-        try checkShelves()
         try checkBasketList()
         try checkBasketPapers()
+        try checkBasketKeys()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -418,7 +418,7 @@ struct CheckFailed: Error { let message: String }
         try checkCopiedImageApp()
         try checkFilesRespectImages()
         try checkRecopyComesBack()
-        try checkShelfSearch()
+        try checkBasketListSearch()
         try checkKindBeforeLimit()
         try checkKeptImageSearchOnLine()
         try checkQuickLookOrder()
@@ -1243,8 +1243,9 @@ struct CheckFailed: Error { let message: String }
         try check(rope.sagScale == Motion.ropeTaut, "Coming down, the rope starts pulled almost straight")
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         try check(rope.sagScale == 1, "Then it is let go into its sag")
-        rope.moveShelf(1)
-        try check(rope.sagScale == Motion.shelfTaut, "↓ to a shelf bounces the rope once")
+        rope.openBasket()
+        try check(rope.sagScale == Motion.basketTaut, "↓ opening the basket list bounces the rope once")
+        rope.closeBasket()
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         Motion.reducedOverride = true
         rope.landed(bySummon: false)
@@ -1544,9 +1545,10 @@ struct CheckFailed: Error { let message: String }
         try check(again.last == picture, "The same picture copied again comes back from the basket")
     }
 
-    /// Review #9: on a shelf, typing searches that shelf only, and clearing
-    /// the words brings the shelf back; ↓ while searching does the same.
-    func checkShelfSearch() throws {
+    /// T-046 (was review #9 on shelves): with the list open, typing narrows
+    /// the list across the whole basket, the groups follow, the line stays
+    /// as it hangs, and clearing the words brings the whole list back.
+    func checkBasketListSearch() throws {
         UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
         UserDefaults.standard.set(true, forKey: "soundOff")
         let history = History(file: root.appendingPathComponent("shelf-search.sqlite"))
@@ -1561,18 +1563,19 @@ struct CheckFailed: Error { let message: String }
         pump(0.7); shelves.closeGaps()
         history.setUsed(yesterdayA, start.addingTimeInterval(-43200))
         history.setUsed(todayB, now.addingTimeInterval(-120)); history.setUsed(todayA, now.addingTimeInterval(-60))
-        func shownURLs() -> Set<URL> { Set(shelves.shown.filter { !$0.falling }.map(\.url)) }
-        shelves.moveShelf(1)
-        try check(shownURLs() == [todayA, todayB], "Today's shelf shows today's two")
+        func shownURLs() -> [URL] { shelves.shown.filter { !$0.falling }.map(\.url) }
+        shelves.openBasket()
+        try check(shelves.basketRows.map(\.url) == [todayA, todayB, yesterdayA], "The list holds the three in the basket")
         shelves.query = "zzzznothing"
-        try check(shownURLs().isEmpty, "Nothing matches")
+        try check(shelves.basketRows.isEmpty && shelves.basketGroups.isEmpty, "Nothing matches, no groups")
         shelves.query = ""
-        try check(shownURLs() == [todayA, todayB], "Clearing the words brings today's shelf back")
+        try check(shelves.basketRows.map(\.url) == [todayA, todayB, yesterdayA], "Clearing the words brings the whole list back")
         shelves.query = "alphaword"
-        try check(shownURLs() == [todayA], "Searching on today's shelf finds only today's match, not yesterday's or the line's")
-        shelves.moveShelf(1)
-        try check(shownURLs() == [yesterdayA], "↓ while searching moves the search to yesterday")
-        shelves.query = ""; shelves.shelf = .line
+        try check(shelves.basketRows.map(\.url) == [todayA, yesterdayA]
+                  && shelves.basketGroups.map(\.title) == [L("Today"), L("Yesterday")],
+                  "Typing narrows the list to today's and yesterday's matches, not the line's; the groups follow")
+        try check(shownURLs() == [hanging], "The line stays as it hangs while the list takes the words")
+        shelves.query = ""; shelves.closeBasket()
     }
 
     /// Review #14: Tab narrows by kind before the line's width cuts the
@@ -1597,10 +1600,12 @@ struct CheckFailed: Error { let message: String }
             history.setUsed(note, now.addingTimeInterval(-Double(100 + i)))
             notes.append(note)
         }
-        kinds.moveShelf(1)
+        kinds.openBasket()
         kinds.kindFilter = .image
-        try check(kinds.shown.map(\.url) == [picture], "Today under Images shows the picture behind nine notes")
-        kinds.shelf = .line; kinds.kindFilter = nil
+        try check(kinds.basketRows.map(\.url) == [picture], "Tab to Images in the list shows the picture behind nine notes")
+        kinds.kindFilter = nil
+        try check(kinds.basketRows.count == 10, "Tab back to all shows the ten")
+        kinds.closeBasket()
         kinds.query = "kindword"
         kinds.kindFilter = .image
         try check(kinds.shown.map(\.url) == [picture] && kinds.matchCount == 1, "A search under Images finds the picture and counts one")
@@ -1926,8 +1931,8 @@ struct CheckFailed: Error { let message: String }
         try check(edit.editAction(for: id(ownMovie)) == .trim, "EnCopy's own recording is still trimmed")
     }
 
-    /// Review 2, finding 7: a shelf's span and Tab's kind narrow the search
-    /// itself, so answers behind a thousand newer matches still show.
+    /// Review 2, finding 7: Tab's kind narrows the search itself, so answers
+    /// behind a thousand newer matches still show; the list goes all the way.
     func checkSearchBeforeLimit() throws {
         UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
         UserDefaults.standard.set(true, forKey: "soundOff")
@@ -1945,11 +1950,11 @@ struct CheckFailed: Error { let message: String }
         history.recordImage(picture, text: "zeta receipt"); history.setUsed(picture, now.addingTimeInterval(-20 * day))
         func paths(_ urls: [URL]) -> Set<String> { Set(urls.map(\.standardizedFileURL.path)) }
 
-        deep.shelf = .earlier
+        deep.openBasket()
         deep.query = "zeta"
-        try check(deep.matchCount == 2 && paths(deep.basketCards.map(\.url)) == paths([old, picture]),
-                  "On 「更早」 the old matches show, behind a thousand newer ones")
-        deep.shelf = .line
+        try check(deep.basketRows.count == 1007 && paths(Array(deep.basketRows.suffix(2)).map(\.url)) == paths([picture, old]),
+                  "In the list the old matches show, behind a thousand newer ones")
+        deep.closeBasket()
         deep.kindFilter = .image
         try check(deep.matchCount == 1 && paths(deep.basketCards.map(\.url)) == paths([picture]),
                   "Tab to images finds the picture behind a thousand matching notes")
@@ -2088,56 +2093,6 @@ struct CheckFailed: Error { let message: String }
                   "The first picture copied again after another comes back, not saved a second time")
     }
 
-    func checkShelves() throws {
-        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
-        UserDefaults.standard.set(true, forKey: "soundOff")
-        let history = History(file: root.appendingPathComponent("shelves.sqlite"))
-        let shelves = Line(pasteboard: pasteboard, desktop: root, history: history)
-        shelves.maxItems = 1; shelves.visibleCount = 8; shelves.revealed = true
-        let now = Date(), day: TimeInterval = 86400
-        let start = Calendar.current.startOfDay(for: now)
-        let ages: [(String, Date)] = [("today", now.addingTimeInterval(-60)), ("yesterday", start.addingTimeInterval(-day / 2)),
-                                      ("week", start.addingTimeInterval(-3 * day)), ("earlier", start.addingTimeInterval(-30 * day))]
-        var urls: [String: URL] = [:]
-        for (name, _) in ages { urls[name] = try adoptedNote("shelf-\(name)", "shelf words \(name)"); _ = shelves.hang(urls[name]!, quietly: true) }
-        let hanging = try adoptedNote("shelf-hanging", "shelf words hanging")
-        _ = shelves.hang(hanging, quietly: true)
-        pump(0.7); shelves.closeGaps()
-        for (name, date) in ages { history.setUsed(urls[name]!, date) }
-        let bar = SearchBar(line: shelves)
-        bar.onShelf = { shelves.moveShelf($0); shelves.pickNewest() }
-        func arrow(_ code: Int) -> NSEvent {
-            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
-        }
-        func shownURLs() -> [URL] { shelves.shown.filter { !$0.falling }.map(\.url) }
-        try check(shownURLs() == [hanging], "The line shows only what hangs")
-        try check(bar.takes(arrow(kVK_DownArrow), composing: false) && shelves.shelf == .today && shownURLs() == [urls["today"]!],
-                  "↓ shows today's shelf of the basket")
-        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
-        try check(shownURLs() == [urls["yesterday"]!], "↓ again shows yesterday")
-        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
-        try check(shownURLs() == [urls["week"]!], "↓ again shows the rest of this week")
-        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
-        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
-        try check(shelves.shelf == .earlier && shownURLs() == [urls["earlier"]!], "↓ stops at earlier")
-        try check(shelves.picked?.url == urls["earlier"], "The shelf's newest is picked")
-        var sent = 0
-        let paster = Paster(line: shelves, isTrusted: { true }, send: { _ in sent += 1 })
-        paster.pastePicked()
-        shelves.shelf = .line
-        try check(sent == 1 && shelves.items.filter { !$0.falling }.last?.url == urls["earlier"], "Pasted from a shelf, it comes back to the head of the line")
-        shelves.shelf = .week
-        let weekCard = shelves.basketCards.first!.id
-        shelves.togglePin(weekCard)
-        try check(shelves.items.first { $0.url == urls["week"] }?.kept == true, "⌘P on a shelf card brings it back pinned")
-        shelves.shelf = .yesterday
-        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
-        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
-        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
-        try check(shelves.shelf == .line, "↑ comes back to the line and stops there")
-    }
-
     /// T-044: ↓ opens the whole basket as a list, grouped by when things were
     /// last used, all the way back; ⏎ pastes the list's pick back to the head.
     func checkBasketList() throws {
@@ -2169,7 +2124,7 @@ struct CheckFailed: Error { let message: String }
         try FileManager.default.removeItem(at: gone)
         basket.countBasket()
         let bar = SearchBar(line: basket)
-        bar.onShelf = { basket.verticalArrow($0) }
+        bar.onVertical = { basket.verticalArrow($0) }
         func arrow(_ code: Int) -> NSEvent {
             NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
                              characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
@@ -2236,6 +2191,68 @@ struct CheckFailed: Error { let message: String }
         let s = papers.basketSummary(shot)
         try check(s.title.lowercased().contains("invoice 2038"), "A picture's row shows the words read from it")
         papers.closeBasket()
+    }
+
+    /// T-046: in the list, ← → jump between groups, Tab narrows it, ⌘P pins
+    /// the pick back onto the line, ⇧⏎ pastes its words only.
+    func checkBasketKeys() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("basket-keys.sqlite"))
+        let keys = Line(pasteboard: pasteboard, desktop: root, history: history)
+        keys.maxItems = 1; keys.visibleCount = 8; keys.revealed = true
+        let now = Date(), day: TimeInterval = 86400, start = Calendar.current.startOfDay(for: now)
+        let ages: [(String, Date)] = [("t1", now.addingTimeInterval(-60)), ("t2", now.addingTimeInterval(-120)),
+                                      ("y1", start.addingTimeInterval(-day / 3)), ("y2", start.addingTimeInterval(-day / 2)),
+                                      ("m1", start.addingTimeInterval(-40 * day))]
+        var urls: [String: URL] = [:]
+        for (name, _) in ages { urls[name] = try adoptedNote("keys-\(name)", "keys words \(name)"); _ = keys.hang(urls[name]!, quietly: true) }
+        let link = try adoptedNote("keys-link", "https://example.com/keys")
+        _ = keys.hang(link, quietly: true)
+        let hanging = try adoptedNote("keys-hanging", "keys words hanging")
+        _ = keys.hang(hanging, quietly: true)
+        pump(0.7); keys.closeGaps()
+        for (name, date) in ages { history.setUsed(urls[name]!, date) }
+        history.setUsed(link, start.addingTimeInterval(-41 * day))
+        keys.maxItems = 3
+        let bar = SearchBar(line: keys)
+        bar.onVertical = { keys.verticalArrow($0) }
+        bar.onMove = { keys.horizontalArrow($0) }
+        bar.onTab = { keys.cycleKind($0) }
+        func key(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String = "") -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code))!
+        }
+        _ = bar.takes(key(kVK_DownArrow), composing: false)
+        try check(keys.basketPick == urls["t1"], "The list opens on the newest")
+        _ = bar.takes(key(kVK_RightArrow), composing: false)
+        try check(keys.basketPick == urls["y1"], "→ jumps to the first of yesterday")
+        _ = bar.takes(key(kVK_RightArrow), composing: false)
+        try check(keys.basketPick == urls["m1"], "→ again jumps to the first of the month before")
+        _ = bar.takes(key(kVK_RightArrow), composing: false)
+        try check(keys.basketPick == urls["m1"], "→ on the last group stays")
+        _ = bar.takes(key(kVK_LeftArrow), composing: false)
+        _ = bar.takes(key(kVK_DownArrow), composing: false)
+        try check(keys.basketPick == urls["y2"], "← goes back a group; ↓ moves inside it")
+        _ = bar.takes(key(kVK_LeftArrow), composing: false)
+        try check(keys.basketPick == urls["y1"], "← inside a group goes to its first row first")
+        _ = bar.takes(key(kVK_Tab), composing: false)
+        try check(keys.kindFilter == .text && !keys.basketRows.contains { $0.url == link } && keys.basketRows.count == 5,
+                  "Tab narrows the list to text: the link leaves it")
+        _ = bar.takes(key(kVK_Tab), composing: false)
+        try check(keys.basketRows.map(\.url) == [link], "Tab again narrows it to links")
+        keys.kindFilter = nil
+        keys.pickBasket(urls["y2"]!)
+        keys.pinPick()
+        try check(keys.items.first { $0.url == urls["y2"] }?.kept == true && !keys.basketRows.contains { $0.url == urls["y2"] },
+                  "⌘P in the list pins its pick back on the line, and it leaves the list")
+        keys.pickBasket(urls["t2"]!)
+        var sent = 0
+        let paster = Paster(line: keys, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.pastePicked(plain: true)
+        try check(sent == 1 && pasteboard.string(forType: .string) == "keys words t2" && pasteboard.data(forType: .rtf) == nil
+                  && keys.items.filter { !$0.falling }.last?.url == urls["t2"],
+                  "⇧⏎ in the list pastes the pick's words only, and it comes back to the head of the line")
     }
 
     func checkDesktopCopies() throws {

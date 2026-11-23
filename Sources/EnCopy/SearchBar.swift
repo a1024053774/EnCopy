@@ -25,8 +25,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onQuickLook: () -> Void = {}
     /// Tab and ⇧Tab: the next or previous kind of item.
     var onTab: (Int) -> Void = { _ in }
-    /// ↓ and ↑: one shelf of the basket further back, or nearer.
-    var onShelf: (Int) -> Void = { _ in }
+    /// ↓ and ↑: open the basket list, and move along it (T-044).
+    var onVertical: (Int) -> Void = { _ in }
 
     var isShown: Bool { panel.isVisible }
     /// The line's frame it was last shown under, to grow from when the
@@ -100,8 +100,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
         switch event.keyCode {
         case UInt16(kVK_LeftArrow): onMove(-1)
         case UInt16(kVK_RightArrow): onMove(1)
-        case UInt16(kVK_DownArrow): onShelf(1)
-        case UInt16(kVK_UpArrow): onShelf(-1)
+        case UInt16(kVK_DownArrow): onVertical(1)
+        case UInt16(kVK_UpArrow): onVertical(-1)
         default: return false
         }
         return true
@@ -174,13 +174,6 @@ private struct SearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            if line.shelf != .line {
-                Text([L("Today"), L("Yesterday"), L("This week"), L("Earlier")][line.shelf.rawValue - 1])
-                    .font(.system(size: 11, weight: .semibold))
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill(Color.orange.opacity(0.22)))
-                    .fixedSize()
-            }
             if let kind = line.kindFilter {
                 Text(kind == .text ? L("Text") : kind == .link ? L("Links") : kind == .image ? L("Images") : L("Files"))
                     .font(.system(size: 11, weight: .semibold))

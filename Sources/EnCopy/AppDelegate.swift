@@ -111,12 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar = SearchBar(line: line)
         // With the basket list open (T-044) the arrows, ⏎, ⌘P and ⌘Y act on
         // the list; otherwise on the line, as before.
-        searchBar.onMove = { [weak self] step in
-            guard let self else { return }
-            if self.line.basketOpen { self.line.jumpBasketGroup(step) } else { self.line.movePick(step) }
-        }
+        searchBar.onMove = { [weak self] in self?.line.horizontalArrow($0) }
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
-        searchBar.onShelf = { [weak self] in self?.line.verticalArrow($0) }
+        searchBar.onVertical = { [weak self] in self?.line.verticalArrow($0) }
         line.onOpenBasket = { [weak self] in self?.openBasketFromHandle() }
         searchBar.onTab = { [weak self] step in
             guard let self else { return }
@@ -124,21 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !self.line.basketOpen { self.line.pickNewest() }
         }
         searchBar.onPlainReturn = { [weak self] in self?.paster.pastePicked(plain: true) }
-        searchBar.onPin = { [weak self] in
-            guard let self else { return }
-            if self.line.basketOpen {
-                // Pinned from the list, it goes back onto the line and leaves the list.
-                if let id = self.line.basketPickCard() { self.line.togglePin(id); self.line.refreshBasket() }
-            } else if let id = self.line.picked?.id {
-                self.line.togglePin(id)
-            }
-        }
+        searchBar.onPin = { [weak self] in self?.line.pinPick() }
         // ⌘Y opens Quick Look on the pick, and closes it again.
         searchBar.onQuickLook = { [weak self] in
             if QuickLook.shared.isOpen { QuickLook.shared.close(); return }
-            guard let self else { return }
-            if self.line.basketOpen { self.line.quickLookBasketPick() }
-            else if let id = self.line.picked?.id { self.line.quickLook(id) }
+            self?.line.quickLookPick()
         }
         QuickLook.shared.onClosed = { [weak self] in self?.searchBar.refocus() }
         searchBar.keepsOpen = { QuickLook.shared.isLending }
@@ -634,6 +621,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if pinned { self.pinned = true }
         if seconds > 0 { peekUntil = Date().addingTimeInterval(seconds) }
         awaySince = nil
+        // The basket's handle hangs for ⌥C and the pointer, not a peek (T-046).
+        if !isRevealed { line.handleShown = seconds == 0 }
+        if bySummon { line.handleShown = true }
         setRevealed(true, bySummon: bySummon)
     }
 
@@ -665,6 +655,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             zoom.hide()
             line.clearSelection()
             line.clearPick()
+            line.handleShown = false
             pinned = false
             peekUntil = .distantPast
             panel.ignoresMouseEvents = true
@@ -704,6 +695,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             refresh()
             reveal(pinned: true, bySummon: true)
         }
+        line.handleShown = true
         line.pickNewest()
         searchBar.show(below: panel.frame)
     }
@@ -721,7 +713,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         line.closeBasket()
         line.query = ""
         line.kindFilter = nil
-        line.shelf = .line
         line.clearPick()
         searchBar.hide()
         if tuckAway, isRevealed { setRevealed(false) }

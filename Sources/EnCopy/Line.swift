@@ -184,58 +184,8 @@ final class Line: ObservableObject {
         if basketOpen { return items }
         let words = SearchIndex.words(query)
         let fits = { (p: Pegged) in self.kindFilter == nil || self.kind(of: p.url) == self.kindFilter }
-        // On a shelf of the basket (↓), its cards stand in for the line's,
-        // searched or not: a search on a shelf searches that shelf (review #9).
-        if shelf != .line { return basketCards.filter(fits) }
         guard !words.isEmpty else { return kindFilter == nil ? items : items.filter { $0.falling || fits($0) } }
         return basketCards.filter(fits) + items.filter { $0.falling || (matches($0) && fits($0)) }
-    }
-
-    /// ↓ while summoned walks the basket by when things were last used (T-033).
-    enum Shelf: Int, CaseIterable { case line, today, yesterday, week, earlier }
-
-    @Published var shelf: Shelf = .line {
-        didSet { if shelf != oldValue { loadShelf() } }
-    }
-
-    /// ↓ goes one shelf further back, ↑ one nearer; stops at either end.
-    func moveShelf(_ step: Int) {
-        lastKeyAt = Date()
-        let was = shelf
-        shelf = Shelf(rawValue: min(Shelf.allCases.count - 1, max(0, shelf.rawValue + step))) ?? .line
-        if shelf != was { bounceRope(from: Motion.shelfTaut, Motion.ropeSummon) }
-    }
-
-    /// The time span a shelf covers, by last use: today, yesterday, the rest
-    /// of the past week, and everything before.
-    func span(of shelf: Shelf, now: Date = Date()) -> (from: Date?, to: Date?) {
-        let start = Calendar.current.startOfDay(for: now)
-        let day: TimeInterval = 86400
-        switch shelf {
-        case .line: return (nil, nil)
-        case .today: return (start, nil)
-        case .yesterday: return (start.addingTimeInterval(-day), start)
-        case .week: return (start.addingTimeInterval(-7 * day), start.addingTimeInterval(-day))
-        case .earlier: return (nil, start.addingTimeInterval(-7 * day))
-        }
-    }
-
-    /// The shelf's cards: basket items in its span, newest at the right, as
-    /// many as fit across the screen.
-    private func loadShelf(now: Date = Date()) {
-        guard shelf != .line else { basketCards = []; recomputeSearch(); return }
-        // Searching: the search moves to this shelf.
-        if isSearching { recomputeSearch(); return }
-        let (from, to) = span(of: shelf, now: now)
-        let onLine = onLinePaths
-        let picked = history.kept().filter { item in
-            fitsKind(item.url) && !onLine.contains(item.url.standardizedFileURL.path)
-                && from.map { item.used >= $0 } ?? true && to.map { item.used < $0 } ?? true
-                && FileManager.default.fileExists(atPath: item.url.path)
-        }.sorted { $0.used > $1.used }.prefix(visibleCount)
-        basketCards = picked.reversed().compactMap { item in
-            basketCards.first { $0.url == item.url } ?? makeThumbnail(item.url).map { Pegged(url: item.url, thumb: $0) }
-        }
     }
 
     // MARK: The basket list (T-043, T-044)
@@ -271,6 +221,25 @@ final class Line: ObservableObject {
 
     var basketRows: [BasketRow] { basketGroups.flatMap(\.rows) }
 
+    /// Whether the handle hangs at the end of the line: when it came down
+    /// with ⌥C or for the pointer, not when it only peeks at something new.
+    @Published var handleShown = false
+
+    /// ⌘P while summoned: the list's pick when the list is open — back onto
+    /// the line, pinned, and out of the list — else the line's pick.
+    func pinPick() {
+        if basketOpen {
+            if let id = basketPickCard() { togglePin(id); refreshBasket() }
+        } else if let id = picked?.id {
+            togglePin(id)
+        }
+    }
+
+    /// ⌘Y while summoned: Quick Look on the list's pick or the line's.
+    func quickLookPick() {
+        if basketOpen { quickLookBasketPick() } else if let id = picked?.id { quickLook(id) }
+    }
+
     func openBasket() {
         guard !basketOpen else { return }
         lastKeyAt = Date()
@@ -278,7 +247,7 @@ final class Line: ObservableObject {
         clearPick()
         loadBasket()
         basketPick = basketRows.first?.url
-        bounceRope(from: Motion.shelfTaut, Motion.ropeSummon)
+        bounceRope(from: Motion.basketTaut, Motion.ropeSummon)
     }
 
     func closeBasket() {
@@ -410,6 +379,12 @@ final class Line: ObservableObject {
         }
     }
 
+    /// ← and → while summoned: along the line, or, with the list open, to the
+    /// group before or after (T-046).
+    func horizontalArrow(_ step: Int) {
+        if basketOpen { jumpBasketGroup(step) } else { movePick(step) }
+    }
+
     /// A click on a row picks it.
     func pickBasket(_ url: URL) {
         guard basketRows.contains(where: { $0.url == url }) else { return }
@@ -452,7 +427,7 @@ final class Line: ObservableObject {
     /// Tab while summoned narrows the line to one kind; nil shows them all.
     @Published var kindFilter: Kind? {
         // The basket's cards are picked by kind first (review #14).
-        didSet { if kindFilter != oldValue, shelf != .line || isSearching || basketOpen { recomputeSearch() } }
+        didSet { if kindFilter != oldValue, isSearching || basketOpen { recomputeSearch() } }
     }
 
     /// Whether a URL is of the kind Tab narrowed to.
@@ -498,9 +473,6 @@ final class Line: ObservableObject {
     private func recomputeSearch() {
         if basketOpen { loadBasket(); return }
         let words = SearchIndex.words(query)
-        // On a shelf with nothing typed, the shelf's own cards (review #9).
-        if words.isEmpty, shelf != .line { loadShelf(); return }
-        let onShelf = shelf != .line
         // Everything on the line that the history also keeps: notes and EnCopy's own pictures.
         let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url)) }.map(\.url)
         var lineMatches = 0
@@ -509,13 +481,12 @@ final class Line: ObservableObject {
             searchFound = History.Found()
             lineMatches = liveCount
         } else {
-            // The shelf's span and Tab's kind narrow the search itself, not
-            // its first thousand answers (review 2, #7).
+            // Tab's kind narrows the search itself, not its first thousand
+            // answers (review 2, #7).
             let found = history.search(words, onLine: liveText, limit: visibleCount,
-                                       used: onShelf ? span(of: shelf) : nil,
                                        accept: kindFilter.map { want in { self.kind(of: $0, words: $1) == want } })
             searchFound = found
-            lineMatches = onShelf ? 0 : items.filter { !$0.falling && matches($0) && fitsKind($0.url) }.count
+            lineMatches = items.filter { !$0.falling && matches($0) && fitsKind($0.url) }.count
             let room = max(0, visibleCount - lineMatches)
             var cards: [Pegged] = []
             // Found.basket is newest first; the cards hang oldest of them
@@ -581,8 +552,8 @@ final class Line: ObservableObject {
     var pinnedLead: Int { items.prefix { $0.kept }.count }
 
     /// How many of what is shown hang pinned left of the knot: none while
-    /// searching or on a shelf of the basket, where there is no knot.
-    var layoutPinned: Int { narrowsLine || shelf != .line ? 0 : shown.prefix { $0.kept }.count }
+    /// searching, where there is no knot.
+    var layoutPinned: Int { narrowsLine ? 0 : shown.prefix { $0.kept }.count }
 
     /// The oldest photo that can fall: the first one past the knot.
     private var oldestLoose: Pegged? { items.first { !$0.falling && !$0.kept && !$0.held } }
@@ -939,7 +910,7 @@ final class Line: ObservableObject {
     /// On a line that scrolls, the picked card is kept in view.
     private func followPick() {
         let all = shown, pinned = layoutPinned
-        guard Line.keepOnLine != nil, all.count > visibleCount, !isSearching, shelf == .line,
+        guard Line.keepOnLine != nil, all.count > visibleCount, !narrowsLine,
               let item = picked, let index = all.firstIndex(where: { $0.id == item.id }) else { return }
         let anchored = Layout.anchorsPinned(pinned, visible: visibleCount) ? pinned : 0
         guard index >= anchored else { return }

@@ -43,7 +43,7 @@ Text, links and code you copy are recorded out of the box, files copied in Finde
 When the line is full, the oldest item falls into the basket instead of the Trash; screenshots and copied images that EnCopy keeps do too. After ⌥C, typing searches all the text on the line and in the basket, and ⏎ pastes the picked result:
 
 - Pictures are found by the text read from them; pictures and videos from Finder by their file names.
-- ↓ walks the basket by day: today, yesterday, this week, earlier.
+- After ⌥C, a basket handle hangs at the lower right of the line: "Basket N ↓". Press ↓ or click it and the basket opens as a list, newest first all the way back, grouped by today, yesterday, this week, then by month; each row is a strip of its own paper, in the theme. ↑↓ go row by row, ← → jump a group, typing and Tab narrow the list, ⏎ pastes, ⌘P pins it back on the line.
 
 ### Six themes
 
