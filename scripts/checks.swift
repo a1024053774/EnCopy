@@ -359,6 +359,7 @@ struct CheckFailed: Error { let message: String }
         try checkVerificationCodes()
         try checkFiles()
         try checkImagesInBasket()
+        try checkRetention()
         try checkDataFolder()
         try checkHistory()
     }
@@ -886,6 +887,81 @@ struct CheckFailed: Error { let message: String }
         _ = other.hang(try png("Outside 2.png"), quietly: true)
         pump(0.7); other.closeGaps()
         try check(FileManager.default.fileExists(atPath: outside.path) && other.history.count == 0, "A picture from elsewhere only leaves the line, as before")
+    }
+
+    /// A large picture in EnCopy's folder, for shrinking.
+    func bigShot(_ name: String) throws -> URL {
+        let url = Inbox.folder.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: Inbox.folder, withIntermediateDirectories: true)
+        let context = CGContext(data: nil, width: 2000, height: 1200, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        for i in 0..<40 {
+            context.setFillColor(CGColor(red: CGFloat(i % 7) / 7, green: CGFloat(i % 5) / 5, blue: CGFloat(i % 3) / 3, alpha: 1))
+            context.fill(CGRect(x: i * 50, y: (i * 37) % 1100, width: 50, height: 100))
+        }
+        let output = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(output, context.makeImage()!, nil)
+        guard CGImageDestinationFinalize(output) else { throw CheckFailed(message: "Could not write the big shot") }
+        return url
+    }
+
+    /// T-031: text stays a year after its last use, a picture's original 30
+    /// days or until the cap; what expires waits seven days in 「最近清掉」.
+    func checkRetention() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Retention check shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("retention.sqlite"))
+        let keep = Line(pasteboard: pasteboard, desktop: root, history: history)
+        keep.maxItems = 1; keep.visibleCount = 8
+        let cleared = Clearing(folder: root.appendingPathComponent("cleared-check", isDirectory: true))
+        keep.clearing = cleared
+        let now = Date()
+        let day: TimeInterval = 86400
+        let old = try adoptedNote("old", "words from long ago")
+        let recent = try adoptedNote("recent", "words from last month")
+        let onLine = try adoptedNote("online", "old words still hanging")
+        for note in [old, recent, onLine] { _ = keep.hang(note, quietly: true) }
+        history.setUsed(old, now.addingTimeInterval(-400 * day))
+        history.setUsed(recent, now.addingTimeInterval(-40 * day))
+        history.setUsed(onLine, now.addingTimeInterval(-500 * day))
+        let shot = try bigShot("Old screenshot.png")
+        _ = keep.hang(shot, quietly: true)
+        keep.search.onRead(shot, "RECEIPT 4410")
+        _ = keep.hang(onLine, quietly: true)
+        pump(0.7); keep.closeGaps()
+        try check(keep.items.filter { !$0.falling }.map(\.url) == [onLine], "Only the old note hangs now")
+        history.setUsed(shot, now.addingTimeInterval(-40 * day))
+        let before = (try FileManager.default.attributesOfItem(atPath: shot.path)[.size] as? Int) ?? 0
+        let result = keep.runRetention(now: now)
+        try check(result.expired == [old], "A note unused for over a year expires; one on the line does not, however old")
+        try check(!FileManager.default.fileExists(atPath: old.path) && history.count == 3 && FileManager.default.fileExists(atPath: recent.path),
+                  "The expired note leaves its place and the history; a month-old note stays")
+        let after = (try FileManager.default.attributesOfItem(atPath: shot.path)[.size] as? Int) ?? 0
+        let pixels = NSBitmapImageRep(data: try Data(contentsOf: shot))?.pixelsWide ?? 0
+        try check(result.shrunk == [shot] && after < before && pixels <= Retention.thumbnailPixels,
+                  "A 40-day-old screenshot shrinks to a thumbnail at the same place")
+        try check(history.search(SearchIndex.words("receipt"), onLine: [], limit: 5).basket == [shot], "Its words are still found after shrinking")
+        try check(keep.runRetention(now: now).shrunk.isEmpty, "A shrunk picture is not shrunk again")
+        let batches = cleared.batches()
+        try check(batches.count == 1 && batches[0].reason == "expired" && batches[0].entries.map(\.path) == [history.relative(old)!],
+                  "The expired note waits in 「最近清掉」 as one batch")
+        cleared.putBack(batches[0].id, history: history)
+        try check(FileManager.default.fileExists(atPath: old.path) && history.count == 4 && cleared.batches().isEmpty
+                  && keep.runRetention(now: now).expired == [old], "Put back, the note returns with its row and its old last use")
+        cleared.purge(now: now.addingTimeInterval(8 * day))
+        try check(cleared.batches().isEmpty && !FileManager.default.fileExists(atPath: old.path), "After seven days a batch is gone for good")
+
+        // Over the cap, the oldest original shrinks first, sooner than 30 days.
+        let a = try bigShot("Cap A.png"), b = try bigShot("Cap B.png")
+        for url in [a, b] { history.recordImage(url, text: "cap") }
+        history.setUsed(a, now.addingTimeInterval(-5 * day))
+        history.setUsed(b, now.addingTimeInterval(-2 * day))
+        let size = Int64(try a.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        let capped = keep.runRetention(now: now, cap: size + size / 2)
+        try check(capped.shrunk == [a], "Over the cap, the oldest original shrinks first")
     }
 
     func checkDesktopCopies() throws {
