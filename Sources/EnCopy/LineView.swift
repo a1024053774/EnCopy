@@ -216,11 +216,12 @@ private struct Hint: View {
     }
 }
 
-/// A thin, neutral line: a mid gray core with a faint highlight and a soft
-/// shadow, so it reads on light and dark backgrounds alike. It fades out at
-/// both ends so it seems to come from beyond the screen.
+/// Twine (T-034): two strands of brown twisted together, with a soft shadow
+/// so it reads on any background. It fades out at both ends so it seems to
+/// come from beyond the screen.
 struct Rope: View {
     let width: CGFloat
+    @Environment(\.colorScheme) private var scheme
 
     private var path: Path {
         Path { p in
@@ -234,9 +235,10 @@ struct Rope: View {
 
     var body: some View {
         ZStack {
-            path.stroke(Color.black.opacity(0.22), lineWidth: 1.4).offset(y: 1.2).blur(radius: 1.2)
-            path.stroke(Color(white: 0.55), lineWidth: 1.2)
-            path.stroke(Color.white.opacity(0.45), lineWidth: 0.4).offset(y: -0.35)
+            path.stroke(Color.black.opacity(0.24), lineWidth: 2.4).offset(y: 1.4).blur(radius: 1.3)
+            path.stroke(scheme == .dark ? Color(red: 0.663, green: 0.541, blue: 0.369) : Color(red: 0.541, green: 0.427, blue: 0.271), lineWidth: 2.2)
+            path.stroke(scheme == .dark ? Color(red: 0.831, green: 0.725, blue: 0.545) : Color(red: 0.788, green: 0.671, blue: 0.486),
+                        style: StrokeStyle(lineWidth: 2.2, dash: [1.6, 3.4]))
         }
         .mask(
             LinearGradient(stops: [

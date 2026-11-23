@@ -198,101 +198,126 @@ struct Note {
     var caption: String { [dateText, app, clears].compactMap { $0 }.joined(separator: " · ") }
 }
 
-/// A sheet from Notes: the yellow band, the perforation it was torn along,
-/// the title in bold and the date in grey. It sits inside the same glass
-/// frame as a photo, and follows the system's light or dark appearance.
+/// A note as paper (T-034): a till receipt with a torn bottom for text, a
+/// tractor-feed printout for code, a kraft luggage tag for a link. The paper
+/// stays paper in dark mode; only the line around it follows the system.
 struct NoteSheet: View {
     let note: Note
     let width: CGFloat
     /// The height the line gives it; none to take what the text needs.
     var height: CGFloat? = nil
 
-    @Environment(\.colorScheme) private var scheme
-
     /// Everything is drawn for a card 136 points wide and scaled from there.
     private var u: CGFloat { width / 136 }
-    private var dark: Bool { scheme == .dark }
+    private let dark = false
+    private let ink = Color(red: 0.165, green: 0.145, blue: 0.122)
+    private let sub = Color(red: 0.463, green: 0.412, blue: 0.353)
+
+    enum Paper { case receipt, tractor, tag }
+    private var paper: Paper { note.link != nil ? .tag : note.code ? .tractor : .receipt }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            LinearGradient(colors: [Color(red: 1, green: 0.886, blue: 0.49), Color(red: 0.973, green: 0.788, blue: 0.235)],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 9 * u)
-            Line()
-                .stroke(dark ? Color(white: 0.42) : Color(red: 0.78, green: 0.76, blue: 0.71),
-                        style: StrokeStyle(lineWidth: 1.3 * u, lineCap: .round, dash: [0, 3.4 * u]))
-                .frame(height: 1.3 * u)
-                .padding(.horizontal, 6 * u)
-                .padding(.top, 2.5 * u)
-            VStack(alignment: .leading, spacing: 3 * u) {
-                if note.link != nil {
-                    HStack(spacing: 4 * u) {
-                        Image(systemName: "link")
-                            .font(.system(size: 9.5 * u, weight: .semibold))
-                            .foregroundStyle(dark ? Color(red: 0.9, green: 0.706, blue: 0.133) : Color(red: 0.788, green: 0.604, blue: 0))
-                        Text(note.title)
-                            .font(.system(size: 11.5 * u, weight: .bold))
-                            .foregroundStyle(dark ? Color(white: 0.96) : Color(white: 0.11))
-                            .lineLimit(1)
-                    }
+        VStack(alignment: .leading, spacing: 3 * u) {
+            if note.link != nil {
+                Text(note.title)
+                    .font(.system(size: 11.5 * u, weight: .bold))
+                    .foregroundStyle(Color(red: 0.25, green: 0.19, blue: 0.11))
+                    .lineLimit(1)
+                    .padding(.trailing, 14 * u)
                     .layoutPriority(1)
-                    if !note.linkPath.isEmpty {
-                        Text(note.linkPath)
-                            .font(.system(size: 8.5 * u))
-                            .foregroundStyle(dark ? Color.white.opacity(0.6) : Color(white: 0.45))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                } else if note.code {
-                    Text(note.body)
-                        .font(.system(size: 7.5 * u, design: .monospaced))
-                        .foregroundStyle(dark ? Color(white: 0.96) : Color(white: 0.11))
-                        .lineSpacing(1.2 * u)
-                        // Code keeps its lines whole and is cut at the edge.
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(width: width - 28 * u, alignment: .leading)
-                        .clipped()
-                        .padding(5 * u)
-                        .background(RoundedRectangle(cornerRadius: 4 * u, style: .continuous)
-                            .fill(dark ? Color(white: 0.17) : Color(red: 0.95, green: 0.95, blue: 0.97)))
-                        .layoutPriority(0)
-                } else {
-                    if !note.title.isEmpty {
-                        Text(note.markdown ? Markdown.inline(note.title) : AttributedString(note.title))
-                            .font(.system(size: (note.body.isEmpty ? 12.5 : 11) * u, weight: .bold))
-                            .foregroundStyle(dark ? Color(white: 0.96) : Color(white: 0.11))
+                if !note.linkPath.isEmpty {
+                    Text(note.linkPath)
+                        .font(.system(size: 8.5 * u, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.36, green: 0.29, blue: 0.2))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+            } else if note.code {
+                Text(note.body)
+                    .font(.system(size: 7.5 * u, design: .monospaced))
+                    .foregroundStyle(ink)
+                    .lineSpacing(5.5 * u)
+                    // Code keeps its lines whole and is cut at the edge.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(width: width - 34 * u, alignment: .leading)
+                    .clipped()
+                    .layoutPriority(0)
+            } else {
+                if !note.title.isEmpty {
+                    Text(note.markdown ? Markdown.inline(note.title) : AttributedString(note.title))
+                        .font(.system(size: (note.body.isEmpty ? 11.5 : 10.5) * u, weight: .bold, design: .monospaced))
+                        .foregroundStyle(ink)
+                        .lineLimit(3)
+                        .layoutPriority(1)
+                }
+                if !note.body.isEmpty {
+                    Dashes()
+                        .stroke(sub.opacity(0.6), style: StrokeStyle(lineWidth: 0.8 * u, dash: [2.5 * u, 2 * u]))
+                        .frame(height: 1 * u)
+                    if note.markdown {
+                        Text(Markdown.swiftUI(note.body, size: 8.5 * u, ink: ink, soft: sub,
+                                              link: Color(red: 0.6, green: 0.36, blue: 0.08)))
+                            .lineSpacing(1 * u)
                             .lineLimit(3)
-                            .layoutPriority(1)
-                    }
-                    if !note.body.isEmpty, note.markdown {
-                        Text(Markdown.swiftUI(note.body, size: (note.title.isEmpty ? 9.5 : 8.5) * u,
-                                              ink: dark ? Color(white: 0.96) : Color(white: 0.11),
-                                              soft: dark ? Color.white.opacity(0.75) : Color(white: 0.24),
-                                              link: dark ? Color(red: 0.9, green: 0.706, blue: 0.133) : Color(red: 0.788, green: 0.604, blue: 0)))
-                            .lineSpacing(1 * u)
                             .layoutPriority(0)
-                    } else if !note.body.isEmpty {
+                    } else {
                         Text(linked(note.body))
-                            // Without a title, the words are the note: a little bigger.
-                            .font(.system(size: (note.title.isEmpty ? 9.5 : 8.5) * u))
-                            .foregroundStyle(dark ? Color.white.opacity(0.75) : Color(white: 0.24))
+                            .font(.system(size: 8.5 * u, design: .monospaced))
+                            .foregroundStyle(sub)
                             .lineSpacing(1 * u)
+                            .lineLimit(3)
                             .layoutPriority(0)
                     }
                 }
-                Spacer(minLength: 0)
-                Text(note.caption)
-                    .font(.system(size: 7.5 * u))
-                    .foregroundStyle(Color(red: 0.557, green: 0.557, blue: 0.576))
-                    .lineLimit(1)
-                    .layoutPriority(2)
             }
-            .padding(.top, 5 * u)
-            .padding(.horizontal, 9 * u)
-            .padding(.bottom, 7 * u)
+            Spacer(minLength: 0)
+            Text(note.caption)
+                .font(.system(size: 7 * u, design: .monospaced))
+                .foregroundStyle(sub)
+                .lineLimit(1)
+                .layoutPriority(2)
         }
+        .padding(.top, (paper == .tag ? 14 : 9) * u)
+        .padding(.horizontal, (paper == .tractor ? 15 : 9) * u)
+        .padding(.bottom, (paper == .receipt ? 11 : 7) * u)
         .frame(width: width, height: height, alignment: .top)
-        .background(dark ? Color(white: 0.118) : Color.white)
+        .background(background)
+        .clipShape(PaperShape(paper: paper, u: u))
+    }
+
+    @ViewBuilder private var background: some View {
+        switch paper {
+        case .receipt:
+            Color(red: 0.984, green: 0.98, blue: 0.957)
+        case .tag:
+            ZStack(alignment: .topTrailing) {
+                Color(red: 0.831, green: 0.69, blue: 0.525)
+                Circle().fill(Color(red: 0.945, green: 0.882, blue: 0.765)).frame(width: 9 * u, height: 9 * u)
+                    .overlay(Circle().fill(Color(red: 0.24, green: 0.16, blue: 0.08).opacity(0.5)).frame(width: 4.5 * u, height: 4.5 * u))
+                    .padding(.top, 6 * u).padding(.trailing, 8 * u)
+            }
+        case .tractor:
+            ZStack {
+                Canvas { context, size in
+                    var y: CGFloat = 0
+                    var light = true
+                    while y < size.height {
+                        context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 13 * u)),
+                                     with: .color(light ? Color(red: 0.96, green: 0.973, blue: 0.94) : Color(red: 0.882, green: 0.929, blue: 0.839)))
+                        y += 13 * u
+                        light.toggle()
+                    }
+                    for x in [4.5 * u, size.width - 4.5 * u] {
+                        var hy: CGFloat = 6.5 * u
+                        while hy < size.height {
+                            context.fill(Path(ellipseIn: CGRect(x: x - 1.8 * u, y: hy - 1.8 * u, width: 3.6 * u, height: 3.6 * u)),
+                                         with: .color(Color(red: 0.35, green: 0.31, blue: 0.24).opacity(0.38)))
+                            hy += 13 * u
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Links in the yellow Notes uses for them.
@@ -310,13 +335,52 @@ struct NoteSheet: View {
         return result
     }
 
-    private struct Line: Shape {
+    private struct Dashes: Shape {
         func path(in rect: CGRect) -> Path {
             var p = Path()
             p.move(to: CGPoint(x: rect.minX, y: rect.midY))
             p.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
             return p
         }
+    }
+}
+
+/// The outline of each paper: a receipt's torn bottom, a tag's cut corners,
+/// a printout's plain sheet.
+struct PaperShape: Shape {
+    let paper: NoteSheet.Paper
+    let u: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        switch paper {
+        case .tractor:
+            p.addRect(rect)
+        case .tag:
+            let c = 11 * u
+            p.move(to: CGPoint(x: c, y: 0))
+            p.addLine(to: CGPoint(x: rect.maxX - c, y: 0))
+            p.addLine(to: CGPoint(x: rect.maxX, y: c))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: 0, y: rect.maxY))
+            p.addLine(to: CGPoint(x: 0, y: c))
+            p.closeSubpath()
+        case .receipt:
+            let tooth = 4.5 * u
+            p.move(to: .zero)
+            p.addLine(to: CGPoint(x: rect.maxX, y: 0))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - tooth))
+            var x = rect.maxX
+            var down = true
+            while x > 0 {
+                x -= tooth
+                p.addLine(to: CGPoint(x: max(0, x), y: down ? rect.maxY : rect.maxY - tooth))
+                down.toggle()
+            }
+            p.addLine(to: CGPoint(x: 0, y: rect.maxY - tooth))
+            p.closeSubpath()
+        }
+        return p
     }
 }
 
