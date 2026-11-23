@@ -398,6 +398,7 @@ struct CheckFailed: Error { let message: String }
         try checkRecopyNeverShortens()
         try checkSearchStaysForQuickLook()
         try checkCleanupConfirmFresh()
+        try checkShrinkRespectsClearing()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -1763,6 +1764,35 @@ struct CheckFailed: Error { let message: String }
         try check(!model.confirming, "Changing the filter cancels the confirmation at once")
         model.clear()
         try check(history.contains(keep) && !history.contains(drop), "Clearing right away clears what the new filter picks, not the old list")
+    }
+
+    /// Review 2, finding 5: a picture cleared while the daily run shrinks it
+    /// in the background is not written back; an original already deleted
+    /// is not waiting to be shrunk for ever.
+    func checkShrinkRespectsClearing() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Shrink race shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("shrink-race.sqlite"))
+        let keep = Line(pasteboard: pasteboard, desktop: root, history: history)
+        keep.clearing = Clearing(folder: root.appendingPathComponent("cleared-race", isDirectory: true))
+        let shot = try bigShot("Race me.png")
+        history.recordImage(shot, text: "race words")
+        history.setUsed(shot, Date().addingTimeInterval(-40 * 86400))
+        keep.runRetention(inBackground: true)
+        keep.cleanUp([shot])                                   // cleared before the background work is done
+        pump(3)
+        try check(!FileManager.default.fileExists(atPath: shot.path) && !history.contains(shot),
+                  "A picture cleared meanwhile is not written back")
+        let gone = try bigShot("Deleted in Finder.png")
+        history.recordImage(gone, text: "gone words")
+        history.setUsed(gone, Date().addingTimeInterval(-40 * 86400))
+        try FileManager.default.removeItem(at: gone)
+        let plan = Retention.plan(history: history, onLine: [], isKeptImage: keep.isKeptImage, cap: Line.originalsCap)
+        try check(!plan.shrunk.contains(gone), "An original deleted in Finder is not waiting to be shrunk")
+        keep.runRetention()
+        try check(!history.contains(gone), "Its row is cleared")
     }
 
     func checkShelves() throws {
