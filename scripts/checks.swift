@@ -440,6 +440,7 @@ struct CheckFailed: Error { let message: String }
         try checkCleanupPreviewOnDisk()
         try checkFinderPicturesByName()
         try checkTakeDownOnlyShown()
+        try checkRecopyAnyPicture()
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`
@@ -2058,6 +2059,30 @@ struct CheckFailed: Error { let message: String }
         try check(sides.neighbours(of: id(2), toTheLeft: false).map(\.url) == [urls[0]]
                   && sides.neighbours(of: id(2), toTheLeft: true).map(\.url) == [urls[4]],
                   "With only images shown, the sides hold only the images")
+    }
+
+    /// Review 2, on #11: a picture copied again after another one comes
+    /// back from where it is, found by its bytes, instead of saved twice.
+    func checkRecopyAnyPicture() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        ClipboardWatcher.imagesEnabled = true
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved; ClipboardWatcher.imagesEnabled = false }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Recopy any shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("recopy-any.sqlite"))
+        var new: [URL] = [], again: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.Preview" },
+                                       onNew: { new.append($0) }, onAgain: { again.append($0) })
+        watcher.start()
+        defer { watcher.stop() }
+        let first = NSImage(contentsOf: try png("Recopy first.png", red: 0.2))!
+        let second = NSImage(contentsOf: try png("Recopy second.png", red: 0.7))!
+        for image in [first, second, first] {
+            pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
+        }
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: Inbox.folder.path)) ?? []
+        try check(new.count == 2 && again == [new[0]] && files.count == 2,
+                  "The first picture copied again after another comes back, not saved a second time")
     }
 
     func checkShelves() throws {
