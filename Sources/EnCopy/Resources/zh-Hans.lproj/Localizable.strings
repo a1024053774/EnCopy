@@ -125,3 +125,33 @@
 /* Files (T-029) */
 "Files" = "文件";
 "Files you copy in Finder hang on the line, where they are" = "在访达里复制的文件也挂上绳，文件留在原处";
+
+/* Cleanup panel (T-032) */
+"Clean Up History…" = "清理历史…";
+"Clean Up History" = "清理历史";
+"Clean up history" = "清理历史";
+"Kind" = "类型";
+"Everything" = "全部";
+"Last used" = "最后用到";
+"Any time" = "不限";
+"Over a day ago" = "一天以前";
+"Over a week ago" = "一周以前";
+"Over a month ago" = "一个月以前";
+"Over three months ago" = "三个月以前";
+"Over a year ago" = "一年以前";
+"Copied from" = "来源 App";
+"Any app" = "不限";
+"Containing" = "包含的文字";
+"%d items will go to Recently Cleared, where they stay 7 days." = "会有 %d 件进「最近清掉」，在那里放 7 天。";
+"Cancel" = "取消";
+"Clear %d" = "清掉 %d 件";
+"Clear %d…" = "清掉 %d 件…";
+"Recently Cleared" = "最近清掉";
+"Nothing cleared in the last 7 days." = "最近 7 天没有清掉东西。";
+"%d expired" = "%d 件过期";
+"%d cleared by you" = "%d 件是你清的";
+"Put Back" = "放回";
+"Keeping" = "保留";
+"Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires." = "文字在最后一次用到一年后过期。截图原图 30 天后缩成缩略图，图里的字照样搜得到。挂在绳上的不过期。";
+"Originals may use up to" = "原图最多占用";
+"Next run: %d expire, %d originals shrink." = "下一次：%d 件过期，%d 张原图缩小。";

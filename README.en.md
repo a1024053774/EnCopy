@@ -57,7 +57,7 @@ It puts a self-signed code-signing certificate in a separate keychain (`~/Librar
 scripts/check.sh
 ```
 
-Runs five checks in order: the upstream name does not appear in the code or scripts; the global shortcut is registered in one place only; the data folder is decided in one place only; every interface string exists in both Simplified Chinese and English; and the local checks run against the real model and view code. The local checks do not depend on XCTest. They use a private pasteboard and a temporary home folder, so they don't touch the system clipboard, don't read or write your EnCopy data, and don't look at your screenshots.
+Runs six checks in order: the upstream name does not appear in the code or scripts; the global shortcut is registered in one place only; the data folder is decided in one place only; every interface string exists in both Simplified Chinese and English; the whole app type-checks; and the local checks run against the real model and view code. The local checks do not depend on XCTest. They use a private pasteboard and a temporary home folder, so they don't touch the system clipboard, don't read or write your EnCopy data, and don't look at your screenshots.
 
 ## Contributors
 

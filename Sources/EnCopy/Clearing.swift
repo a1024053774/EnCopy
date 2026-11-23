@@ -171,3 +171,35 @@ enum Retention {
         }
     }
 }
+
+/// T-005's manual cleanup: pick by kind, age, source app and the words it
+/// holds; see what would go; clear it into 「最近清掉」. What hangs on the line
+/// (pinned included) is never picked.
+@MainActor
+struct CleanupFilter: Equatable {
+    var kind: Line.Kind?
+    /// Last used more than this many days ago; nil is any time.
+    var olderThanDays: Double?
+    /// A source app's bundle id; nil is any app.
+    var app: String?
+    var text = ""
+
+    func candidates(history: History, onLine: Set<String>, isKeptImage: (URL) -> Bool, now: Date = Date()) -> [URL] {
+        let words = SearchIndex.words(text)
+        return history.kept().filter { item in
+            guard !onLine.contains(item.url.standardizedFileURL.path) else { return false }
+            if let days = olderThanDays, now.timeIntervalSince(item.used) <= days * 86400 { return false }
+            if let app, item.app != app { return false }
+            if let kind {
+                let actual: Line.Kind = isText(item.url) ? (Note.cached(item.url)?.link != nil ? .link : .text)
+                    : isKeptImage(item.url) ? .image : .file
+                if actual != kind { return false }
+            }
+            if !words.isEmpty {
+                let have = history.words(of: item.url) ?? ""
+                if !words.allSatisfy({ have.contains($0) }) { return false }
+            }
+            return true
+        }.sorted { $0.used > $1.used }.map(\.url)
+    }
+}

@@ -360,6 +360,7 @@ struct CheckFailed: Error { let message: String }
         try checkFiles()
         try checkImagesInBasket()
         try checkRetention()
+        try checkCleanup()
         try checkDataFolder()
         try checkHistory()
     }
@@ -962,6 +963,43 @@ struct CheckFailed: Error { let message: String }
         let size = Int64(try a.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
         let capped = keep.runRetention(now: now, cap: size + size / 2)
         try check(capped.shrunk == [a], "Over the cap, the oldest original shrinks first")
+    }
+
+    /// T-032: the cleanup panel picks by kind, age, app and words, never
+    /// what hangs; what it clears waits in 「最近清掉」 and goes back whole.
+    func checkCleanup() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("cleanup.sqlite"))
+        let tidy = Line(pasteboard: pasteboard, desktop: root, history: history)
+        tidy.maxItems = 1; tidy.visibleCount = 8
+        tidy.clearing = Clearing(folder: root.appendingPathComponent("cleared-cleanup", isDirectory: true))
+        let now = Date(), day: TimeInterval = 86400
+        let slack = try adoptedNote("slack", "standup notes from slack")
+        let mail = try adoptedNote("mail", "invoice from mail")
+        let linkSrc = root.appendingPathComponent("note-src/cleanup-link-\(UUID().uuidString.prefix(6)).txt")
+        try "https://example.com/cleanup".write(to: linkSrc, atomically: true, encoding: .utf8)
+        let link = NoteFolder.adopt(linkSrc)!
+        let hanging = try adoptedNote("hanging", "invoice still hanging")
+        for url in [slack, mail, link, hanging] { _ = tidy.hang(url, quietly: true) }
+        history.record(slack, app: "com.tinyspeck.slackmacgap"); history.record(mail, app: "com.apple.mail")
+        for (url, days) in [(slack, 40.0), (mail, 3.0), (link, 100.0), (hanging, 400.0)] { history.setUsed(url, now.addingTimeInterval(-days * day)) }
+        func pick(_ f: CleanupFilter) -> [URL] { tidy.cleanupCandidates(f, now: now) }
+        try check(Set(pick(CleanupFilter())) == [slack, mail, link], "Without conditions everything but what hangs is picked")
+        try check(Set(pick(CleanupFilter(olderThanDays: 30))) == [slack, link], "Over a month ago picks the two older ones")
+        try check(pick(CleanupFilter(kind: .link)) == [link], "The link kind picks only the link")
+        try check(pick(CleanupFilter(app: "com.apple.mail")) == [mail], "An app picks only what came from it")
+        try check(pick(CleanupFilter(text: "invoice")) == [mail], "Words pick what holds them, never the one on the line")
+        guard let batch = tidy.cleanUp(pick(CleanupFilter(olderThanDays: 30)), now: now) else { throw CheckFailed(message: "Nothing was cleared") }
+        try check(batch.reason == "manual" && batch.entries.count == 2 && !FileManager.default.fileExists(atPath: slack.path)
+                  && history.count == 2, "Clearing moves them into 「最近清掉」 as one batch, out of the history")
+        tidy.putBack(batch: batch.id)
+        try check(FileManager.default.fileExists(atPath: slack.path) && history.count == 4 && history.app(of: slack) == "com.tinyspeck.slackmacgap",
+                  "Put back, they return with their app")
+        Line.originalsCap = 2 << 30
+        try check(Line.originalsCap == 2 << 30, "The originals cap is kept as set")
+        UserDefaults.standard.removeObject(forKey: "originalsCap")
+        try check(Line.originalsCap == Retention.defaultCap, "Unset, the cap is 1 GB")
     }
 
     func checkDesktopCopies() throws {
