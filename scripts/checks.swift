@@ -364,6 +364,7 @@ struct CheckFailed: Error { let message: String }
         try checkShelves()
         try checkNewestByKnot()
         try checkMotion()
+        try checkMenuBarIcon()
         try checkDataFolder()
         try checkHistory()
     }
@@ -1115,6 +1116,32 @@ struct CheckFailed: Error { let message: String }
         try check(keys.cameBySummon && keys.landing == before + 1, "Coming down by ⌥C is told to the papers")
         keys.landed(bySummon: false)
         try check(!keys.cameBySummon && keys.landing == before + 2, "Sliding down is told too")
+    }
+
+    /// T-037: the menu bar glyph is the design's rope with two pegs.
+    func checkMenuBarIcon() throws {
+        func inked(_ image: NSImage) -> (total: Int, ropeRow: Int, pegCore: Int) {
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 36, pixelsHigh: 24, bitsPerSample: 8,
+                                       samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                       bytesPerRow: 0, bitsPerPixel: 0)!
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            image.draw(in: NSRect(x: 0, y: 0, width: 36, height: 24))
+            NSGraphicsContext.restoreGraphicsState()
+            var total = 0, ropeRow = 0, core = 0
+            for y in 0..<24 { for x in 0..<36 where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+                total += 1
+                if y <= 5 && (x < 6 || x > 30) { ropeRow += 1 }   // rope ends, near the top (bitmap rows go down)
+                if (x == 10 || x == 24) && (10...14).contains(y) { core += 1 }   // the middle of each peg
+            } }
+            return (total, ropeRow, core)
+        }
+        let on = MenuBarIcon.image(watching: true), off = MenuBarIcon.image(watching: false)
+        try check(on.isTemplate && off.isTemplate && on.size == NSSize(width: 18, height: 12),
+                  "The menu bar glyph is an 18×12 template image")
+        let a = inked(on), b = inked(off)
+        try check(a.ropeRow > 0 && b.ropeRow > 0, "The rope runs to both ends, high at the edges")
+        try check(a.pegCore >= 8 && b.pegCore == 0, "The pegs are filled while watching, hollow when not")
     }
 
     func checkShelves() throws {
