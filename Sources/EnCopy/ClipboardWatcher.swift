@@ -89,14 +89,20 @@ final class ClipboardWatcher {
     static let codeLife: TimeInterval = 600
 
     /// A verification code: 4 to 8 digits on their own from Messages or Mail,
-    /// or a short text that says 验证码 or "code" next to 4 to 8 digits.
+    /// or a short text where 验证码 or "code" stands right next to 4 to 8
+    /// digits. A status, postal or error code is not one, nor a number that
+    /// is part of a name like T-1024 or v2024 (review #5).
     static func isCode(_ text: String, app: String?) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let digitsOnly = trimmed.range(of: #"^[0-9]{4,8}$"#, options: .regularExpression) != nil
         if digitsOnly, let app, ["com.apple.MobileSMS", "com.apple.mail"].contains(app) { return true }
-        guard trimmed.count <= 160,
-              trimmed.range(of: #"(?<![0-9])[0-9]{4,8}(?![0-9])"#, options: .regularExpression) != nil else { return false }
-        return trimmed.range(of: #"验证码|校验码|动态码|\bcode\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        guard trimmed.count <= 160 else { return false }
+        let notACode = #"\b(status|postal|zip|area|country|error|exit|return|dead|source|promo|discount|bar|qr)\s+code\b"#
+        guard trimmed.range(of: notACode, options: [.regularExpression, .caseInsensitive]) == nil else { return false }
+        let word = #"(验证码|校验码|动态码|\bcode\b)"#
+        let number = #"(?<![0-9A-Za-z-])[0-9]{4,8}(?![0-9])"#
+        let near = word + #"[^0-9]{0,12}"# + number + "|" + number + #"[^0-9]{0,24}"# + word
+        return trimmed.range(of: near, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     /// The clipboard is watched while anything is on and recording is not paused.
@@ -253,7 +259,9 @@ final class ClipboardWatcher {
     /// Notes and links go to their own folder, apart from the screenshots.
     /// The same words again add nothing: the kept note comes back instead.
     private func save(text: String, rtf: Data?, link: Bool, app: String?, ttl: TimeInterval?) {
-        if let kept = history.note(holding: text) { onAgain(kept); return }
+        // Copied again: how long it stays follows this copy, so a number
+        // first copied as a code and then as plain text no longer expires.
+        if let kept = history.note(holding: text) { history.setTTL(kept, ttl); onAgain(kept); return }
         let ext = rtf == nil ? "txt" : "rtf"
         let name = link ? "Link" : "Text"
         let fm = FileManager.default
