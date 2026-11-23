@@ -50,7 +50,7 @@ final class Line: ObservableObject {
             guard revealed != oldValue else { return }
             gustWork?.cancel()
             gustWork = nil
-            if revealed { scheduleGust(); refreshNotes() }
+            if revealed { scheduleGust(); refreshNotes(); countBasket() }
         }
     }
 
@@ -161,6 +161,9 @@ final class Line: ObservableObject {
     /// `Motion.keyRepeat`, and slides without swinging.
     var lastPickMove = Date.distantPast
     var isSearching: Bool { !SearchIndex.words(query).isEmpty }
+    /// Searching narrows the line itself, which it does not while the
+    /// basket list is open: the list takes the words.
+    var narrowsLine: Bool { isSearching && !basketOpen }
 
     /// What the search found in the basket, oldest first: cards that are
     /// not on the line.
@@ -176,6 +179,9 @@ final class Line: ObservableObject {
     /// so its fall is not cut short. While searching, the basket's matches
     /// hang to the left of the line's own.
     var shown: [Pegged] {
+        // With the basket list open, typing and Tab narrow the list; the
+        // line stays as it hangs.
+        if basketOpen { return items }
         let words = SearchIndex.words(query)
         let fits = { (p: Pegged) in self.kindFilter == nil || self.kind(of: p.url) == self.kindFilter }
         // On a shelf of the basket (↓), its cards stand in for the line's,
@@ -232,13 +238,189 @@ final class Line: ObservableObject {
         }
     }
 
+    // MARK: The basket list (T-043, T-044)
+
+    /// One thing in the basket, as the list shows it.
+    struct BasketRow: Identifiable, Equatable {
+        let url: URL
+        let used: Date
+        let app: String?
+        var id: URL { url }
+    }
+
+    /// One day, or one month further back, of the basket list.
+    struct BasketGroup: Identifiable, Equatable {
+        let title: String
+        let rows: [BasketRow]
+        var id: String { title }
+    }
+
+    /// ↓ while summoned opens the whole basket as a list under the line.
+    @Published private(set) var basketOpen = false
+    /// What the list shows: the whole basket, narrowed by what is typed and
+    /// by Tab, newest first, in groups.
+    @Published private(set) var basketGroups: [BasketGroup] = []
+    /// The row the arrows rest on while the list is open.
+    @Published private(set) var basketPick: URL?
+    /// How many things are in the basket, for the handle at the end of the line.
+    @Published private(set) var basketCount = 0
+    /// The handle at the end of the line was clicked: the list opens.
+    var onOpenBasket: () -> Void = {}
+    /// The handle's place among the line's click targets.
+    static let basketHandleID = UUID()
+
+    var basketRows: [BasketRow] { basketGroups.flatMap(\.rows) }
+
+    func openBasket() {
+        guard !basketOpen else { return }
+        lastKeyAt = Date()
+        basketOpen = true
+        clearPick()
+        loadBasket()
+        basketPick = basketRows.first?.url
+        bounceRope(from: Motion.shelfTaut, Motion.ropeSummon)
+    }
+
+    func closeBasket() {
+        guard basketOpen else { return }
+        basketOpen = false
+        basketGroups = []
+        basketPick = nil
+        recomputeSearch()
+    }
+
+    /// Counted when the line comes down; the list itself is read when it opens.
+    func countBasket() {
+        let onLine = onLinePaths
+        basketCount = history.kept().filter { !onLine.contains($0.url.standardizedFileURL.path) }.count
+    }
+
+    /// The group title for when something was last used: today, yesterday,
+    /// the rest of the past week, then each month.
+    func basketTitle(_ used: Date, now: Date = Date()) -> String {
+        let start = Calendar.current.startOfDay(for: now)
+        let day: TimeInterval = 86400
+        if used >= start { return L("Today") }
+        if used >= start.addingTimeInterval(-day) { return L("Yesterday") }
+        if used >= start.addingTimeInterval(-7 * day) { return L("This week") }
+        return Self.monthFormatter.string(from: used)
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+        f.setLocalizedDateFormatFromTemplate("yMMMM")
+        return f
+    }()
+
+    /// Reads the list: every kept thing not on the line whose file is still
+    /// there, or, with words typed, what the history finds for them, however
+    /// far back. Tab's kind narrows both.
+    private func loadBasket(now: Date = Date()) {
+        let onLine = onLinePaths
+        let kept = history.kept().filter { !onLine.contains($0.url.standardizedFileURL.path) }
+        let words = SearchIndex.words(query)
+        var rows: [BasketRow]
+        if words.isEmpty {
+            rows = kept.filter { fitsKind($0.url) }
+                .sorted { $0.used > $1.used }
+                .map { BasketRow(url: $0.url, used: $0.used, app: $0.app) }
+        } else {
+            let byPath = Dictionary(kept.map { ($0.url.standardizedFileURL.path, $0) }, uniquingKeysWith: { a, _ in a })
+            let found = history.search(words, onLine: [], limit: Int.max,
+                                       accept: kindFilter.map { want in { self.kind(of: $0, words: $1) == want } })
+            rows = found.basket.compactMap { url in
+                byPath[url.standardizedFileURL.path].map { BasketRow(url: $0.url, used: $0.used, app: $0.app) }
+            }
+        }
+        rows = rows.filter { FileManager.default.fileExists(atPath: $0.url.path) }
+        var groups: [BasketGroup] = []
+        var title: String?
+        var run: [BasketRow] = []
+        for row in rows {
+            let t = basketTitle(row.used, now: now)
+            if t != title, let done = title { groups.append(BasketGroup(title: done, rows: run)); run = [] }
+            title = t
+            run.append(row)
+        }
+        if let done = title { groups.append(BasketGroup(title: done, rows: run)) }
+        basketGroups = groups
+        basketCount = kept.count
+        if !rows.contains(where: { $0.url == basketPick }) { basketPick = rows.first?.url }
+    }
+
+    /// The list again, after the line changed under it (something pinned
+    /// back onto the line, say).
+    func refreshBasket() { if basketOpen { loadBasket() } }
+
+    /// ↓ is +1 and ↑ is -1 along the list; stops at the bottom. Returns false
+    /// for ↑ on the top row: the list closes and the line has the keys again.
+    @discardableResult
+    func moveBasketPick(_ step: Int) -> Bool {
+        lastKeyAt = Date()
+        let rows = basketRows
+        guard let i = rows.firstIndex(where: { $0.url == basketPick }) else {
+            basketPick = rows.first?.url
+            return !rows.isEmpty || step > 0
+        }
+        if i + step < 0 { return false }
+        basketPick = rows[min(rows.count - 1, i + step)].url
+        return true
+    }
+
+    /// ↓ and ↑ while summoned: ↓ opens the list; in the list they move the
+    /// pick, and ↑ on the top row closes it, the line's newest picked again.
+    func verticalArrow(_ step: Int) {
+        if basketOpen {
+            if !moveBasketPick(step) { closeBasket(); pickNewest() }
+        } else if step > 0 {
+            openBasket()
+        }
+    }
+
+    /// A click on a row picks it.
+    func pickBasket(_ url: URL) {
+        guard basketRows.contains(where: { $0.url == url }) else { return }
+        basketPick = url
+    }
+
+    /// ← and → in the list: the first row of the group before or after.
+    func jumpBasketGroup(_ step: Int) {
+        lastKeyAt = Date()
+        let groups = basketGroups
+        guard let g = groups.firstIndex(where: { $0.rows.contains { $0.url == basketPick } }) else { return }
+        let rows = groups[g].rows
+        // ← on a row inside a group goes to the group's first row first.
+        if step < 0, rows.first?.url != basketPick { basketPick = rows.first?.url; return }
+        basketPick = groups[min(groups.count - 1, max(0, g + step))].rows.first?.url
+    }
+
+    /// The list's pick as a card the line's own actions take: pasting,
+    /// copying and pinning bring it back onto the line as the newest, as
+    /// they do for any basket card.
+    func basketPickCard() -> UUID? {
+        guard let url = basketPick else { return nil }
+        if let card = basketCards.first(where: { $0.url == url }) { return card.id }
+        guard let thumb = makeThumbnail(url) else { return nil }
+        let card = Pegged(url: url, thumb: thumb)
+        basketCards.append(card)
+        return card.id
+    }
+
+    /// Quick Look on the list's pick, the rest of the list a key press away.
+    func quickLookBasketPick() {
+        let urls = basketRows.map(\.url)
+        guard let index = urls.firstIndex(of: basketPick ?? urls.first ?? URL(fileURLWithPath: "/")) else { return }
+        QuickLook.shared.show(urls, at: index)
+    }
+
     /// What kind of thing an item is, for Tab while summoned.
     enum Kind { case text, link, image, file }
 
     /// Tab while summoned narrows the line to one kind; nil shows them all.
     @Published var kindFilter: Kind? {
         // The basket's cards are picked by kind first (review #14).
-        didSet { if kindFilter != oldValue, shelf != .line || isSearching { recomputeSearch() } }
+        didSet { if kindFilter != oldValue, shelf != .line || isSearching || basketOpen { recomputeSearch() } }
     }
 
     /// Whether a URL is of the kind Tab narrowed to.
@@ -282,6 +464,7 @@ final class Line: ObservableObject {
     /// when the index finishes reading. The line's own matches come first;
     /// the basket fills the room left across the screen.
     private func recomputeSearch() {
+        if basketOpen { loadBasket(); return }
         let words = SearchIndex.words(query)
         // On a shelf with nothing typed, the shelf's own cards (review #9).
         if words.isEmpty, shelf != .line { loadShelf(); return }
@@ -367,7 +550,7 @@ final class Line: ObservableObject {
 
     /// How many of what is shown hang pinned left of the knot: none while
     /// searching or on a shelf of the basket, where there is no knot.
-    var layoutPinned: Int { isSearching || shelf != .line ? 0 : shown.prefix { $0.kept }.count }
+    var layoutPinned: Int { narrowsLine || shelf != .line ? 0 : shown.prefix { $0.kept }.count }
 
     /// The oldest photo that can fall: the first one past the knot.
     private var oldestLoose: Pegged? { items.first { !$0.falling && !$0.kept && !$0.held } }

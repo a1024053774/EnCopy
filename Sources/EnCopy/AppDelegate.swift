@@ -109,22 +109,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         noteWatcher.start()
 
         searchBar = SearchBar(line: line)
-        searchBar.onMove = { [weak self] in self?.line.movePick($0) }
-        searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
-        searchBar.onShelf = { [weak self] step in
-            self?.line.moveShelf(step)
-            self?.line.pickNewest()
+        // With the basket list open (T-044) the arrows, ⏎, ⌘P and ⌘Y act on
+        // the list; otherwise on the line, as before.
+        searchBar.onMove = { [weak self] step in
+            guard let self else { return }
+            if self.line.basketOpen { self.line.jumpBasketGroup(step) } else { self.line.movePick(step) }
         }
+        searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
+        searchBar.onShelf = { [weak self] in self?.line.verticalArrow($0) }
+        line.onOpenBasket = { [weak self] in self?.openBasketFromHandle() }
         searchBar.onTab = { [weak self] step in
-            self?.line.cycleKind(step)
-            self?.line.pickNewest()
+            guard let self else { return }
+            self.line.cycleKind(step)
+            if !self.line.basketOpen { self.line.pickNewest() }
         }
         searchBar.onPlainReturn = { [weak self] in self?.paster.pastePicked(plain: true) }
-        searchBar.onPin = { [weak self] in if let id = self?.line.picked?.id { self?.line.togglePin(id) } }
+        searchBar.onPin = { [weak self] in
+            guard let self else { return }
+            if self.line.basketOpen {
+                // Pinned from the list, it goes back onto the line and leaves the list.
+                if let id = self.line.basketPickCard() { self.line.togglePin(id); self.line.refreshBasket() }
+            } else if let id = self.line.picked?.id {
+                self.line.togglePin(id)
+            }
+        }
         // ⌘Y opens Quick Look on the pick, and closes it again.
         searchBar.onQuickLook = { [weak self] in
             if QuickLook.shared.isOpen { QuickLook.shared.close(); return }
-            if let id = self?.line.picked?.id { self?.line.quickLook(id) }
+            guard let self else { return }
+            if self.line.basketOpen { self.line.quickLookBasketPick() }
+            else if let id = self.line.picked?.id { self.line.quickLook(id) }
         }
         QuickLook.shared.onClosed = { [weak self] in self?.searchBar.refocus() }
         searchBar.keepsOpen = { QuickLook.shared.isLending }
@@ -694,9 +708,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar.show(below: panel.frame)
     }
 
+    /// The handle at the end of the line was clicked: the line takes the
+    /// keyboard, as with ⌥C, and the list opens.
+    private func openBasketFromHandle() {
+        if searchBar?.isShown != true { summon() }
+        line.openBasket()
+    }
+
     /// The whole line comes back. With Escape it also tucks away; after a
     /// click elsewhere it stays as it is.
     private func endSearch(tuckAway: Bool) {
+        line.closeBasket()
         line.query = ""
         line.kindFilter = nil
         line.shelf = .line

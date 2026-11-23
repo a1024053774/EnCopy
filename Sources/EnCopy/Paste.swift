@@ -44,7 +44,13 @@ final class Paster {
     }
 
     /// `plain` is ⇧⏎: the words without their styling.
+    /// ⏎ and ⇧⏎: the basket list's pick when the list is open (T-044), else
+    /// the line's.
     func pastePicked(plain: Bool = false) {
+        if line.basketOpen {
+            if let id = line.basketPickCard() { paste(id, plain: plain) }
+            return
+        }
         guard let item = line.picked else { return }
         paste(item.id, plain: plain)
     }

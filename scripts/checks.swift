@@ -400,6 +400,7 @@ struct CheckFailed: Error { let message: String }
         try checkRetention()
         try checkCleanup()
         try checkShelves()
+        try checkBasketList()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -2134,6 +2135,69 @@ struct CheckFailed: Error { let message: String }
         _ = bar.takes(arrow(kVK_UpArrow), composing: false)
         _ = bar.takes(arrow(kVK_UpArrow), composing: false)
         try check(shelves.shelf == .line, "↑ comes back to the line and stops there")
+    }
+
+    /// T-044: ↓ opens the whole basket as a list, grouped by when things were
+    /// last used, all the way back; ⏎ pastes the list's pick back to the head.
+    func checkBasketList() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let history = History(file: root.appendingPathComponent("basket-list.sqlite"))
+        let basket = Line(pasteboard: pasteboard, desktop: root, history: history)
+        basket.maxItems = 1; basket.visibleCount = 8; basket.revealed = true
+        let now = Date(), day: TimeInterval = 86400
+        let start = Calendar.current.startOfDay(for: now)
+        // Twelve in the basket, more than a shelf of 8 held, five of them
+        // over a week old: newest first as the list should show them.
+        let ages: [(String, Date)] = [
+            ("t1", now.addingTimeInterval(-60)), ("t2", now.addingTimeInterval(-120)), ("t3", now.addingTimeInterval(-180)),
+            ("y1", start.addingTimeInterval(-day / 3)), ("y2", start.addingTimeInterval(-day / 2)),
+            ("w1", start.addingTimeInterval(-3 * day)), ("w2", start.addingTimeInterval(-4 * day)),
+            ("m1", start.addingTimeInterval(-40 * day)), ("m2", start.addingTimeInterval(-40 * day - 60)), ("m3", start.addingTimeInterval(-40 * day - 120)),
+            ("o1", start.addingTimeInterval(-100 * day)), ("o2", start.addingTimeInterval(-100 * day - 60))]
+        var urls: [String: URL] = [:]
+        for (name, _) in ages { urls[name] = try adoptedNote("list-\(name)", "list words \(name)"); _ = basket.hang(urls[name]!, quietly: true) }
+        let hanging = try adoptedNote("list-hanging", "list words hanging")
+        _ = basket.hang(hanging, quietly: true)
+        let gone = try adoptedNote("list-gone", "list words gone")
+        _ = basket.hang(gone, quietly: true)
+        _ = basket.hang(hanging, quietly: true)
+        pump(0.7); basket.closeGaps()
+        for (name, date) in ages { history.setUsed(urls[name]!, date) }
+        history.setUsed(gone, now)
+        try FileManager.default.removeItem(at: gone)
+        basket.countBasket()
+        let bar = SearchBar(line: basket)
+        bar.onShelf = { basket.verticalArrow($0) }
+        func arrow(_ code: Int) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
+        }
+        let expected = ages.map { urls[$0.0]! }
+        try check(basket.items.filter { !$0.falling }.map(\.url) == [hanging], "Only one hangs; the rest are in the basket")
+        try check(bar.takes(arrow(kVK_DownArrow), composing: false) && basket.basketOpen, "↓ opens the basket list")
+        try check(basket.basketRows.map(\.url) == expected,
+                  "The list holds all twelve, newest first, past a shelf's eight and back past a week; not what hangs, not a gone file")
+        try check(basket.basketGroups.map(\.rows.count) == [3, 2, 2, 3, 2], "Grouped today, yesterday, this week, then by month")
+        try check(Array(basket.basketGroups.prefix(3).map(\.title)) == [L("Today"), L("Yesterday"), L("This week")],
+                  "The first groups are named today, yesterday, this week")
+        try check(basket.basketGroups[3].title != basket.basketGroups[4].title, "Two months back are two groups")
+        try check(basket.basketPick == urls["t1"], "The newest in the basket is picked")
+        for _ in 0..<20 { _ = bar.takes(arrow(kVK_DownArrow), composing: false) }
+        try check(basket.basketPick == urls["o2"], "↓ goes all the way to the oldest and stops there")
+        for _ in 0..<11 { _ = bar.takes(arrow(kVK_UpArrow), composing: false) }
+        try check(basket.basketOpen && basket.basketPick == urls["t1"], "↑ comes back up the list")
+        _ = bar.takes(arrow(kVK_UpArrow), composing: false)
+        try check(!basket.basketOpen && basket.picked?.url == hanging, "↑ on the top row closes the list and picks on the line again")
+        _ = bar.takes(arrow(kVK_DownArrow), composing: false)
+        for _ in 0..<7 { _ = bar.takes(arrow(kVK_DownArrow), composing: false) }
+        try check(basket.basketPick == urls["m1"], "The eighth row down is the first of last month's")
+        var sent = 0
+        let paster = Paster(line: basket, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.pastePicked()
+        try check(sent == 1 && basket.items.filter { !$0.falling }.last?.url == urls["m1"]
+                  && pasteboard.string(forType: .string)?.contains("list words m1") == true,
+                  "⏎ pastes the list's pick, and it comes back to the head of the line")
     }
 
     func checkDesktopCopies() throws {
