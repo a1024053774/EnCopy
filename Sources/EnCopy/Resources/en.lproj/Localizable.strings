@@ -212,3 +212,17 @@
 "Past it, the oldest originals shrink first" = "Past it, the oldest originals shrink first";
 "Originals use %@ of %@" = "Originals use %@ of %@";
 "What expires waits 7 days in Recently Cleared, and can be put back" = "What expires waits 7 days in Recently Cleared, and can be put back";
+
+/* How EnCopy stores things, Keeping page (T-052) */
+"How EnCopy stores things" = "How EnCopy stores things";
+"Text, links and code" = "Text, links and code";
+"Each is a small file in EnCopy's folder; copying the same thing again adds nothing" = "Each is a small file in EnCopy's folder; copying the same thing again adds nothing";
+"Screenshots and copied images" = "Screenshots and copied images";
+"The original is kept in EnCopy's folder until it shrinks to a thumbnail" = "The original is kept in EnCopy's folder until it shrinks to a thumbnail";
+"Screen recordings" = "Screen recordings";
+"Kept in EnCopy's folder; off the line, they go to the Trash" = "Kept in EnCopy's folder; off the line, they go to the Trash";
+"Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list" = "Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list";
+"Pictures and videos from Finder" = "Pictures and videos from Finder";
+"Shown from where they are, not copied; when they leave the line, the files stay put" = "Shown from where they are, not copied; when they leave the line, the files stay put";
+"All on this Mac" = "All on this Mac";
+"EnCopy never goes online; Check for Updates only opens the releases page" = "EnCopy never goes online; Check for Updates only opens the releases page";

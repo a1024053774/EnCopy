@@ -10,7 +10,7 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 ## Download
 
-The latest version is [0.4.0](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+The latest version is [0.4.1](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. To paste directly with ⏎, turn on EnCopy in System Settings → Privacy & Security → Accessibility.
 
@@ -63,6 +63,7 @@ Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope
 
 - Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes, and one thrown away early is not left in the Trash.
 - Text and files from Finder are kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass the cap (1 GB by default), the oldest shrink first. All of it is on the Keeping page in Settings, where you set the cap and see how much originals take and what the next run will clear.
+- Files copied in Finder are never copied and never linked: EnCopy writes their paths in a short list, the files stay where they are, untouched, and clearing one deletes only the list. Pictures and videos from Finder are shown from where they are. Text is a small file, and copying the same thing again adds nothing. Screenshots, copied images and screen recordings are kept in EnCopy's own folder (`~/Library/Application Support/EnCopy/`). All of it stays on this Mac; EnCopy never goes online. The Keeping page in Settings says how each kind is stored, and its button shows that folder in Finder.
 - Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
 
 ### Motion

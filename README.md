@@ -10,7 +10,7 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 
 ## 下载
 
-最新版是 [0.4.0](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
+最新版是 [0.4.1](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
 
 这一版没有经过 Apple 公证，第一次打开会被 macOS 拦下：到「系统设置 → 隐私与安全性」，点「仍要打开」。想按 ⏎ 直接贴，在「系统设置 → 隐私与安全性 → 辅助功能」里打开 EnCopy。
 
@@ -63,6 +63,7 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 
 - 每个 App 可以设成照常记、一小时后清、不记，「密码」和「钥匙串访问」默认不记。验证码 10 分钟后清，提前扔掉的也不留在废纸篓里。
 - 文字和访达的文件留一年；截图原图 30 天后缩成缩略图，图里的字还能搜；原图合计超过上限（默认 1 GB）时从最旧的先缩。这些都在设置的「保留」一页，原图上限在那里改，还能看到原图占了多少、下次会清掉几件。
+- 访达里复制的文件不复制、不建替身：EnCopy 只在一张清单里记下路径，文件留在原处，不移动也不改，清掉时也只删这张清单。访达里的图片和视频直接显示原文件。文字存成小文件，同样的内容再复制一遍不多存一份。截图、复制的图片和录屏存在 EnCopy 自己的文件夹（`~/Library/Application Support/EnCopy/`）里。这些都只在这台 Mac 上，EnCopy 不联网。设置的「保留」页写着每一类怎么存，按钮能在访达里打开这个文件夹。
 - 过期的先进「最近清掉」，7 天内能整批放回。菜单栏「清理历史…」按类型、时间、App、文字手动清一批。
 
 ### 动画

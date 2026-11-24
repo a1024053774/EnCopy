@@ -210,3 +210,17 @@
 "Past it, the oldest originals shrink first" = "超过了就从最旧的原图先缩";
 "Originals use %@ of %@" = "原图已用 %@，上限 %@";
 "What expires waits 7 days in Recently Cleared, and can be put back" = "清掉的先在「最近清掉」放 7 天，能整批放回";
+
+/* How EnCopy stores things, Keeping page (T-052) */
+"How EnCopy stores things" = "EnCopy 怎么存";
+"Text, links and code" = "文字、链接和代码";
+"Each is a small file in EnCopy's folder; copying the same thing again adds nothing" = "每条存成一个小文件，放在 EnCopy 的文件夹里；同样的内容再复制一遍，不多存一份";
+"Screenshots and copied images" = "截图和复制的图片";
+"The original is kept in EnCopy's folder until it shrinks to a thumbnail" = "原图存在 EnCopy 的文件夹里，到期或超过上限时缩成缩略图";
+"Screen recordings" = "录屏";
+"Kept in EnCopy's folder; off the line, they go to the Trash" = "存在 EnCopy 的文件夹里，掉下绳后进废纸篓";
+"Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list" = "不复制，也不建替身：EnCopy 只在一张清单里记下路径，文件留在原处，不移动也不改。清掉时只删这张清单";
+"Pictures and videos from Finder" = "访达里的图片和视频";
+"Shown from where they are, not copied; when they leave the line, the files stay put" = "直接显示原文件，不复制；离开绳子后，原文件不动";
+"All on this Mac" = "都在这台 Mac 上";
+"EnCopy never goes online; Check for Updates only opens the releases page" = "EnCopy 不联网；「检查更新…」只是打开发布页";

@@ -2342,6 +2342,13 @@ struct CheckFailed: Error { let message: String }
         copyFile(pdfA)
         guard let listA = line.items.last?.url, isFileList(listA) else { throw CheckFailed(message: "The file did not hang as a list") }
         try check(history.contains(listA), "A file copied in Finder goes into the history, as its list")
+        // T-052, as the Keeping page says: no copy of the file, no link to
+        // it, in EnCopy's folder; only the list naming its path.
+        let kept = (FileManager.default.enumerator(at: DataFolder.url, includingPropertiesForKeys: nil)?.allObjects as? [URL]) ?? []
+        let copies = kept.filter { $0.lastPathComponent == pdfA.lastPathComponent || (try? Data(contentsOf: $0)) == Data("%PDF a".utf8)
+            || (try? FileManager.default.destinationOfSymbolicLink(atPath: $0.path)) != nil }
+        try check(copies.isEmpty && listA.path.hasPrefix(DataFolder.url.path + "/") && samePaths(FileList.paths(listA), [pdfA]),
+                  "EnCopy's folder holds no copy of the file and no link to it, only a list naming its path")
         copyFile(pdfB)
         guard let listB = line.items.last?.url, isFileList(listB), listB != listA else { throw CheckFailed(message: "The second file did not hang") }
         let note = try adoptedNote("files-basket-note", "a note to fill the line")
