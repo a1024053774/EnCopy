@@ -1105,7 +1105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             soundOn: { [weak self] in self?.line.soundOn ?? false },
             setSoundOn: { [weak self] in self?.line.soundOn = $0 },
             theme: { [weak self] in self?.line.theme ?? .paper },
-            setTheme: { [weak self] in self?.line.theme = $0 }
+            setTheme: { [weak self] in self?.line.theme = $0 },
+            retention: { [weak self] in self?.line.retentionStatus() ?? Retention.Status() },
+            openCleanup: { [weak self] in
+                guard let self else { return }
+                CleanupPanel.shared.show(line: self.line)
+            }
         ), frontApp: front)
     }
 

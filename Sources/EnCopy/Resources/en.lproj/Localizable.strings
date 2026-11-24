@@ -154,7 +154,6 @@
 "%d cleared by you" = "%d cleared by you";
 "Put Back" = "Put Back";
 "Keeping" = "Keeping";
-"Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires." = "Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires.";
 "Originals may use up to" = "Originals may use up to";
 "Next run: %d expire, %d originals shrink." = "Next run: %d expire, %d originals shrink.";
 
@@ -199,3 +198,17 @@
 "%d files" = "%d files";
 "Moved away" = "Moved away";
 "Show the files" = "Show the files";
+
+/* Keeping page in Settings (T-051) */
+"What EnCopy keeps" = "What EnCopy keeps";
+"Kept a year after its last use" = "Kept a year after its last use";
+"Screenshots and images" = "Screenshots and images";
+"Originals shrink to thumbnails after 30 days; the words in them can still be found" = "Originals shrink to thumbnails after 30 days; the words in them can still be found";
+"Files from Finder" = "Files from Finder";
+"Their paths are kept a year; the files themselves are never moved" = "Their paths are kept a year; the files themselves are never moved";
+"On the line and pinned" = "On the line and pinned";
+"Never expire" = "Never expire";
+"Room for originals" = "Room for originals";
+"Past it, the oldest originals shrink first" = "Past it, the oldest originals shrink first";
+"Originals use %@ of %@" = "Originals use %@ of %@";
+"What expires waits 7 days in Recently Cleared, and can be put back" = "What expires waits 7 days in Recently Cleared, and can be put back";

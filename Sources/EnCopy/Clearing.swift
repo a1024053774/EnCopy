@@ -156,6 +156,26 @@ enum Retention {
         var missing: [URL] = []
     }
 
+    /// What the Settings window's 「保留」 page shows (T-051): how much the
+    /// originals EnCopy keeps take now, the cap, and what the next run would
+    /// clear and shrink.
+    struct Status: Equatable {
+        var originalsBytes: Int64 = 0
+        var cap: Int64 = defaultCap
+        var willExpire = 0
+        var willShrink = 0
+    }
+
+    static func status(history: History, onLine: Set<String>, isKeptImage: (URL) -> Bool,
+                       now: Date = Date(), cap: Int64 = defaultCap) -> Status {
+        let plan = plan(history: history, onLine: onLine, isKeptImage: isKeptImage, now: now, cap: cap)
+        var bytes: Int64 = 0
+        for item in history.kept() where isKeptImage(item.url) && !item.shrunk {
+            bytes += (try? item.url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        }
+        return Status(originalsBytes: bytes, cap: cap, willExpire: plan.expired.count, willShrink: plan.shrunk.count)
+    }
+
     /// What the rules would do now, without doing it (the settings show this).
     static func plan(history: History, onLine: Set<String>, isKeptImage: (URL) -> Bool,
                      now: Date = Date(), cap: Int64 = defaultCap) -> Result {
