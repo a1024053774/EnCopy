@@ -1,43 +1,55 @@
 # 小红书笔记
 
-视频笔记。视频用 `EnCopy-xhs.mp4`（3:4，1080×1440，约 43 秒，中文，带音乐）；封面用 `cover.png`。两个文件都从下面「重新生成」的命令做出来。
+图文笔记，8 张 3:4 图（1080×1440），按顺序上传 `card-1.png` 到 `card-8.png`：
 
-小红书正文里的外链点不开，还可能被限流，所以正文只写「GitHub 搜 EnCopy」，链接放到评论区或个人简介。
+1. 封面：Mac 剪贴板，全挂一根绳上
+2. 为什么自己动手改一个：Tendedero 的 5 处不顺手，EnCopy 怎么改
+3. ⌥C 挑一件，⏎ 直接贴回
+4. 直接打字就能搜历史，截图里的字也算
+5. 挂满了不删，掉进篮子；25 个文件只算一张
+6. 截图右键：隔空投送到手机，或拿在手上
+7. 六套主题
+8. 数据只留在你的 Mac 上，GitHub 搜 EnCopy
 
-## 标题（20 字以内）
+文案初稿由我按项目里的事实写，再用 `agy` 的 Gemini 4 Carbon (Medium) 按小红书的写法润色（标题、口语化、emoji、话题）；润色后逐条对过事实。正文里不放网址：小红书正文的外链点不开，还容易被限流，下载地址放在自己发的第一条评论里。
+
+## 标题
 
 ```text
-Mac 剪贴板终于记得我复制过什么了
+复制过的老找不着？Mac这根绳太顺手📎
 ```
-
-备选：
-
-- `复制过的东西，全挂在一根绳上`
-- `自己做的 Mac 剪贴板小工具，免费开源`
 
 ## 正文
 
 ```text
-Mac 的剪贴板只记得最后一次，复制了新的，旧的就没了。于是我做了 EnCopy 👇
+刚复制的东西转头就找不到！每天都要 ⌥C 翻剪贴板历史找东西，太费劲了。
 
-🧵 复制什么都挂到屏幕顶上的一根绳上：文字、代码、链接、截图、访达里的文件
-⌨️ ⌥C 叫出来，← → 挑一件，⏎ 直接贴回正在打字的地方
-🔍 打字就搜，连截图里的字都搜得到
-🧺 绳挂满了掉进篮子，按 ↓ 展开成列表，按种类筛
-📁 一次复制 25 个文件只算一张，文件只记路径，不多占一点空间
-📤 截图右键就能隔空投送到手机、发信息、发邮件
-🖼 「拿在手上」：把截图浮在你正在做的事前面，照着做设计、抄数字都方便
+前阵子看到开源（MIT）好作品 Tendedero，把截图晾在屏幕顶上的一根绳上，第一眼就喜欢！但真用起来有 5 处不顺手：
+
+🤏 绳子只挂一屏宽，挂满了最老那张直接进废纸篓
+📁 访达里复制的文件挂不上去
+👆 只能鼠标点，没有键盘操作
+📋 点一下只是复制，还得自己再按 ⌘V
+🚧 指针停在绳上时，会临时占掉 ⌫、空格、⌘Z、⌘C、Esc 这些键
+
+原作底子很棒，于是我在它基础上改出了 EnCopy，顺手太多了：
+
+🧺 挂满了不删，掉进篮子，按 ↓ 展开列表按种类筛
+📦 文字、代码、链接、截图、访达文件都能挂；一次复制 25 个文件只算一张，只记路径不多占空间
+⚡ ⌥C 叫出来，← → 挑一件，⏎ 直接贴回正在打字的地方
+🎯 全局只占 ⌥C 一个键，别的键只在绳子打开时才生效
+🔍 打字就搜，截图里的字也搜得到
+📲 截图右键：隔空投送到手机，或「拿在手上」浮在手头的活前面
 🎨 六套主题：纸、像素、拟物、极简、霓虹、手账
 
-不用账号，不联网，密码不记，验证码 10 分钟自己清掉。
-免费开源，macOS 14 以上，Apple 芯片和 Intel 都能用。
+不用账号、不联网、密码不记，验证码 10 分钟自己清掉。免费开源，macOS 14 以上可用。
 
-GitHub 搜 EnCopy 就能下载 ⭐️ 有想要的功能评论区告诉我～
+先收藏防走丢！GitHub 搜 EnCopy，下载地址放评论区啦～大家还想要什么功能？评论区聊聊！
 
-#Mac #Mac软件 #效率工具 #剪贴板 #开源 #macOS #独立开发 #生产力工具
+#Mac #macOS #Mac软件 #Mac必备软件 #效率工具 #剪贴板 #开源 #独立开发 #程序员 #生产力 #打工人 #学生党
 ```
 
-评论区第一条（自己发）：
+## 评论区第一条（自己发）
 
 ```text
 下载地址：github.com/a1024053774/EnCopy
@@ -45,17 +57,12 @@ GitHub 搜 EnCopy 就能下载 ⭐️ 有想要的功能评论区告诉我～
 第一次打开会被系统拦一下（没有付费公证），到「系统设置 → 隐私与安全性」点「仍要打开」就好
 ```
 
-## 重新生成
+## 重新生成图片
 
 ```sh
-cd promo
-INTRO_LANG=zh NODE_PATH=/tmp/encopy-render/node_modules node render.js video /tmp/encopy-render/zh.mp4
-python3 soundtrack.py /tmp/encopy-render/zh.events.json /tmp/encopy-render/zh.wav
-ffmpeg -y -i /tmp/encopy-render/zh.mp4 -i /tmp/encopy-render/zh.wav -c:v copy -c:a aac -b:a 192k -shortest /tmp/encopy-render/zh-sound.mp4
-NODE_PATH=/tmp/encopy-render/node_modules node xhs/shoot.js /tmp/encopy-render   # frame.png and cover.png
-ffmpeg -y -f lavfi -i color=c=0x1f45d8:s=1080x1440:r=30 -i /tmp/encopy-render/zh-sound.mp4 -i /tmp/encopy-render/frame.png \
-  -filter_complex "[1:v]scale=1080:608[v];[0:v][v]overlay=0:416:shortest=1[b];[b][2:v]overlay=0:0" \
-  -map 1:a -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a copy -movflags +faststart xhs/EnCopy-xhs.mp4
+cd promo/xhs
+NODE_PATH=/tmp/encopy-render/node_modules node stills.js img      # 中文片子里的几帧，去掉字幕
+NODE_PATH=/tmp/encopy-render/node_modules node shoot.js .        # card-1.png … card-8.png
 ```
 
-`xhs/still.png` 是封面中间那张图：中文片子 15.6 秒处的一帧，缩到 1080×608。
+图上的字在 `cards.html` 的 `CARDS` 里改。

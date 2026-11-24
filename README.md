@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://a1024053774.github.io/EnCopy/"><img src="promo/readme/zh/hero.png" width="860" alt="EnCopy 六个字母各挂在一张纸上，夹在麻绳上：Mac 上的剪贴板历史，挂在一根绳上"></a></p>
 
-EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶部的一根绳上，按 ⌥C 把绳子叫下来，用键盘挑一件，贴回正在打字的地方。产品页：<https://a1024053774.github.io/EnCopy/>，网页上就能按 ⌥C 试，也有一段 43 秒的演示。演示也有视频版：[EnCopy-intro.mp4](promo/EnCopy-intro.mp4)（43 秒，英文，带声音）；小红书用的竖版和封面在 [promo/xhs/](promo/xhs/)。
+EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶部的一根绳上，按 ⌥C 把绳子叫下来，用键盘挑一件，贴回正在打字的地方。产品页：<https://a1024053774.github.io/EnCopy/>，网页上就能按 ⌥C 试，也有一段 43 秒的演示。演示也有视频版：[EnCopy-intro.mp4](promo/EnCopy-intro.mp4)（43 秒，英文，带声音）；小红书图文和 V2EX 帖子在 [promo/](promo/)。
 
 它基于 Alejandro Buján 的 [Tendedero](https://github.com/alejandrobujan/tendedero) 修改而来（上游 `3c5b575`，2.0.0，MIT 许可）。EnCopy 是独立的项目，有自己的名字和图标，与 Tendedero 及其作者没有关联，也没有得到其认可。
 

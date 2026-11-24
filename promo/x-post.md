@@ -52,4 +52,4 @@ python3 soundtrack.py /tmp/encopy-render/silent.events.json /tmp/encopy-render/t
 ffmpeg -y -i /tmp/encopy-render/silent.mp4 -i /tmp/encopy-render/track.wav -c:v copy -c:a aac -b:a 192k -shortest EnCopy-intro.mp4
 ```
 
-`INTRO_LANG=zh` before `node render.js` renders the Chinese version. The Xiaohongshu cut (3:4, Chinese) and its cover are made from that: see `xhs/post.md`.
+`INTRO_LANG=zh` before `node render.js` renders the Chinese version. The Xiaohongshu picture set is in `xhs/` (see `xhs/post.md`), the V2EX post in `v2ex.md`.
