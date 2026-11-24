@@ -6,22 +6,26 @@ Attach `EnCopy-intro.mp4` (43 s, 1920×1080, 30 fps, with music and sound effect
 
 No links in the post itself: X shows posts with outside links to far fewer people. The links go in your own first reply, right after posting.
 
-272 / 280 by X's count (⌥ and ⏎ count as 2 each).
+278 / 280 by X's count (⌥ and ⏎ count as 2 each).
 
 ```text
-My Mac's clipboard only remembered the last thing I copied, so I built EnCopy.
+I kept losing things I'd copied, so I built a Mac app that hangs every copy on a clothesline.
 
-Everything you copy hangs on a clothesline at the top of your screen. ⌥C, pick one, ⏎ pastes it.
+⌥C brings the line down. Pick one, ⏎ pastes it.
+Search finds text inside screenshots.
+Right-click a screenshot to AirDrop it or float it over your work.
 
-It even searches the text inside screenshots. Free and open source, nothing leaves your Mac.
+Free, open source, offline.
 ```
 
-First reply, 100 / 280:
+First reply, 103 / 280:
 
 ```text
 Download (macOS 14+): https://github.com/a1024053774/EnCopy
-Try ⌥C right in your browser: https://a1024053774.github.io/EnCopy/
+Or try ⌥C right in your browser: https://a1024053774.github.io/EnCopy/
 ```
+
+The first post (2026-11-24, links in the post, a dark text slide as the first frame) reached 8 views.
 
 ## Getting it seen
 
