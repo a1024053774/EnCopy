@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>EnCopy in 40 seconds</title>
+<title>EnCopy in 43 seconds</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+SC:wght@500;700;900&family=Space+Grotesk:wght@500;700&display=swap">
 <style>
-/* EnCopy in 40 seconds: a 1920×1080 stage scaled to the window. render(t) sets every style from the time alone,
+/* EnCopy in 43 seconds: a 1920×1080 stage scaled to the window. render(t) sets every style from the time alone,
    so the same t always draws the same frame: the product page plays it live in an iframe, and promo/render.js
    screenshots it frame by frame into the MP4. Sound is synthesized with Web Audio on a context the page hands in.
    URL: ?lang=zh|en  ?theme=light|dark  ?t=12.5 (one still frame)  ?embed (wait for the page to drive it). */
@@ -116,7 +116,41 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 .theme-dots i { width: 18px; height: 18px; border-radius: 50%; background: rgba(251,247,236,.3); }
 
 /* scene 5b: the basket as a list, a stack of files opened, one pasted (0.4) */
-#stage.solo > *:not(#bl):not(.grain):not(#cap):not(#chip):not(#curtain) { visibility: hidden; }
+#stage.solo > *:not(#bl):not(#ph):not(.grain):not(#cap):not(#chip):not(#curtain) { visibility: hidden; }
+/* scene 5c: a screenshot shared and held */
+#ph { inset: 0; }
+#ph .card { position: absolute; transform-origin: 50% 0; }
+#ph .card .peg { left: 50%; margin-left: -9px; }
+#ph .card .paper { position: relative; transform: none; top: 0; }
+.design { width: 100%; height: 100%; background: #f6efe2; position: relative; overflow: hidden; }
+.design .nav { position: absolute; left: 6%; right: 6%; top: 7%; height: 7%; display: flex; gap: 5%; align-items: center; }
+.design .nav i { height: 40%; flex: 1; border-radius: 99px; background: #d8ccb6; } .design .nav i:first-child { flex: 2; background: #e25b45; }
+.design h5 { position: absolute; left: 6%; top: 24%; width: 60%; margin: 0; font: 800 1em/1.05 var(--f-head); color: #1d1f22; }
+.design .btn { position: absolute; left: 6%; top: 62%; width: 30%; height: 11%; border-radius: 99px; background: #e25b45; }
+.design .blob { position: absolute; right: 6%; top: 22%; width: 30%; height: 56%; border-radius: 22px; background: linear-gradient(160deg, #ffd33d, #f08b3a); }
+.design .row { position: absolute; left: 6%; right: 6%; bottom: 8%; height: 6%; display: flex; gap: 4%; } .design .row i { flex: 1; border-radius: 6px; background: #e6dcc8; }
+.menu { position: absolute; width: 270px; padding: 6px; border-radius: 12px; background: rgba(246,246,248,.97); box-shadow: 0 18px 50px rgba(5,10,40,.45), 0 0 0 1px rgba(0,0,0,.08);
+  font: 500 21px/1 var(--f-body); color: #1d1f22; transform-origin: 0 0; }
+.menu div { padding: 8px 14px; border-radius: 7px; } .menu div.on { background: #2f7cf6; color: #fff; } .menu hr { border: 0; height: 1px; background: rgba(0,0,0,.1); margin: 5px 8px; }
+.cursor { position: absolute; width: 34px; height: 50px; z-index: 9; }
+.sheet { position: absolute; left: 610px; top: 470px; width: 700px; padding: 26px 30px 30px; border-radius: 22px; background: rgba(246,246,248,.98); color: #1d1f22;
+  box-shadow: 0 30px 80px rgba(5,10,40,.5); transform-origin: 50% 0; }
+.sheet .hd { display: flex; align-items: center; gap: 18px; font: 600 24px/1.2 var(--f-body); }
+.sheet .hd .th { width: 74px; height: 56px; border-radius: 6px; overflow: hidden; font-size: 9px; flex: none; }
+.sheet .hd small { display: block; font: 500 17px/1.2 var(--f-body); color: #7b7f86; margin-top: 4px; }
+.sheet .ics { display: flex; gap: 34px; margin-top: 26px; }
+.sheet .ic { width: 96px; text-align: center; font: 500 17px/1.2 var(--f-body); color: #3a3d44; } .sheet .ic b { display: grid; place-items: center; width: 78px; height: 78px; margin: 0 auto 10px; border-radius: 20px; color: #fff; font: 700 34px/1 var(--f-head); }
+.sheet .ic.on b { box-shadow: 0 0 0 5px #fff, 0 0 0 9px var(--pick); }
+.phone { position: absolute; left: 1440px; top: 330px; width: 300px; height: 600px; border-radius: 46px; background: #0d0f14; padding: 14px; box-shadow: 0 30px 80px rgba(5,10,40,.55); }
+.phone .scr { width: 100%; height: 100%; border-radius: 34px; background: linear-gradient(180deg, #e9ecf5, #cfd6ea); position: relative; overflow: hidden; }
+.phone .note { position: absolute; left: 14px; right: 14px; top: 46px; padding: 14px; border-radius: 18px; background: rgba(255,255,255,.9); font: 600 17px/1.3 var(--f-body); color: #1d1f22; }
+.phone .note .im { height: 150px; border-radius: 10px; overflow: hidden; margin-top: 10px; font-size: 18px; }
+.work { position: absolute; left: 250px; top: 280px; width: 1420px; height: 580px; border-radius: 18px; background: #1e2230; overflow: hidden; box-shadow: 0 30px 80px rgba(5,10,40,.45); }
+.work .bar { background: #2a2f40; color: #9aa3c9; }
+.work .code { position: absolute; left: 0; top: 48px; right: 0; bottom: 0; padding: 26px 34px; background: none; font: 600 21px/1.8 var(--f-mono); color: #c8d0ec; white-space: pre; width: auto; height: auto; }
+.work .code::before, .work .code::after { display: none; }
+.held { position: absolute; left: 0; top: 0; padding: 14px; border-radius: 14px; background: #fff; box-shadow: 0 40px 90px rgba(5,10,40,.6), 0 0 0 1px rgba(0,0,0,.06); transform-origin: 50% 50%; }
+.end-url { left: 0;
 #bl { left: 470px; top: 110px; width: 980px; height: 770px; border-radius: 22px; background: #fbf7ec; color: #24262b; overflow: hidden;
   box-shadow: 0 30px 80px rgba(5,10,40,.5); }
 #bl .q { position: absolute; left: 28px; right: 28px; top: 24px; height: 58px; border-radius: 14px; background: #fff; display: flex; align-items: center; gap: 16px; padding: 0 22px;
@@ -193,6 +227,7 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
   <div id="themeDots" class="abs theme-dots"></div>
 
   <div id="bl" class="abs"></div>
+  <div id="ph" class="abs"></div>
   <svg id="rope" class="abs"><g id="ropeG">
     <path id="ropeA" fill="none" stroke="#8a6a3d" stroke-width="10" stroke-linecap="round"/>
     <path id="ropeB" fill="none" stroke="#e6c995" stroke-width="5" stroke-linecap="round" stroke-dasharray="13 10"/>
@@ -212,14 +247,20 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 
 <script>
 (() => {
-const DURATION = 39.9, FPS = 30;
-/* The cut (0.4): the 0.3 film's scenes, trimmed where they only held still, with the basket-list scene put in
-   after the search. Each piece is [new start, old start, length]; old null is the new scene. The old timeline's
-   constants below stay as they were, and render(t) maps the film's time onto them. */
-const SEGS = [[0, 0.4, 7.2], [7.2, 8.0, 11.7], [18.9, 21.5, 4.95], [23.85, null, 5.5], [29.35, 26.6, 4.1], [33.45, 30.7, 3.5], [36.95, 34.2, 2.95]];
-const BL0 = 23.85;
-const toOld = (t) => { for (const [n, o, l] of SEGS) if (t < n + l) return o === null ? null : o + Math.max(0, t - n); const [n, o] = SEGS[SEGS.length - 1]; return o + (t - n); };
-const fromOld = (o) => { for (const [n, oo, l] of SEGS) if (oo !== null && o >= oo - 1e-6 && o < oo + l) return n + (o - oo); return null; };
+const DURATION = 43.35, FPS = 30;
+/* The cut: the 0.3 film's scenes, trimmed where they only held still, opened cold on ⌥C bringing the line
+   down (the first seconds have to show the product), with two scenes of its own: the basket as a list, and a
+   screenshot shared and held. Each piece is [new start, old start, length]; a name instead of an old start is
+   one of the new scenes. The old timeline's constants below stay as they were, and render(t) maps onto them. */
+const SEGS = [[0, 16.0, 1.6], [1.6, 2.35, 2.6], [4.2, 4.95, 2.65], [6.85, 8.0, 11.7], [18.55, 21.5, 4.95],
+  [23.5, "list", 5.5], [29.0, "photo", 6.0], [35.0, 26.6, 2.6], [37.6, 30.7, 2.8], [40.4, 34.2, 2.95]];
+const BL0 = 23.5, PH0 = 29.0;
+const toOld = (t) => {
+  for (const [n, o, l] of SEGS) if (t < n + l) return typeof o === "string" ? { scene: o, u: t - n } : o + Math.max(0, t - n);
+  const [n, o] = SEGS[SEGS.length - 1]; return o + (t - n);
+};
+// Every place an old time shows up in the cut: the cold open plays a stretch that comes back later in full.
+const fromOldAll = (o) => SEGS.filter(([, oo, l]) => typeof oo === "number" && o >= oo - 1e-6 && o < oo + l).map(([n, oo]) => n + (o - oo));
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, p) => a + (b - a) * p;
@@ -261,6 +302,10 @@ const STR = {
       inv: "Invoice #2038 — Acme Design Studio", code: "func paste(_ id: UUID) {", report: "Weekly report %s.pdf" },
     blOpen: "<em>↓</em> opens the whole basket as a list.", blStack: "25 files copied at once? <em>One card.</em> Paste just one.",
     blPath: "Files are never copied: <em>only their path is kept.</em>",
+    ph: { menu: ["Copy", "Quick Look", "Markup", "Share…", "Hold", "Pin", "Save to Desktop"], design: "Spring<br>launch", sheet: "Screenshot 14.31", png: "PNG image",
+      targets: [["AirDrop", "#2f7cf6", "⌁"], ["Messages", "#28c840", "✉"], ["Mail", "#3b82f6", "@"], ["Notes", "#f5c331", "✎"]], phone: "AirDrop", got: "Screenshot 14.31 from your Mac",
+      file: "landing.css" },
+    phShare: "Right-click → <em>Share</em>: AirDrop, Messages, Mail.", phHold: "<em>Hold</em> it over your work. Drag it, zoom it.",
     private: "Private by default.", endPress: 'Press <span class="kc">⌥C</span> and pick.', endSub: "Free &amp; open source · macOS 14+",
   },
   zh: {
@@ -287,6 +332,10 @@ const STR = {
       inv: "发票 #2038：Acme 设计工作室", code: "func paste(_ id: UUID) {", report: "Weekly report %s.pdf" },
     blOpen: "按 <em>↓</em>，整只篮子展开成列表。", blStack: "一次复制 25 个文件？<em>只算一张。</em>挑一个单独贴。",
     blPath: "文件从不复制，<em>只记下路径。</em>",
+    ph: { menu: ["复制", "快速查看", "标记", "共享…", "拿在手上", "固定", "存储到桌面"], design: "春季<br>发布会", sheet: "截图 14.31", png: "PNG 图像",
+      targets: [["隔空投送", "#2f7cf6", "⌁"], ["信息", "#28c840", "✉"], ["邮件", "#3b82f6", "@"], ["备忘录", "#f5c331", "✎"]], phone: "隔空投送", got: "来自你的 Mac：截图 14.31",
+      file: "landing.css" },
+    phShare: "右键 → <em>共享</em>：隔空投送、信息、邮件。", phHold: "<em>拿在手上</em>，浮在手头的活前面，能拖能缩放。",
     private: "默认就不外传。", endPress: '按 <span class="kc">⌥C</span>，挑一件。', endSub: "免费开源 · macOS 14 及以上",
   },
 };
@@ -322,11 +371,17 @@ const S7 = { drop: 30.75 };
 const S8 = { lift: 34.2, drop: 34.6 };
 
 /* The groove runs from the line drawing in to the end card; it goes quiet under the themes. The soundtrack reads it too. */
-const GROOVE = { start: +fromOld(4.9).toFixed(3), end: +fromOld(34.4).toFixed(3), light: [+fromOld(26.6).toFixed(3), +fromOld(30.6).toFixed(3)] };
+const GROOVE = { start: 0, end: +fromOldAll(34.4)[0].toFixed(3), light: [35.0, 37.6] }; // from the cold open; quiet under the themes
 /* The basket-list scene, in its own time u from 0 to 5.5. */
 const BL = { in: 0, down: 0.3, r1: 1.0, r2: 1.3, open: 1.9, s1: 2.5, s2: 2.8, s3: 3.1, enter: 3.5, path: 4.0, out: 5.15 };
 const BL_EVENTS = [[BL.in, "whoosh"], [BL.down, "key"], [BL.r1, "tick"], [BL.r2, "tick"], [BL.open, "key"], [BL.open + 0.06, "key"],
   [BL.s1, "tick"], [BL.s2, "tick"], [BL.s3, "tick"], [BL.enter, "key"], [BL.enter + 0.1, "paste"]];
+/* The photo scene, in its own time u from 0 to 6: a screenshot on the line, right-clicked, shared to a phone by
+   AirDrop, then held in front of the work it belongs to, dragged and zoomed. */
+const PH = { in: 0, aim: 0.4, menu1: 0.8, pickShare: 1.25, sheet: 1.4, aimAir: 1.85, air: 2.15, phone: 2.3, got: 2.7, away: 3.0,
+  menu2: 3.35, pickHold: 3.6, fly: 3.75, drag: 4.5, out: 5.6 };
+const PH_EVENTS = [[PH.in, "whoosh"], [PH.menu1, "tick"], [PH.pickShare, "tick"], [PH.sheet, "drop"], [PH.air, "tick"], [PH.got, "paste"],
+  [PH.menu2, "tick"], [PH.pickHold, "tick"], [PH.fly, "whoosh"], [PH.fly + 0.5, "peg"]];
 /* Sound effects land on these times; the soundtrack reads them too. */
 function buildEvents() {
   const E = [];
@@ -345,8 +400,9 @@ function buildEvents() {
   for (let i = 0; i < 3; i++) ev(S7.drop + i * 0.16 + 0.35, "peg");
   ev(S8.lift, "whoosh"); ev(S8.drop + 0.35, "drop");
   const out = [];
-  for (const e of E) { const n = fromOld(e.t); if (n !== null) out.push({ t: +n.toFixed(3), type: e.type }); }
+  for (const e of E) for (const n of fromOldAll(e.t)) out.push({ t: +n.toFixed(3), type: e.type });
   for (const [u, type] of BL_EVENTS) out.push({ t: +(BL0 + u).toFixed(3), type });
+  for (const [u, type] of PH_EVENTS) out.push({ t: +(PH0 + u).toFixed(3), type });
   return out.sort((a, b) => a.t - b.t);
 }
 
@@ -397,6 +453,20 @@ function build(lang) {
     ${row("blR3", "file", b.q4, b.q4Sub, `<span class="tm">9:43</span>`)}
     ${row("blR4", "image", b.inv, "", `<span class="tm">16:12</span>`)}
     ${row("blR5", "code", b.code, "", `<span class="tm">15:30</span>`)}</div>`;
+  const ph = S.ph, design = (fs) => `<div class="design" style="font-size:${fs}px"><div class="nav"><i></i><i></i><i></i><i></i></div><h5>${ph.design}</h5><div class="btn"></div><div class="blob"></div><div class="row"><i></i><i></i><i></i></div></div>`;
+  const CURSOR = `<svg class="cursor" id="phCur" viewBox="0 0 34 50"><path d="M3 3 L3 40 L12 31 L18 46 L25 43 L19 28 L31 28 Z" fill="#111" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>`;
+  $("ph").innerHTML = `<div class="work" id="phWork"><div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span>${ph.file}</span></div>
+      <div class="code">.hero {\n  display: grid;\n  grid-template-columns: 3fr 2fr;\n  gap: 48px;\n}\n.hero h1 {\n  font: 800 96px/1.05 var(--head);\n}\n.cta {\n  background: #e25b45;\n  border-radius: 999px;</div></div>
+    <svg class="abs" id="phRope" style="left:0;top:0;width:1920px;height:400px;overflow:visible"><path d="${ropePath}" fill="none" stroke="#8a6a3d" stroke-width="10" stroke-linecap="round"/><path d="${ropePath}" fill="none" stroke="#e6c995" stroke-width="5" stroke-linecap="round" stroke-dasharray="13 10"/></svg>
+    <div class="card" id="phC0"><div class="paper receipt"><h4>${S.textH}</h4><p>${S.textP}</p></div><i class="peg"></i></div>
+    <div class="card" id="phC1"><div class="paper shot" style="width:330px;height:262px"><div class="img">${design(30)}</div></div><i class="peg"></i></div>
+    <div class="card" id="phC2"><div class="paper link"><h4>github.com</h4><p>/a1024053774/EnCopy</p></div><i class="peg"></i></div>
+    <div class="held" id="phHeld"><div style="width:100%;height:100%;border-radius:4px;overflow:hidden" id="phHeldIn">${design(66)}</div></div>
+    <div class="menu" id="phMenu">${ph.menu.map((m, i) => `${i === 3 || i === 6 ? "<hr>" : ""}<div data-i="${i}">${m}</div>`).join("")}</div>
+    <div class="sheet" id="phSheet"><div class="hd"><div class="th">${design(9)}</div><div>${ph.sheet}<small>${ph.png}</small></div></div>
+      <div class="ics">${ph.targets.map(([n, c, g], i) => `<div class="ic" data-i="${i}"><b style="background:${c}">${g}</b>${n}</div>`).join("")}</div></div>
+    <div class="phone" id="phPhone"><div class="scr"><div class="note">${ph.phone}<br><span style="font-weight:500;color:#555">${ph.got}</span><div class="im">${design(20)}</div></div></div></div>
+    ${CURSOR}`;
   // the selection width follows the first note line, which changes with the language
   // (measured on a canvas: the window is hidden when this runs)
   const cx = document.createElement("canvas").getContext("2d");
@@ -650,16 +720,65 @@ function renderList(u) {
   const k = u >= BL.enter ? ["⏎", BL.enter, BL.enter + 0.6] : u >= BL.s1 ? ["↓", BL.s1, BL.enter] : u >= BL.open ? ["⌘↓", BL.open, BL.s1] : u >= BL.down ? ["↓", BL.down, BL.open] : null;
   chip(u, k && k[0], k ? k[1] : 0, k ? k[2] : 0);
 }
+function renderPhoto(u) {
+  const T = PH0 + u, inP = eOut(seg(u, 0, 0.35)), outP = seg(u, PH.out, PH.out + 0.4);
+  const ph = $("ph"); ph.style.display = ""; ph.style.opacity = inP * (1 - outP);
+  // the line tucks up once the photo is held, as the app does
+  const tuck = HIDE * eInOut(seg(u, PH.fly, PH.fly + 0.45));
+  $("phRope").style.transform = `translateY(${tuck}px)`;
+  const SH = { x: 960, w: 330, h: 262 };
+  [[600, "phC0"], [960, "phC1"], [1320, "phC2"]].forEach(([x, id], i) => {
+    const c = $(id), w = c.firstElementChild.offsetWidth || 250;
+    c.style.left = `${x - w / 2}px`; c.style.top = `${ropeY(x) - 4 + tuck}px`;
+    c.style.transform = `rotate(${breeze(T, i * 1.3) * 0.8 + swing(u, 0.05, i % 2 ? 5 : -5)}deg)`;
+    if (id === "phC1") c.style.opacity = u < PH.fly ? 1 : 0; // the clip waits empty while it is held
+  });
+  // the menu: Share the first time, Hold the second
+  const menu = $("phMenu"), mTop = ropeY(SH.x) + 120, mLeft = SH.x + 60;
+  const m1 = u >= PH.menu1 && u < PH.pickShare + 0.1, m2 = u >= PH.menu2 && u < PH.pickHold + 0.1;
+  const mOpen = m1 ? eOut(seg(u, PH.menu1, PH.menu1 + 0.12)) : m2 ? eOut(seg(u, PH.menu2, PH.menu2 + 0.12)) : 0;
+  Object.assign(menu.style, { left: `${mLeft}px`, top: `${mTop}px`, opacity: mOpen, transform: `scale(${0.92 + 0.08 * mOpen})`, display: mOpen ? "" : "none" });
+  const hi = m1 && u > PH.pickShare - 0.2 ? 3 : m2 && u > PH.pickHold - 0.15 ? 4 : -1;
+  menu.querySelectorAll("div").forEach((d) => d.classList.toggle("on", +d.dataset.i === hi));
+  const itemY = (i) => mTop + 6 + i * 37 + (i >= 3 ? 11 : 0) + 18;
+  // the share sheet, then the phone it went to
+  const sh = $("phSheet"), sOpen = u >= PH.sheet && u < PH.phone ? eBack(seg(u, PH.sheet, PH.sheet + 0.25)) * (1 - seg(u, PH.phone - 0.12, PH.phone)) : 0;
+  Object.assign(sh.style, { opacity: clamp(sOpen), transform: `scale(${0.9 + 0.1 * sOpen})`, display: sOpen > 0 ? "" : "none" });
+  sh.querySelectorAll(".ic").forEach((d) => d.classList.toggle("on", +d.dataset.i === 0 && u > PH.air - 0.05));
+  const phIn = eOut(seg(u, PH.phone, PH.phone + 0.3)) * (1 - eIn(seg(u, PH.away, PH.away + 0.3)));
+  const pho = $("phPhone"); pho.style.display = phIn > 0 ? "" : "none"; pho.style.transform = `translateX(${(1 - phIn) * 560}px)`;
+  const got = eBack(seg(u, PH.got, PH.got + 0.25));
+  pho.querySelector(".note").style.opacity = clamp(got); pho.querySelector(".note").style.transform = `translateY(${(1 - got) * -30}px)`;
+  // held: out of its clip to the middle of the screen, over the work, then dragged and zoomed
+  const wk = eOut(seg(u, PH.pickHold, PH.pickHold + 0.35)); $("phWork").style.opacity = wk; $("phWork").style.transform = `translateY(${(1 - wk) * 40}px)`;
+  const held = $("phHeld"), f = eOut(seg(u, PH.fly, PH.fly + 0.5));
+  const drag = eInOut(seg(u, PH.drag, PH.drag + 0.6)), zoom = eInOut(seg(u, PH.drag + 0.5, PH.drag + 0.95));
+  const from = { x: SH.x - SH.w / 2, y: ropeY(SH.x), w: SH.w, h: SH.h }, to = { x: 600, y: 290, w: 680, h: 520 };
+  Object.assign(held.style, { display: u >= PH.fly ? "" : "none", left: `${lerp(from.x, to.x, f) + 150 * drag}px`, top: `${lerp(from.y, to.y, f) + 20 * drag}px`,
+    width: `${lerp(from.w, to.w, f)}px`, height: `${lerp(from.h, to.h, f)}px`, transform: `scale(${1 + 0.1 * zoom}) rotate(${(1 - f) * -4}deg)` });
+  // the pointer
+  const path = [[0, 1500, 980], [PH.aim, 1500, 980], [PH.aim + 0.35, SH.x + 50, ropeY(SH.x) + 110], [PH.pickShare - 0.2, SH.x + 50, ropeY(SH.x) + 110],
+    [PH.pickShare - 0.05, mLeft + 90, itemY(3)], [PH.sheet + 0.2, mLeft + 90, itemY(3)], [PH.aimAir + 0.25, 688, 600], [PH.away, 688, 600],
+    [PH.menu2 - 0.05, SH.x + 50, ropeY(SH.x) + 110], [PH.pickHold - 0.15, SH.x + 50, ropeY(SH.x) + 110], [PH.pickHold - 0.02, mLeft + 90, itemY(4)],
+    [PH.drag - 0.05, 940, 330], [PH.drag + 0.6, 1090, 350], [9, 1090, 350]];
+  let cx = path[0][1], cy = path[0][2];
+  for (let i = 0; i < path.length - 1; i++) { const [a, x0, y0] = path[i], [b, x1, y1] = path[i + 1]; if (u >= a && u <= b) { const p = eInOut(seg(u, a, b)); cx = lerp(x0, x1, p); cy = lerp(y0, y1, p); } }
+  const clickAt = [PH.menu1, PH.pickShare, PH.air, PH.menu2, PH.pickHold].find((c) => u >= c && u < c + 0.12);
+  Object.assign($("phCur").style, { left: `${cx}px`, top: `${cy}px`, transform: `scale(${clickAt !== undefined ? 0.85 : 1})` });
+  caption(T, [[PH0 + 0.3, PH0 + PH.away + 0.05, S.phShare], [PH0 + PH.away + 0.1, PH0 + PH.out + 0.35, S.phHold]]);
+  chip(u, null, 0, 0);
+}
 function render(t) {
   const o = toOld(t), stage = $("stage");
-  if (o === null) {
+  if (typeof o === "object") {
     renderOld(26.45); hideAll();
     stage.classList.add("solo");
     Object.assign($("chip").style, { left: "1490px", top: "120px" }); // beside the list, clear of the caption
-    renderList(t - BL0);
+    $("bl").style.display = o.scene === "list" ? "" : "none"; $("ph").style.display = o.scene === "photo" ? "" : "none";
+    if (o.scene === "list") renderList(o.u); else renderPhoto(o.u);
     return;
   }
-  stage.classList.remove("solo"); $("bl").style.display = "none";
+  stage.classList.remove("solo"); $("bl").style.display = "none"; $("ph").style.display = "none";
   Object.assign($("chip").style, { left: "1560px", top: "940px" });
   renderOld(o);
   if (o > 26.42 && o < 26.85) $("rope").style.display = "none"; // the line was still tucking up where the cut lands

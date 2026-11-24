@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<title>EnCopy 小红书竖版框</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700;900&family=JetBrains+Mono:wght@700&display=swap">
+<style>
+/* The 3:4 frame for Xiaohongshu: words above and below, a hole in the middle where the 16:9 film plays.
+   ?cover renders the cover instead: the same words around one still of the film (xhs/still.png). */
+html, body { margin: 0; width: 1080px; height: 1440px; background: transparent; }
+body { position: relative; font-family: "Noto Sans SC", sans-serif; color: #fbf7ec; }
+.bg { position: absolute; inset: 0; background: #1f45d8; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 1024px, 100% 1024px, 100% 416px, 0 416px); }
+body.cover .bg { clip-path: none; }
+.tag { position: absolute; left: 64px; top: 70px; padding: 12px 22px; border-radius: 30px; background: #ffd33d; color: #0f1638; font: 700 30px/1 "Noto Sans SC"; }
+h1 { position: absolute; left: 64px; top: 140px; margin: 0; font: 900 92px/1.12 "Noto Sans SC"; letter-spacing: -.01em; }
+h1 em { font-style: normal; color: #ffd33d; }
+.still { position: absolute; left: 0; top: 416px; width: 1080px; height: 608px; display: none; }
+body.cover .still { display: block; }
+ul { position: absolute; left: 64px; right: 64px; top: 1060px; margin: 0; padding: 0; list-style: none; display: grid; gap: 18px; }
+li { font: 700 38px/1.25 "Noto Sans SC"; }
+li b { display: inline-block; min-width: 64px; padding: 4px 14px; margin-right: 14px; border-radius: 12px; background: #fbf7ec; color: #0f1638; font: 700 32px/1.2 "JetBrains Mono"; text-align: center; }
+.foot { position: absolute; left: 64px; right: 64px; bottom: 54px; font: 500 30px/1 "Noto Sans SC"; color: rgba(251,247,236,.8); }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="tag">Mac 小工具 · 免费开源</div>
+<h1>复制过的东西，<br><em>全挂在一根绳上</em></h1>
+<img class="still" src="still.png" alt="">
+<ul>
+  <li><b>⌥C</b>叫出来，挑一件，⏎ 贴回去</li>
+  <li><b>搜</b>截图里的字也搜得到</li>
+  <li><b>文件</b>只记路径，一张不多存</li>
+</ul>
+<div class="foot">GitHub 搜 EnCopy · 只在你的 Mac 上，不联网</div>
+<script>if (location.search.includes("cover")) document.body.classList.add("cover");</script>
+</body>
+</html>

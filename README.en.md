@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://a1024053774.github.io/EnCopy/"><img src="promo/readme/en/hero.png" width="860" alt="The letters of EnCopy, each on a paper pegged to a twine line: clipboard history for Mac, hung on a line"></a></p>
 
-EnCopy is a clipboard app for macOS: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page and watch a 40-second demo. The demo is also a video: [EnCopy-intro.mp4](promo/EnCopy-intro.mp4) (40 seconds, with sound).
+EnCopy is a clipboard app for macOS: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page and watch a 43-second demo. The demo is also a video: [EnCopy-intro.mp4](promo/EnCopy-intro.mp4) (43 seconds, with sound).
 
 It is a modified version of Alejandro Buján's [Tendedero](https://github.com/alejandrobujan/tendedero) (upstream `3c5b575`, 2.0.0, MIT license). EnCopy is an independent project with its own name and icon. It is not affiliated with or endorsed by Tendedero or its author.
 
@@ -34,6 +34,7 @@ Text, links and code you copy are recorded out of the box, files copied in Finde
 - Pinned items hang left of the knot; the newest hangs first right of the knot, older ones further right.
 - An item you paste or copy out goes back to the head of the line, so the next ⌥C picks it first. Copying the same content again adds no new item and brings the existing one back to the head; the same goes for copying the same picture again, which is not saved twice.
 - When something new is copied, the line peeks out for 1.5 seconds; set it from 0.8 to 4 seconds in Settings → The line, or turn it off.
+- Right-click a picture to Share it (AirDrop, Messages, Mail, through the share panel macOS itself shows), to Hold it (it comes off the line and floats in the middle of the screen without taking the front from your app; drag it, zoom it, hold several at once; Hang back or Escape sends it home), or to Mark it up, Quick Look it or save it to the Desktop. Any card can also be dragged straight into another app or a folder.
 - Everything is still there after you quit and reopen.
 
 ### Type to search, the basket included
