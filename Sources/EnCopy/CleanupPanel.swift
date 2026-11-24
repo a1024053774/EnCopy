@@ -101,6 +101,7 @@ private struct CleanupView: View {
                     Text(L("Text")).tag(Line.Kind?.some(.text))
                     Text(L("Links")).tag(Line.Kind?.some(.link))
                     Text(L("Images")).tag(Line.Kind?.some(.image))
+                    Text(L("Files")).tag(Line.Kind?.some(.file))
                 }
                 Picker(L("Last used"), selection: $model.filter.olderThanDays) {
                     ForEach(ages, id: \.1) { Text($0.1).tag($0.0) }

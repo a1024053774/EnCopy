@@ -192,3 +192,7 @@
 "File" = "文件";
 "All" = "全部";
 "1 item" = "1 件";
+
+/* Files in the basket (T-049) */
+"%d files" = "%d 个文件";
+"Moved away" = "已移走";

@@ -67,6 +67,7 @@ final class SearchIndex {
     nonisolated private static func recognize(_ url: URL) -> String? {
         // A file is found by its name and its folder, not by reading a picture of it.
         let name = url.lastPathComponent + " " + url.deletingLastPathComponent().lastPathComponent
+        if isFileList(url) { return FileList.words(FileList.paths(url)) }
         if isFile(url) { return name }
         // A picture or video copied in Finder is found by its name too, as
         // in Finder; EnCopy's own screenshots only by what they show (review 2, on #4).

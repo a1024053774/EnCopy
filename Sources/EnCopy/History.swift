@@ -358,6 +358,50 @@ final class History {
     }
 
     /// Used: pasted or copied out of EnCopy, or the same words copied again.
+    /// Files copied in Finder, as the list EnCopy keeps of them (T-049): a row
+    /// found by the files' names and folders, and a hash of the paths, so the
+    /// same files copied again find this row.
+    func recordFileList(_ url: URL, app: String? = nil, ttl: TimeInterval? = nil) {
+        guard isFileList(url), let path = relativePath(url), FileManager.default.fileExists(atPath: url.path),
+              let modified = Note.modificationDate(url)?.timeIntervalSince1970 else { return }
+        let files = FileList.paths(url)
+        let hash = Self.fileListHash(files)
+        let used = Date().timeIntervalSince1970
+        attempt("record files") {
+            try transaction {
+                try run("""
+                    INSERT INTO item (path, hash, modified, used) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(path) DO UPDATE SET modified = excluded.modified
+                    """, bind: { stmt in
+                        bind(stmt, 1, path)
+                        bind(stmt, 2, hash)
+                        bind(stmt, 3, modified)
+                        bind(stmt, 4, used)
+                    })
+                let id = try scalar("SELECT id FROM item WHERE path = ?", bind: { bind($0, 1, path) })
+                guard id != 0 else { throw Failure(message: "the files' row is missing after the upsert") }
+                try run("DELETE FROM item_text WHERE rowid = ?", bind: { bind($0, 1, id) })
+                try run("INSERT INTO item_text (rowid, text) VALUES (?, ?)", bind: { stmt in
+                    bind(stmt, 1, id)
+                    bind(stmt, 2, SearchIndex.fold(FileList.words(files)))
+                })
+            }
+        }
+        if let app { setApp(url, app) }
+        if let ttl { setTTL(url, ttl) }
+    }
+
+    /// The same files, in any order: one hash.
+    static func fileListHash(_ files: [URL]) -> Data {
+        Data(SHA256.hash(data: Data(("files:" + files.map(\.standardizedFileURL.path).sorted().joined(separator: "\n")).utf8)))
+    }
+
+    /// The list kept for exactly these files, if they were copied before.
+    func fileList(holding files: [URL]) -> URL? {
+        let paths = (try? strings("SELECT path FROM item WHERE hash = ?", bind: { bind($0, 1, Self.fileListHash(files)) })) ?? []
+        return paths.map(absoluteURL).first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     func use(_ url: URL) {
         guard let path = relativePath(url) else { return }
         attempt("use") {

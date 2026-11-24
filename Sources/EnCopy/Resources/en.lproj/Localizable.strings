@@ -194,3 +194,7 @@
 "File" = "File";
 "All" = "All";
 "1 item" = "1 item";
+
+/* Files in the basket (T-049) */
+"%d files" = "%d files";
+"Moved away" = "Moved away";

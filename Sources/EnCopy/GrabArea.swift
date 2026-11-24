@@ -333,7 +333,12 @@ final class GrabView: NSView, NSDraggingSource {
         startedDrag = true
         endPress()
 
-        let group = dragGroup()
+        // A list of files copied in Finder drags out as the files (T-049),
+        // alone or among others picked together.
+        let picked = dragGroup()
+        let group = (picked.isEmpty ? [(url, dragImage ?? NSImage())] : picked).flatMap { member in
+            isFileList(member.0) ? FileList.present(member.0).map { ($0, member.1) } : [member]
+        }
         let items: [NSDraggingItem]
         if group.count > 1 {
             // A small pile, each with its own picture, set off a little.
@@ -344,7 +349,7 @@ final class GrabView: NSView, NSDraggingSource {
                 return item
             }
         } else {
-            let item = NSDraggingItem(pasteboardWriter: Self.dragWriter(for: url))
+            let item = NSDraggingItem(pasteboardWriter: Self.dragWriter(for: group.first?.0 ?? url))
             item.setDraggingFrame(imageFrame(), contents: dragImage)
             items = [item]
         }
