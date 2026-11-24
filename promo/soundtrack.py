@@ -127,7 +127,9 @@ def main(events_path, out):
 
     bpm = 108
     beat = 60 / bpm
-    start, end = 4.9, 34.4
+    # The groove's start, end and quiet stretch (under the themes) come from intro.html with the events.
+    g = data["groove"]
+    start, end, quiet = g["start"], g["end"], g["light"]
     chords = [  # F, Dm, Bb, C (I vi IV V)
         (["F4", "A4", "C5", "F5"], "F2"),
         (["D4", "F4", "A4", "D5"], "D2"),
@@ -137,10 +139,10 @@ def main(events_path, out):
     arp = [0, 2, 1, 3, 2, 1, 3, 2]
 
     # intro: a soft pad under the clipboard scene
-    n = int(4.9 * SR)
+    n = int(start * SR)
     t = np.arange(n) / SR
     pad = sum(np.sin(2 * np.pi * note(p) * t) for p in ["D3", "A3", "F4"]) / 3
-    music[:n] += 0.18 * pad * np.clip(t / 1.2, 0, 1) * np.clip((4.9 - t) / 0.4, 0, 1)
+    music[:n] += 0.18 * pad * np.clip(t / 1.2, 0, 1) * np.clip((start - t) / 0.4, 0, 1)
 
     i = 0
     tb = start
@@ -149,7 +151,7 @@ def main(events_path, out):
         tones, root = chords[bar]
         step = i % 8
         # themes section gets a lighter feel
-        light = 26.6 <= tb < 30.6
+        light = quiet[0] <= tb < quiet[1]
         add(music, mallet(note(tones[arp[step]]), vel=0.55 if step % 2 == 0 else 0.4), tb, 0.5)
         if step % 2 == 0:
             add(music, shaker(), tb + beat / 4, 0.25)

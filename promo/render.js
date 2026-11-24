@@ -26,7 +26,7 @@ async function open() {
 (async () => {
   const [mode, out, ...rest] = process.argv.slice(2);
   let { browser, page } = await open();
-  const { DURATION, FPS, EVENTS } = await page.evaluate(() => ({ DURATION: window.DURATION, FPS: window.FPS, EVENTS: window.EVENTS }));
+  const { DURATION, FPS, EVENTS, GROOVE } = await page.evaluate(() => ({ DURATION: window.DURATION, FPS: window.FPS, EVENTS: window.EVENTS, GROOVE: window.GROOVE }));
 
   if (mode === "stills") {
     fs.mkdirSync(out, { recursive: true });
@@ -38,7 +38,7 @@ async function open() {
     return;
   }
 
-  fs.writeFileSync(out.replace(/\.mp4$/, ".events.json"), JSON.stringify({ duration: DURATION, events: EVENTS }, null, 1));
+  fs.writeFileSync(out.replace(/\.mp4$/, ".events.json"), JSON.stringify({ duration: DURATION, groove: GROOVE, events: EVENTS }, null, 1));
   const dir = out.replace(/\.mp4$/, "-frames");
   fs.mkdirSync(dir, { recursive: true });
   const n = Math.round(DURATION * FPS);

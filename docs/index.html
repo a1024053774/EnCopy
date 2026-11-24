@@ -517,7 +517,7 @@ footer { padding-block: 40px 52px; }
     <div class="vctl">
       <button type="button" class="vbtn" id="v-play">播放</button>
       <button type="button" class="vbtn" id="v-sound" aria-pressed="false">打开声音</button>
-      <div class="vbar" id="v-bar" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="39" aria-valuenow="0" data-i18n-attr="aria-label:w.seek" aria-label="播放位置"><i id="v-fill"></i></div>
+      <div class="vbar" id="v-bar" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="39.9" aria-valuenow="0" data-i18n-attr="aria-label:w.seek" aria-label="播放位置"><i id="v-fill"></i></div>
       <span class="vtime" id="v-time">0:00 / 0:39</span>
     </div>
   </section>
@@ -1024,7 +1024,7 @@ footer { padding-block: 40px 52px; }
 
   /* ---- The 40-second film: intro.html in an iframe that never takes focus, driven from here ---- */
   const film = $("intro"), vPlay = $("v-play"), vSound = $("v-sound"), vBar = $("v-bar"), vFill = $("v-fill"), vTime = $("v-time");
-  let filmApi = null, filmState = { t: 0, playing: false, sound: false, ended: false, duration: 39 }, audioCtx = null, inView = false, filmFallback = false;
+  let filmApi = null, filmState = { t: 0, playing: false, sound: false, ended: false, duration: 39.9 }, audioCtx = null, inView = false, filmFallback = false;
   let userPaused = reduce; // with reduced motion it waits on the last frame until you press play
   const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const filmTheme = () => d.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
