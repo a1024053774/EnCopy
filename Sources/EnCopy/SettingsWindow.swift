@@ -298,7 +298,8 @@ struct SettingsView: View {
     /// 保留 (T-051): T-004's rules as they run, with the cap to choose.
     private var keeping: some View {
         let status = { _ = model.version; return model.actions.retention() }()
-        let size = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .file) }
+        // Binary units, as the caps are counted: 1 << 30 reads "1 GB", as in the picker.
+        let size = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .memory) }
         return Group {
             SettingsSheet(title: L("What EnCopy keeps")) {
                 SettingsRow(L("Text"), detail: L("Kept a year after its last use")) { EmptyView() }
@@ -381,10 +382,13 @@ private struct SettingsTag: View {
                     ThemeCardBackground(theme: theme, card: .text)
                 }
             }
-            .shadow(color: .black.opacity(selected ? 0.25 : 0.12), radius: 2, y: 1)
+            // On the paper, not the label: a shadow on the whole tab falls
+            // behind every letter too, which the pixel theme's hard one smears.
+            .background { Color.clear.shadow(color: .black.opacity(selected ? 0.25 : 0.12), radius: 2, y: 1) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusEffectDisabled()
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -404,9 +408,12 @@ private struct SettingsSheet<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ThemeCardBackground(theme: theme, card: .text))
-        .shadow(color: theme.shadow(hovering: false).0.opacity(0.7), radius: theme.shadow(hovering: false).1 / 2,
-                x: theme.shadow(hovering: false).2, y: theme.shadow(hovering: false).3 / 2)
+        // The shadow goes on the paper alone: put on the sheet, it falls
+        // behind every line of text as well, and the pixel theme's hard,
+        // offset one doubles each letter.
+        .background(ThemeCardBackground(theme: theme, card: .text)
+            .shadow(color: theme.shadow(hovering: false).0.opacity(0.7), radius: theme.shadow(hovering: false).1 / 2,
+                    x: theme.shadow(hovering: false).2, y: theme.shadow(hovering: false).3 / 2))
     }
 }
 
