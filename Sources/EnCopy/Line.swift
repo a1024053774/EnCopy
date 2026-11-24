@@ -263,6 +263,8 @@ final class Line: ObservableObject {
         basketOpen = false
         basketGroups = []
         basketPick = nil
+        basketExpanded = nil
+        basketSubPick = nil
         recomputeSearch()
     }
 
@@ -346,6 +348,18 @@ final class Line: ObservableObject {
     @discardableResult
     func moveBasketPick(_ step: Int) -> Bool {
         lastKeyAt = Date()
+        // In an open stack the arrows go through its files first (T-050).
+        if let stack = basketExpanded, basketPick == stack, let files = stackFiles(stack) {
+            if let sub = basketSubPick, let i = files.firstIndex(of: sub) {
+                if i + step < 0 { basketSubPick = nil; return true }
+                if i + step < files.count { basketSubPick = files[i + step]; return true }
+                basketSubPick = nil            // past its last file: on to the next row
+            } else if step > 0 {
+                basketSubPick = files.first
+                return true
+            }
+        }
+        basketSubPick = nil
         let rows = basketRows
         guard let i = rows.firstIndex(where: { $0.url == basketPick }) else {
             basketPick = rows.first?.url
@@ -410,7 +424,9 @@ final class Line: ObservableObject {
                                  : (String(words.prefix(120)), url.deletingPathExtension().lastPathComponent)
         case .file:
             guard isFileList(url) else { return (url.lastPathComponent, url.deletingLastPathComponent().path) }
-            let files = FileList.paths(url)
+            // Those still in place, when some were moved; all of them, greyed, when none are.
+            let present = FileList.present(url)
+            let files = present.isEmpty ? FileList.paths(url) : present
             if files.count == 1, let file = files.first { return (file.lastPathComponent, file.deletingLastPathComponent().path) }
             return (String(format: L("%d files"), files.count), files.prefix(3).map(\.lastPathComponent).joined(separator: ", "))
         }
@@ -422,15 +438,54 @@ final class Line: ObservableObject {
         if basketOpen { jumpBasketGroup(step) } else { movePick(step) }
     }
 
+    /// A stack of files opened in the list (T-050), and the file in it the
+    /// arrows rest on, if any.
+    @Published private(set) var basketExpanded: URL?
+    @Published private(set) var basketSubPick: URL?
+
+    /// The files a row stands for, when it is a stack of more than one.
+    func stackFiles(_ url: URL) -> [URL]? {
+        guard isFileList(url) else { return nil }
+        let present = FileList.present(url)
+        return present.count > 1 ? present : nil
+    }
+
+    /// ⌘↓, or the arrow on the row: opens the picked stack, or closes it.
+    func toggleBasketStack() {
+        guard let pick = basketPick, stackFiles(pick) != nil else { return }
+        basketExpanded = basketExpanded == pick ? nil : pick
+        basketSubPick = nil
+    }
+
+    /// A click on a file in an open stack picks it.
+    func pickBasketFile(_ file: URL, in stack: URL) {
+        guard stackFiles(stack)?.contains(file) == true else { return }
+        basketPick = stack
+        basketExpanded = stack
+        basketSubPick = file
+    }
+
+    /// The single file picked inside an open stack, as a list of its own,
+    /// so it pastes and comes back to the line like anything else.
+    private func basketSubPickList() -> URL? {
+        guard let file = basketSubPick else { return nil }
+        if let earlier = history.fileList(holding: [file]) { return earlier }
+        guard let list = FileList.make([file]) else { return nil }
+        history.recordFileList(list)
+        return list
+    }
+
     /// A click on a row picks it.
     func pickBasket(_ url: URL) {
         guard basketRows.contains(where: { $0.url == url }) else { return }
         basketPick = url
+        basketSubPick = nil
     }
 
     /// ← and → in the list: the first row of the group before or after.
     func jumpBasketGroup(_ step: Int) {
         lastKeyAt = Date()
+        basketSubPick = nil
         let groups = basketGroups
         guard let g = groups.firstIndex(where: { $0.rows.contains { $0.url == basketPick } }) else { return }
         let rows = groups[g].rows
@@ -443,7 +498,8 @@ final class Line: ObservableObject {
     /// copying and pinning bring it back onto the line as the newest, as
     /// they do for any basket card.
     func basketPickCard() -> UUID? {
-        guard let url = basketPick, !(isFileList(url) && FileList.present(url).isEmpty) else { return nil }
+        guard let picked = basketPick, !(isFileList(picked) && FileList.present(picked).isEmpty) else { return nil }
+        let url = basketSubPickList() ?? picked
         if let card = basketCards.first(where: { $0.url == url }) { return card.id }
         guard let thumb = makeThumbnail(url) else { return nil }
         let card = Pegged(url: url, thumb: thumb)
@@ -2007,7 +2063,11 @@ private struct FileCard: View {
 
     /// A list of files copied in Finder shows its first file, or how many
     /// there are and the first names (T-049, T-050).
-    private var files: [URL] { isFileList(url) ? FileList.paths(url) : [url] }
+    private var files: [URL] {
+        guard isFileList(url) else { return [url] }
+        let present = FileList.present(url)
+        return present.isEmpty ? FileList.paths(url) : present
+    }
     private var title: String {
         files.count == 1 ? (files.first?.lastPathComponent ?? "") : String(format: L("%d files"), files.count)
     }

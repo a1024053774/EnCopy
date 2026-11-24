@@ -43,10 +43,20 @@ struct BasketListView: View {
                     ForEach(line.basketGroups) { group in
                         Section {
                             ForEach(group.rows) { row in
-                                BasketRowView(row: row, line: line, picked: row.url == line.basketPick)
+                                BasketRowView(row: row, line: line,
+                                              picked: row.url == line.basketPick && line.basketSubPick == nil)
                                     .id(row.url)
                                     .contentShape(Rectangle())
                                     .onTapGesture { line.pickBasket(row.url) }
+                                // An open stack lists its files, each one pastes alone (T-050).
+                                if line.basketExpanded == row.url, let files = line.stackFiles(row.url) {
+                                    ForEach(files, id: \.self) { file in
+                                        StackFileRow(file: file, picked: line.basketSubPick == file, theme: line.theme)
+                                            .id(file)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { line.pickBasketFile(file, in: row.url) }
+                                    }
+                                }
                             }
                         } header: {
                             HStack {
@@ -72,6 +82,10 @@ struct BasketListView: View {
             .onChange(of: line.basketPick) { _, url in
                 guard let url else { return }
                 proxy.scrollTo(url, anchor: nil)
+            }
+            .onChange(of: line.basketSubPick) { _, file in
+                guard let file else { return }
+                proxy.scrollTo(file, anchor: nil)
             }
         }
     }
@@ -108,6 +122,20 @@ private struct BasketRowView: View {
             }
             .truncationMode(.tail)
             Spacer(minLength: 8)
+            // A stack of files opens to show them (T-050): click, or ⌘↓.
+            if let files = line.stackFiles(row.url) {
+                Button(action: { line.pickBasket(row.url); line.toggleBasketStack() }) {
+                    HStack(spacing: 3) {
+                        Text("\(files.count)").font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                        Image(systemName: line.basketExpanded == row.url ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.black.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .help(L("Show the files"))
+            }
             // Files copied in Finder that are no longer where they were.
             if row.moved {
                 Text(L("Moved away"))
@@ -356,5 +384,33 @@ struct BasketKindChips: View {
         }
         .buttonStyle(.plain)
         .opacity(count == 0 && !on ? 0.45 : 1)
+    }
+}
+
+/// One file of an open stack in the basket list (T-050): its icon, name and
+/// folder, set in under the stack's row.
+private struct StackFileRow: View {
+    let file: URL
+    let picked: Bool
+    let theme: Theme
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: file.path)).resizable().frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.lastPathComponent).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text(file.deletingLastPathComponent().path).font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(picked ? 0.12 : 0.04)))
+        .overlay {
+            if picked {
+                RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(theme.picked, lineWidth: 2)
+            }
+        }
+        .padding(.leading, 74).padding(.trailing, 14).padding(.vertical, 2)
     }
 }

@@ -410,6 +410,7 @@ struct CheckFailed: Error { let message: String }
         try checkBasketKeys()
         try checkKindChips()
         try checkFilesInBasket()
+        try checkFileStack()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -2382,6 +2383,56 @@ struct CheckFailed: Error { let message: String }
         try check(FileManager.default.fileExists(atPath: pdfA.path) && !FileManager.default.fileExists(atPath: listA.path)
                   && !history.contains(listA),
                   "Clearing moves only the list into 「最近清掉」; the file stays where it is")
+    }
+
+    /// T-050: one copy of many files in Finder is one stack, all of them, not
+    /// twenty; it pastes back as every file; in the basket it is found by any
+    /// file's name, opens to its files, and one of them pastes alone; the same
+    /// files again add nothing; moved files leave the stack.
+    func checkFileStack() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let docs = root.appendingPathComponent("Stack Docs", isDirectory: true)
+        try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        var files: [URL] = []
+        for i in 1...25 {
+            let f = docs.appendingPathComponent(String(format: "Report %02d.pdf", i)); try Data("%PDF \(i)".utf8).write(to: f); files.append(f)
+        }
+        let history = History(file: root.appendingPathComponent("file-stack.sqlite"))
+        let line = Line(pasteboard: pasteboard, desktop: root, history: history)
+        line.maxItems = 1; line.visibleCount = 8; line.revealed = true
+        var again: [URL] = []
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                       onNew: { _ = line.hang($0, quietly: true) }, onAgain: { again.append($0) })
+        func copyFiles(_ urls: [URL]) { pasteboard.clearContents(); pasteboard.writeObjects(urls.map { $0 as NSURL }); watcher.check() }
+        copyFiles(files)
+        guard let stack = line.items.last?.url, isFileList(stack) else { throw CheckFailed(message: "The files did not hang as a stack") }
+        try check(line.items.count == 1 && samePaths(FileList.paths(stack), files), "Twenty-five files copied at once hang as one stack of all twenty-five")
+        line.copy(line.items[0].id)
+        try check(samePaths(copiedURLs, files), "Copying the stack back gives all twenty-five files, in order")
+        copyFiles(files.reversed())
+        try check(line.items.count == 1 && again == [stack], "The same files copied again, in any order, add nothing: the stack comes back")
+        let note = try adoptedNote("stack-note", "a note to fill the line")
+        _ = line.hang(note, quietly: true)
+        pump(0.7); line.closeGaps()
+        line.openBasket()
+        line.query = "report 17"
+        try check(line.basketRows.map(\.url) == [stack], "In the basket the stack is found by one of its files' names")
+        line.query = ""
+        try check(line.basketSummary(stack).title == String(format: L("%d files"), 25), "Its row says how many files")
+        line.pickBasket(stack)
+        line.toggleBasketStack()
+        try check(line.basketExpanded == stack, "⌘↓ opens the stack")
+        line.verticalArrow(1); line.verticalArrow(1)
+        try check(line.basketSubPick.map { samePaths([$0], [files[1]]) } == true, "↓ walks into it, file by file")
+        var sent = 0
+        let paster = Paster(line: line, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.pastePicked()
+        try check(sent == 1 && samePaths(copiedURLs, [files[1]]), "⏎ on one file of the stack pastes that file alone")
+        line.closeBasket()
+        try FileManager.default.removeItem(at: files[0]); try FileManager.default.removeItem(at: files[2])
+        try check(FileList.present(stack).count == 23 && line.basketSummary(stack).title == String(format: L("%d files"), 23),
+                  "Two files moved away: the stack shows the twenty-three still in place")
     }
 
     func checkDesktopCopies() throws {
