@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://a1024053774.github.io/EnCopy/"><img src="promo/readme/zh/hero.png" width="860" alt="EnCopy 六个字母各挂在一张纸上，夹在麻绳上：Mac 上的剪贴板历史，挂在一根绳上"></a></p>
 
-EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶部的一根绳上，按 ⌥C 把绳子叫下来，用键盘挑一件，贴回正在打字的地方。产品页：<https://a1024053774.github.io/EnCopy/>，网页上就能按 ⌥C 试，也有一段 40 秒的演示。演示也有视频版：[EnCopy-intro.mp4](promo/EnCopy-intro.mp4)（40 秒，英文，带声音）。
+EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶部的一根绳上，按 ⌥C 把绳子叫下来，用键盘挑一件，贴回正在打字的地方。产品页：<https://a1024053774.github.io/EnCopy/>，网页上就能按 ⌥C 试，也有一段 43 秒的演示。演示也有视频版：[EnCopy-intro.mp4](promo/EnCopy-intro.mp4)（43 秒，英文，带声音）；小红书用的竖版和封面在 [promo/xhs/](promo/xhs/)。
 
 它基于 Alejandro Buján 的 [Tendedero](https://github.com/alejandrobujan/tendedero) 修改而来（上游 `3c5b575`，2.0.0，MIT 许可）。EnCopy 是独立的项目，有自己的名字和图标，与 Tendedero 及其作者没有关联，也没有得到其认可。
 
@@ -34,6 +34,7 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 - 收藏的钉在绳结左边，最新的挂在绳结右边第一个，越往右越旧。
 - 贴出去、复制出去的那件回到绳头，下次 ⌥C 第一个选中的就是它。同样的内容再复制一遍不会多出一件，原来那件回到绳头；同一张图片再复制也一样，不多存一份。
 - 复制了新东西，绳子探出来 1.5 秒；在设置 → 晾衣绳里调成 0.8 到 4 秒，或者关掉。
+- 右键一张图片：共享（隔空投送、信息、邮件，用的是 macOS 自带的共享面板），拿在手上（从绳上取下来浮在屏幕中间，不抢前台，能拖、能缩放，能同时拿好几张；「放回绳上」或 Esc 就回去），还有标记、快速查看、存储到桌面。纸也能直接拖进别的 App 或文件夹。
 - 退出重开后都还在。
 
 ### 打字就搜，篮子里的也搜得到

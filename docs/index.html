@@ -344,7 +344,7 @@ html[lang="en"] .hchar { --s: clamp(40px, 5.6vw, 78px); }
 .tag .paper { background: var(--kraft); color: var(--ink); padding: 34px 22px 26px; clip-path: polygon(22px 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%, 0 22px); display: grid; gap: 10px; min-height: 200px; align-content: start; }
 .tag .n { font: 700 40px/1 var(--f-latin); }
 .tag p { font-size: 15.5px; }
-/* Watch: the 40-second film, intro.html playing live in an iframe that never takes focus (⌥C stays the page's).
+/* Watch: the 43-second film, intro.html playing live in an iframe that never takes focus (⌥C stays the page's).
    This page drives it: play, pause, seek, and the sound, which needs an AudioContext made during a click here. */
 .watch { padding-block: 84px 96px; display: grid; gap: 26px; }
 .screen { position: relative; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: #0f1638; cursor: pointer;
@@ -508,17 +508,17 @@ footer { padding-block: 40px 52px; }
 <div class="band deep" id="watch">
   <section class="inner watch" aria-labelledby="watch-title">
     <div class="ride-head">
-      <h2 class="big" id="watch-title" data-i18n="w.h">四十秒看一遍</h2>
+      <h2 class="big" id="watch-title" data-i18n="w.h">四十三秒看一遍</h2>
       <p data-i18n="w.p">复制、叫它来、贴回去、搜索、换主题，都在这一段里。先静音播放，想听就点「打开声音」，音乐和音效都是现场合成的。</p>
     </div>
     <div class="screen" id="screen">
-      <iframe id="intro" src="intro.html?embed&amp;lang=zh" title="EnCopy 四十秒演示" data-i18n-attr="title:w.frame" tabindex="-1" loading="lazy"></iframe>
+      <iframe id="intro" src="intro.html?embed&amp;lang=zh" title="EnCopy 四十三秒演示" data-i18n-attr="title:w.frame" tabindex="-1" loading="lazy"></iframe>
     </div>
     <div class="vctl">
       <button type="button" class="vbtn" id="v-play">播放</button>
       <button type="button" class="vbtn" id="v-sound" aria-pressed="false">打开声音</button>
-      <div class="vbar" id="v-bar" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="39.9" aria-valuenow="0" data-i18n-attr="aria-label:w.seek" aria-label="播放位置"><i id="v-fill"></i></div>
-      <span class="vtime" id="v-time">0:00 / 0:39</span>
+      <div class="vbar" id="v-bar" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="43.35" aria-valuenow="0" data-i18n-attr="aria-label:w.seek" aria-label="播放位置"><i id="v-fill"></i></div>
+      <span class="vtime" id="v-time">0:00 / 0:43</span>
     </div>
   </section>
 </div>
@@ -537,6 +537,7 @@ footer { padding-block: 40px 52px; }
         <article class="sheet-card" style="--tilt:2deg"><i class="peg"></i><div class="swing"><div class="paper tractor"><span class="tagline" data-i18n="r4.t">合并</span><h3 data-i18n="r4.h">不多出一件</h3><p data-i18n="r4.p">同样的内容再复制一遍，原来那件回到绳头，绳上和篮子里都不会多一份。</p></div></div></article>
         <article class="sheet-card" style="--tilt:-2.5deg"><i class="peg"></i><div class="swing"><div class="paper receipt"><span class="tagline" data-i18n="r5.t">不记</span><h3 data-i18n="r5.h">这些不记</h3><p data-i18n="r5.p">在密码框里输入时复制的；密码管理器标为私密或临时的；从 iPhone 等设备通过通用剪贴板过来的。</p></div></div></article>
         <article class="sheet-card" style="--tilt:1deg"><i class="peg"></i><div class="swing"><div class="paper polaroid"><span class="tagline" data-i18n="r6.t">截图</span><h3 data-i18n="r6.h">截图也挂上来</h3><p data-i18n="r6.p">第一次打开时问你要不要交给它。交给它后，截图那一瞬间就挂上绳，不出浮动缩略图，不堆到桌面。</p></div></div></article>
+        <article class="sheet-card" style="--tilt:-1deg"><i class="peg"></i><div class="swing"><div class="paper receipt"><span class="tagline" data-i18n="r14.t">右键</span><h3 data-i18n="r14.h">分享，或者拿在手上</h3><p data-i18n="r14.p">右键一张图片：共享到隔空投送、信息、邮件；或者拿在手上，让它浮在你正在做的事前面，能拖能缩放，照着做设计、抄数字都方便。纸也能直接拖进别的 App。</p></div></div></article>
         <article class="sheet-card" style="--tilt:-1.5deg"><i class="peg"></i><div class="swing"><div class="paper kraft"><span class="tagline" data-i18n="r7.t">两块屏</span><h3 data-i18n="r7.h">跟着指针走</h3><p data-i18n="r7.p">指针在哪块屏，按 ⌥C 绳子就落在哪块屏，搜索框跟着过去。</p></div></div></article>
         <article class="sheet-card" style="--tilt:2deg"><i class="peg"></i><div class="swing"><div class="paper sunny"><span class="tagline" data-i18n="r8.t">存在哪</span><h3 data-i18n="r8.h">只在这台 Mac 上</h3><p data-i18n="r8.p">记下的东西存在 <code>~/Library/Application Support/EnCopy</code>，只有你能读。EnCopy 不联网，菜单栏里随时暂停记录。</p></div></div></article>
         <article class="sheet-card" style="--tilt:-1deg"><i class="peg"></i><div class="swing"><div class="paper receipt"><span class="tagline" data-i18n="r13.t">文件</span><h3 data-i18n="r13.h">文件不多存一份</h3><p data-i18n="r13.p">访达里复制的文件，EnCopy 只在一张清单里记下路径：不复制、不建替身，文件留在原处，清掉时也只删清单。文字存成小文件，同样的内容不存第二份。设置 → 保留里写着每一类怎么存。</p></div></div></article>
@@ -627,7 +628,7 @@ footer { padding-block: 40px 52px; }
   /* ---- Words. The Chinese is the page's own markup; English comes from here. ---- */
   const EN = {
     "nav.watch": "Watch", "nav.rules": "The line",
-    "w.h": "See it in 40 seconds", "w.frame": "EnCopy in 40 seconds",
+    "w.h": "See it in 43 seconds", "w.frame": "EnCopy in 43 seconds",
     "w.p": "Copy, bring it down, paste, search, switch themes, all in one take. It plays muted; turn the sound on to hear the music and effects, synthesized live.",
     "w.seek": "Playback position",
     "nav.themes": "Themes", "nav.install": "Install", "nav.dl": "Download",
@@ -654,6 +655,7 @@ footer { padding-block: 40px 52px; }
     "r4.t": "Merge", "r4.h": "No duplicates", "r4.p": "Copy the same content again and the existing item goes back to the head. Neither the line nor the basket gets a second copy.",
     "r5.t": "Skipped", "r5.h": "Never recorded", "r5.p": "What you copy while typing in a password field; copies a password manager marks private or temporary; copies arriving from your iPhone or other devices through Universal Clipboard.",
     "r6.t": "Screenshots", "r6.h": "Screenshots hang too", "r6.p": "On first launch it asks whether to take over your screenshots. Say yes and a screenshot hangs on the line the moment you take it, with no floating thumbnail and nothing piling up on the Desktop.",
+    "r14.t": "Right-click", "r14.h": "Share it, or hold it", "r14.p": "Right-click a picture to share it by AirDrop, Messages or Mail, or hold it: it floats in front of what you are doing, to drag and zoom while you copy a design or type in numbers. Any card can also be dragged straight into another app.",
     "r7.t": "Two screens", "r7.h": "It follows the pointer", "r7.p": "⌥C drops the line on whichever screen the pointer is on, and the search field goes with it.",
     "r8.t": "Storage", "r8.h": "Only on this Mac", "r8.p": "What it keeps lives in <code>~/Library/Application Support/EnCopy</code>, readable only by you. EnCopy never goes online, and you can pause recording from the menu bar anytime.",
     "r9.t": "Basket", "r9.h": "The whole basket, as one list", "r9.p": "After ⌥C, press ↓ or click “Basket N” at the lower right of the line, and the basket opens as a list: newest first all the way back, grouped by today, yesterday, this week, then by month, one strip of paper per row, tagged text, code, link, image or file. Chips above it, “All / Text / Links / Images / Files” with counts, narrow it by kind. A batch of files copied in Finder is one row, “N files”: ⌘↓ opens it so you can paste just one. ↑↓ go row by row, ← → jump a day, ⏎ pastes, ⌘P pins it back on the line.",
@@ -1022,9 +1024,9 @@ footer { padding-block: 40px 52px; }
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.dataset.show = "false"; }, 2400);
   }
 
-  /* ---- The 40-second film: intro.html in an iframe that never takes focus, driven from here ---- */
+  /* ---- The 43-second film: intro.html in an iframe that never takes focus, driven from here ---- */
   const film = $("intro"), vPlay = $("v-play"), vSound = $("v-sound"), vBar = $("v-bar"), vFill = $("v-fill"), vTime = $("v-time");
-  let filmApi = null, filmState = { t: 0, playing: false, sound: false, ended: false, duration: 39.9 }, audioCtx = null, inView = false, filmFallback = false;
+  let filmApi = null, filmState = { t: 0, playing: false, sound: false, ended: false, duration: 43.35 }, audioCtx = null, inView = false, filmFallback = false;
   let userPaused = reduce; // with reduced motion it waits on the last frame until you press play
   const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const filmTheme = () => d.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
