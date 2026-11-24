@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://a1024053774.github.io/EnCopy/"><img src="promo/readme/en/hero.png" width="860" alt="The letters of EnCopy, each on a paper pegged to a twine line: clipboard history for Mac, hung on a line"></a></p>
 
-EnCopy is a clipboard app for macOS: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page and watch a 40-second demo. The demo is also a video: [EnCopy-intro.mp4](promo/EnCopy-intro.mp4) (39 seconds, with sound).
+EnCopy is a clipboard app for macOS: what you copy and your screenshots hang on a line at the top of the screen; press ⌥C to bring the line down, pick an item with the keyboard, and paste it back where you were typing. Product page: <https://a1024053774.github.io/EnCopy/>. You can try ⌥C right on the page and watch a 40-second demo. The demo is also a video: [EnCopy-intro.mp4](promo/EnCopy-intro.mp4) (40 seconds, with sound).
 
 It is a modified version of Alejandro Buján's [Tendedero](https://github.com/alejandrobujan/tendedero) (upstream `3c5b575`, 2.0.0, MIT license). EnCopy is an independent project with its own name and icon. It is not affiliated with or endorsed by Tendedero or its author.
 

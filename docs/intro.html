@@ -115,6 +115,31 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 .theme-dots { left: 1300px; top: 870px; display: flex; gap: 14px; }
 .theme-dots i { width: 18px; height: 18px; border-radius: 50%; background: rgba(251,247,236,.3); }
 
+/* scene 5b: the basket as a list, a stack of files opened, one pasted (0.4) */
+#stage.solo > *:not(#bl):not(.grain):not(#cap):not(#chip):not(#curtain) { visibility: hidden; }
+#bl { left: 470px; top: 110px; width: 980px; height: 770px; border-radius: 22px; background: #fbf7ec; color: #24262b; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(5,10,40,.5); }
+#bl .q { position: absolute; left: 28px; right: 28px; top: 24px; height: 58px; border-radius: 14px; background: #fff; display: flex; align-items: center; gap: 16px; padding: 0 22px;
+  font: 500 24px/1 var(--f-body); color: #9a9ea8; box-shadow: inset 0 0 0 1px rgba(15,22,56,.08); }
+#bl .q .mag { width: 22px; height: 22px; border-width: 4px; } #bl .q .mag::after { width: 4px; height: 12px; right: -7px; bottom: -9px; }
+#bl .chips { position: absolute; left: 28px; top: 100px; display: flex; gap: 12px; }
+#bl .chips span { padding: 9px 16px; border-radius: 20px; background: #fff; font: 600 19px/1 var(--f-body); color: #4a4e57; box-shadow: inset 0 0 0 1px rgba(15,22,56,.1); }
+#bl .chips span.on { background: #2f7cf6; color: #fff; box-shadow: none; }
+#bl .chips b { font-weight: 700; margin-left: 6px; opacity: .7; }
+#bl .list { position: absolute; left: 28px; right: 28px; top: 160px; bottom: 0; }
+#bl .grp { position: absolute; left: 4px; font: 600 17px/1 var(--f-mono); color: #8a8e95; letter-spacing: .06em; }
+#bl .r { position: absolute; left: 0; right: 0; height: 74px; border-radius: 12px; background: #fff; display: flex; align-items: center; gap: 18px; padding: 0 22px;
+  box-shadow: 0 2px 6px rgba(15,22,56,.08); }
+#bl .r.sub { left: 64px; height: 60px; background: #fffdf7; }
+#bl .r .tag { flex: none; width: 74px; text-align: center; padding: 6px 0; border-radius: 8px; color: #fff; font: 700 16px/1 var(--f-body); }
+#bl .r .ic { flex: none; width: 34px; height: 42px; border-radius: 4px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); position: relative; }
+#bl .r .ic::after { content: "PDF"; position: absolute; left: 3px; right: 3px; bottom: 5px; background: #e0352b; color: #fff; font: 700 9px/13px var(--f-body); text-align: center; border-radius: 2px; }
+#bl .r .tx { flex: 1; min-width: 0; }
+#bl .r .tx b { display: block; font: 600 23px/1.2 var(--f-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#bl .r .tx i { display: table; max-width: 100%; font: 500 16px/1.3 var(--f-mono); font-style: normal; color: #7b7f86; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; border-radius: 4px; }
+#bl .r .n { flex: none; padding: 6px 12px; border-radius: 14px; background: #f1e6d2; font: 700 18px/1 var(--f-mono); color: #6b5232; }
+#bl .r .tm { flex: none; font: 500 17px/1 var(--f-mono); color: #8a8e95; }
+#bl .r .ring { position: absolute; inset: -4px; border: 5px solid var(--pick); border-radius: 15px; opacity: 0; }
 .end-url { left: 0; width: 1920px; top: 900px; text-align: center; }
 .end-url span { display: inline-block; padding: 18px 34px; border-radius: 40px; background: var(--sun); color: #0f1638; font: 700 38px/1 var(--f-mono); }
 .end-sub { left: 0; width: 1920px; top: 800px; text-align: center; font: 600 36px/1 var(--f-body); color: rgba(251,247,236,.85); }
@@ -167,6 +192,7 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
   <div id="themeName" class="abs theme-name"></div>
   <div id="themeDots" class="abs theme-dots"></div>
 
+  <div id="bl" class="abs"></div>
   <svg id="rope" class="abs"><g id="ropeG">
     <path id="ropeA" fill="none" stroke="#8a6a3d" stroke-width="10" stroke-linecap="round"/>
     <path id="ropeB" fill="none" stroke="#e6c995" stroke-width="5" stroke-linecap="round" stroke-dasharray="13 10"/>
@@ -186,7 +212,14 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 
 <script>
 (() => {
-const DURATION = 39, FPS = 30;
+const DURATION = 39.9, FPS = 30;
+/* The cut (0.4): the 0.3 film's scenes, trimmed where they only held still, with the basket-list scene put in
+   after the search. Each piece is [new start, old start, length]; old null is the new scene. The old timeline's
+   constants below stay as they were, and render(t) maps the film's time onto them. */
+const SEGS = [[0, 0.4, 7.2], [7.2, 8.0, 11.7], [18.9, 21.5, 4.95], [23.85, null, 5.5], [29.35, 26.6, 4.1], [33.45, 30.7, 3.5], [36.95, 34.2, 2.95]];
+const BL0 = 23.85;
+const toOld = (t) => { for (const [n, o, l] of SEGS) if (t < n + l) return o === null ? null : o + Math.max(0, t - n); const [n, o] = SEGS[SEGS.length - 1]; return o + (t - n); };
+const fromOld = (o) => { for (const [n, oo, l] of SEGS) if (oo !== null && o >= oo - 1e-6 && o < oo + l) return n + (o - oo); return null; };
 const $ = (id) => document.getElementById(id);
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, p) => a + (b - a) * p;
@@ -218,9 +251,16 @@ const STR = {
     type: "Just start typing to search.", everything: "Searches everything, <em>even text in screenshots.</em>",
     basket: "THE BASKET · EVERYTHING OLDER", sixLooks: "Six looks.",
     themes: ["Paper", "Pixel", "Skeuomorphic", "Minimal", "Neon", "Journal"],
-    big: [["Stays on your Mac", "No account. No network. Your history lives in one local folder."],
+    big: [["Stays on your Mac", "No account. No network. Files are never copied, only their paths."],
           ["Skips passwords", "Passwords and Keychain Access are never recorded."],
           ["Codes expire", "Verification codes are cleared after 10 minutes."]],
+    bl: { q: "Type to narrow the basket", chips: [["All", 12], ["Text", 5], ["Links", 2], ["Images", 2], ["Files", 3]], today: "TODAY", yday: "YESTERDAY",
+      kinds: { text: "Text", link: "Link", file: "File", image: "Image", code: "Code" },
+      stack: "25 files", stackSub: "Weekly report 01.pdf, Weekly report 02.pdf, Weekly report 03.pdf", folder: "~/Documents/Team Reports",
+      q4: "Q4 budget.pdf", q4Sub: "~/Documents/Finance", note: "Meeting moved to Thursday 3 pm", link: "github.com/a1024053774/EnCopy",
+      inv: "Invoice #2038 — Acme Design Studio", code: "func paste(_ id: UUID) {", report: "Weekly report %s.pdf" },
+    blOpen: "<em>↓</em> opens the whole basket as a list.", blStack: "25 files copied at once? <em>One card.</em> Paste just one.",
+    blPath: "Files are never copied: <em>only their path is kept.</em>",
     private: "Private by default.", endPress: 'Press <span class="kc">⌥C</span> and pick.', endSub: "Free &amp; open source · macOS 14+",
   },
   zh: {
@@ -237,9 +277,16 @@ const STR = {
     type: "直接打字就是搜索。", everything: "全部历史都搜，<em>连截图里的字也搜得到。</em>",
     basket: "篮子 · 更早的都在这里", sixLooks: "六套主题。",
     themes: ["纸", "像素", "拟物", "极简", "霓虹", "手账"],
-    big: [["只在这台 Mac 上", "不用账号，不联网。记下的东西存在本机的一个文件夹里。"],
+    big: [["只在这台 Mac 上", "不用账号，不联网。文件从不复制，只记路径。"],
           ["不记密码", "「密码」和「钥匙串访问」里复制的，默认不记。"],
           ["验证码会过期", "复制的验证码 10 分钟后清掉。"]],
+    bl: { q: "打字筛选篮子", chips: [["全部", 12], ["文字", 5], ["链接", 2], ["图片", 2], ["文件", 3]], today: "今天", yday: "昨天",
+      kinds: { text: "文字", link: "链接", file: "文件", image: "图片", code: "代码" },
+      stack: "25 个文件", stackSub: "Weekly report 01.pdf, Weekly report 02.pdf, Weekly report 03.pdf", folder: "~/文稿/Team Reports",
+      q4: "四季度预算.pdf", q4Sub: "~/文稿/财务", note: "周会改到周四下午三点", link: "github.com/a1024053774/EnCopy",
+      inv: "发票 #2038：Acme 设计工作室", code: "func paste(_ id: UUID) {", report: "Weekly report %s.pdf" },
+    blOpen: "按 <em>↓</em>，整只篮子展开成列表。", blStack: "一次复制 25 个文件？<em>只算一张。</em>挑一个单独贴。",
+    blPath: "文件从不复制，<em>只记下路径。</em>",
     private: "默认就不外传。", endPress: '按 <span class="kc">⌥C</span>，挑一件。', endSub: "免费开源 · macOS 14 及以上",
   },
 };
@@ -274,6 +321,12 @@ const TH_T0 = 26.9, TH_STEP = 0.62;
 const S7 = { drop: 30.75 };
 const S8 = { lift: 34.2, drop: 34.6 };
 
+/* The groove runs from the line drawing in to the end card; it goes quiet under the themes. The soundtrack reads it too. */
+const GROOVE = { start: +fromOld(4.9).toFixed(3), end: +fromOld(34.4).toFixed(3), light: [+fromOld(26.6).toFixed(3), +fromOld(30.6).toFixed(3)] };
+/* The basket-list scene, in its own time u from 0 to 5.5. */
+const BL = { in: 0, down: 0.3, r1: 1.0, r2: 1.3, open: 1.9, s1: 2.5, s2: 2.8, s3: 3.1, enter: 3.5, path: 4.0, out: 5.15 };
+const BL_EVENTS = [[BL.in, "whoosh"], [BL.down, "key"], [BL.r1, "tick"], [BL.r2, "tick"], [BL.open, "key"], [BL.open + 0.06, "key"],
+  [BL.s1, "tick"], [BL.s2, "tick"], [BL.s3, "tick"], [BL.enter, "key"], [BL.enter + 0.1, "paste"]];
 /* Sound effects land on these times; the soundtrack reads them too. */
 function buildEvents() {
   const E = [];
@@ -291,7 +344,10 @@ function buildEvents() {
   for (let i = 1; i < 6; i++) ev(TH_T0 + i * TH_STEP, "tick");
   for (let i = 0; i < 3; i++) ev(S7.drop + i * 0.16 + 0.35, "peg");
   ev(S8.lift, "whoosh"); ev(S8.drop + 0.35, "drop");
-  return E.sort((a, b) => a.t - b.t);
+  const out = [];
+  for (const e of E) { const n = fromOld(e.t); if (n !== null) out.push({ t: +n.toFixed(3), type: e.type }); }
+  for (const [u, type] of BL_EVENTS) out.push({ t: +(BL0 + u).toFixed(3), type });
+  return out.sort((a, b) => a.t - b.t);
 }
 
 /* ---------- cards ---------- */
@@ -330,6 +386,17 @@ function build(lang) {
   BIG = S.big.map(([h, p], i) => makeCard(`<h4>${h}</h4><p>${p}</p>`, "big", `background:${["var(--cream)", "var(--sun)", "var(--kraft)"][i]}`));
   END = makeCard(`<div style="display:flex;align-items:center;gap:40px">${ICON_SVG}<div><div style="font:700 150px/1 var(--f-head);letter-spacing:-.04em;color:#0f1638">EnCopy</div><div style="font:600 40px/1.2 var(--f-body);color:#4a5170;margin-top:14px">${S.endPress.replace('class="kc"', 'style="font-family:var(--f-mono);background:#0f1638;color:#ffd33d;padding:2px 14px;border-radius:10px"')}</div></div></div>`,
     "big", "width:1000px;height:330px;padding:70px 80px;background:var(--cream);border-radius:16px");
+  const b = S.bl, KC = { text: "#e08a1e", link: "#2f7cf6", file: "#a0743c", image: "#8b5cf6", code: "#2e6b2a" };
+  const row = (id, kind, title, sub, extra, cls = "") => `<div class="r ${cls}" id="${id}">${kind ? `<span class="tag" style="background:${KC[kind]}">${b.kinds[kind]}</span>` : ""}${kind === "file" || cls === "sub" ? '<span class="ic"></span>' : ""}<div class="tx"><b>${title}</b>${sub ? `<i>${sub}</i>` : ""}</div>${extra}<div class="ring"></div></div>`;
+  $("bl").innerHTML = `<div class="q"><div class="mag"></div>${b.q}</div><div class="chips">${b.chips.map(([k, n], i) => `<span class="${i ? "" : "on"}">${k}<b>${n}</b></span>`).join("")}</div>
+    <div class="list"><div class="grp" id="blG1">${b.today}</div><div class="grp" id="blG2">${b.yday}</div>
+    ${row("blR0", "text", b.note, "", `<span class="tm">9:41</span>`)}
+    ${row("blR1", "link", b.link, "", `<span class="tm">9:42</span>`)}
+    ${row("blR2", "file", b.stack, b.stackSub, `<span class="n">25 ▾</span><span class="tm">9:44</span>`)}
+    ${["01", "02", "03", "04"].map((n, i) => row(`blS${i}`, null, b.report.replace("%s", n), b.folder, "", "sub")).join("")}
+    ${row("blR3", "file", b.q4, b.q4Sub, `<span class="tm">9:43</span>`)}
+    ${row("blR4", "image", b.inv, "", `<span class="tm">16:12</span>`)}
+    ${row("blR5", "code", b.code, "", `<span class="tm">15:30</span>`)}</div>`;
   // the selection width follows the first note line, which changes with the language
   // (measured on a canvas: the window is hidden when this runs)
   const cx = document.createElement("canvas").getContext("2d");
@@ -363,7 +430,7 @@ function chip(t, label, a, b) {
   c.style.opacity = 1 - seg(t, b - 0.15, b); c.style.transform = `scale(${0.6 + 0.4 * eBack(seg(t, a, a + 0.18))})`;
 }
 
-function render(t) {
+function renderOld(t) {
   hideAll();
   // scene 1: the clipboard slot, overwritten
   const s1on = t < 5;
@@ -559,21 +626,60 @@ function render(t) {
   show($("endUrl"), t > 35.7 ? e2 : 0); $("endUrl").style.transform = `translateY(${(1 - e2) * 20}px)`;
 }
 
+function renderList(u) {
+  const inP = eOut(seg(u, BL.in, BL.in + 0.4)), outP = seg(u, BL.out, BL.out + 0.35);
+  const bl = $("bl"); bl.style.display = ""; bl.style.opacity = inP * (1 - outP); bl.style.transform = `translateY(${(1 - inP) * 70}px)`;
+  const e = eInOut(seg(u, BL.open, BL.open + 0.35)), SUB = 70, R = 86;
+  // rows: today (note, link, the stack, Q4) then yesterday; the stack's files open under it
+  const y = { blR0: 30, blR1: 30 + R, blR2: 30 + 2 * R, blR3: 30 + 3 * R + 4 * SUB * e, blR4: 30 + 4 * R + 44 + 4 * SUB * e, blR5: 30 + 5 * R + 44 + 4 * SUB * e };
+  for (const [id, v] of Object.entries(y)) { const r = $(id), k = +id.slice(-1), a = 0.15 + k * 0.05, p = eOut(seg(u, a, a + 0.3)); r.style.top = `${v + (1 - p) * 30}px`; r.style.opacity = p; }
+  $("blG1").style.top = "0px"; $("blG2").style.top = `${y.blR4 - 34}px`;
+  for (let i = 0; i < 4; i++) { const r = $(`blS${i}`), p = eOut(seg(u, BL.open + i * 0.05, BL.open + 0.3 + i * 0.05)); r.style.top = `${30 + 3 * R + i * SUB - (1 - p) * 40}px`; r.style.opacity = p; r.style.display = p > 0 ? "" : "none"; }
+  $("blR2").querySelector(".n").textContent = u >= BL.open ? "25 ▴" : "25 ▾";
+  const pick = u < BL.r1 ? "blR0" : u < BL.r2 ? "blR1" : u < BL.s1 ? "blR2" : u < BL.s2 ? "blS0" : u < BL.s3 ? "blS1" : "blS2";
+  bl.querySelectorAll(".r").forEach((r) => {
+    const on = r.id === pick && u > BL.down + 0.1;
+    const flash = r.id === "blS2" && u > BL.enter ? 0.35 * Math.exp(-6 * (u - BL.enter)) : 0;
+    r.querySelector(".ring").style.opacity = on ? 1 : 0;
+    r.style.background = flash ? `rgba(255,211,61,${flash + 0.2})` : "";
+  });
+  // the paths light up: that is all EnCopy keeps of a file
+  const mark = u > BL.path ? eOut(seg(u, BL.path, BL.path + 0.3)) : 0;
+  bl.querySelectorAll(".sub i, #blR3 i").forEach((i) => { i.style.background = mark ? `rgba(255,211,61,${0.85 * mark})` : ""; i.style.color = mark ? "#3b2a14" : ""; });
+  caption(BL0 + u, [[BL0 + BL.down, BL0 + BL.open, S.blOpen], [BL0 + BL.open + 0.05, BL0 + BL.path, S.blStack], [BL0 + BL.path + 0.05, BL0 + BL.out + 0.3, S.blPath]]);
+  const k = u >= BL.enter ? ["⏎", BL.enter, BL.enter + 0.6] : u >= BL.s1 ? ["↓", BL.s1, BL.enter] : u >= BL.open ? ["⌘↓", BL.open, BL.s1] : u >= BL.down ? ["↓", BL.down, BL.open] : null;
+  chip(u, k && k[0], k ? k[1] : 0, k ? k[2] : 0);
+}
+function render(t) {
+  const o = toOld(t), stage = $("stage");
+  if (o === null) {
+    renderOld(26.45); hideAll();
+    stage.classList.add("solo");
+    Object.assign($("chip").style, { left: "1490px", top: "120px" }); // beside the list, clear of the caption
+    renderList(t - BL0);
+    return;
+  }
+  stage.classList.remove("solo"); $("bl").style.display = "none";
+  Object.assign($("chip").style, { left: "1560px", top: "940px" });
+  renderOld(o);
+  if (o > 26.42 && o < 26.85) $("rope").style.display = "none"; // the line was still tucking up where the cut lands
+}
+
 /* ---------- sound: a mallet groove and effects, synthesized on a context the host hands in ---------- */
 function soundPlan() {
   const N = [];
-  const bpm = 108, half = 60 / bpm / 2, start = 4.9, end = 34.4;
+  const { start, end, light } = GROOVE, bpm = 108, half = 60 / bpm / 2;
   const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
   // F, Dm, Bb, C: chord tones (MIDI) and a bass root
   const chords = [[[65, 69, 72, 77], 41], [[62, 65, 69, 74], 38], [[58, 62, 65, 70], 34], [[60, 64, 67, 72], 36]];
   const arp = [0, 2, 1, 3, 2, 1, 3, 2];
   for (let i = 0, t = start; t < end - 0.01; i++, t = start + i * half) {
-    const [tones, root] = chords[Math.floor(i / 8) % 4], step = i % 8, light = t >= 26.6 && t < 30.6;
+    const [tones, root] = chords[Math.floor(i / 8) % 4], step = i % 8, quiet = t >= light[0] && t < light[1];
     N.push({ t, v: "mallet", f: hz(tones[arp[step]]), g: step % 2 ? 0.4 : 0.55 });
     N.push({ t, v: "shaker", g: 0.18 });
     if (step % 2 === 0) N.push({ t: t + half / 2, v: "shaker", g: 0.25 });
-    if (step === 0 || step === 4) { if (!light) N.push({ t, v: "kick" }); N.push({ t, v: "bass", f: hz(root) }); }
-    if ((step === 2 || step === 6) && !light) N.push({ t, v: "clap" });
+    if (step === 0 || step === 4) { if (!quiet) N.push({ t, v: "kick" }); N.push({ t, v: "bass", f: hz(root) }); }
+    if ((step === 2 || step === 6) && !quiet) N.push({ t, v: "clap" });
   }
   [53, 57, 60, 65, 69].forEach((m) => N.push({ t: end, v: "mallet", f: hz(m), g: 0.8, long: true }));
   N.push({ t: end, v: "bass", f: hz(41), long: true });
@@ -621,8 +727,8 @@ function Sound(ctx) {
       this.stop();
       bus = ctx.createGain(); bus.connect(out);
       base = ctx.currentTime + 0.06 - from;
-      if (from < 4.9) { // the soft pad under the first scene
-        const t0 = base + Math.max(from, 0), t1 = base + 4.9;
+      if (from < GROOVE.start) { // the soft pad under the first scene
+        const t0 = base + Math.max(from, 0), t1 = base + GROOVE.start;
         [146.83, 220, 349.23].forEach((f) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f;
           g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.06, Math.min(t1, base + 1.2)); g.gain.setValueAtTime(0.06, t1 - 0.4); g.gain.linearRampToValueAtTime(0, t1);
           o.connect(g); g.connect(bus); o.start(t0); o.stop(t1); });
@@ -688,7 +794,7 @@ function fit() { $("stage").style.transform = `scale(${innerWidth / 1920})`; }
 addEventListener("resize", fit);
 
 const qs = new URLSearchParams(location.search);
-window.render = render; window.DURATION = DURATION; window.FPS = FPS;
+window.render = render; window.DURATION = DURATION; window.FPS = FPS; window.GROOVE = GROOVE;
 window.Intro = { play, pause, seek, setSound, setLang, setTheme, state: () => ({ ...state }), on: (fn) => listeners.push(fn), soundPlan, Sound };
 setTheme(qs.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
 build(qs.get("lang") === "zh" ? "zh" : "en");
