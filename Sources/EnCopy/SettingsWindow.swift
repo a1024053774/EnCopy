@@ -327,6 +327,24 @@ struct SettingsView: View {
                     Button(L("Clean Up History…")) { model.actions.openCleanup() }
                 }
             }
+            // T-052: how each kind is stored, as the code does it, so nobody
+            // has to wonder whether a copied file takes room twice.
+            SettingsSheet(title: L("How EnCopy stores things")) {
+                SettingsRow(L("Text, links and code"),
+                            detail: L("Each is a small file in EnCopy's folder; copying the same thing again adds nothing")) { EmptyView() }
+                SettingsRow(L("Screenshots and copied images"),
+                            detail: L("The original is kept in EnCopy's folder until it shrinks to a thumbnail")) { EmptyView() }
+                SettingsRow(L("Screen recordings"),
+                            detail: L("Kept in EnCopy's folder; off the line, they go to the Trash")) { EmptyView() }
+                SettingsRow(L("Files from Finder"),
+                            detail: L("Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list")) { EmptyView() }
+                SettingsRow(L("Pictures and videos from Finder"),
+                            detail: L("Shown from where they are, not copied; when they leave the line, the files stay put")) { EmptyView() }
+                SettingsRow(L("All on this Mac"),
+                            detail: L("EnCopy never goes online; Check for Updates only opens the releases page"), last: true) {
+                    Button(L("Show in Finder")) { NSWorkspace.shared.open(DataFolder.url) }
+                }
+            }
         }
     }
 
