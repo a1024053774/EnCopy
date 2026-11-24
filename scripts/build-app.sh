@@ -15,7 +15,7 @@ case "${EDITION:-dev}" in
   *) echo "EDITION must be dev or daily" >&2; exit 1 ;;
 esac
 APP="build/$NAME.app"
-VERSION="0.3.2"
+VERSION="0.4.0"
 
 # Builds one architecture and prints the binary's path.
 build_arch() {

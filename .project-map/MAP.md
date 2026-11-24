@@ -12,7 +12,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
-- 已发布 0.1.0（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.1.0)，2026-11-22）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
+- 最新发布 0.4.0（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.0)，2026-11-23）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
 ## Decisions so far
@@ -37,7 +37,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 ## Not yet specified
 
 - 真机：两次走查见各工单。没确认的：⏎ 飞向指针、菜单栏小夹子晃一下（截帧没抓到）、拖出、真的清掉一批再放回。
-- 下一版发布：`main` 上的这批功能还没进发布出去的 DMG；产品页 `docs/index.html` 跟发布走，现在写的是 0.1.0，发下一版时按 `main` 改。
+- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.0。
 
 ## Out of scope
 
@@ -54,5 +54,5 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 3805623 |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 3babdea |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 3babdea |
-| [AGENTS.md](../AGENTS.md) | `scripts/**` | 22a2bb8 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 22a2bb8 |
+| [AGENTS.md](../AGENTS.md) | `scripts/**` | 6ad161a |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 6ad161a |
