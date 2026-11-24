@@ -108,6 +108,14 @@ private struct BasketRowView: View {
             }
             .truncationMode(.tail)
             Spacer(minLength: 8)
+            // Files copied in Finder that are no longer where they were.
+            if row.moved {
+                Text(L("Moved away"))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.secondary.opacity(0.2)))
+                    .foregroundStyle(.secondary)
+            }
             // The app and the time in columns of their own, so rows line up.
             Group {
                 if Line.showsSourceApp, let app = row.app, let icon = AppIcons.icon(for: app) {
@@ -137,7 +145,8 @@ private struct BasketRowView: View {
         // same as the pick's edge (seen on the walk).
         .shadow(color: .black.opacity(picked ? 0.35 : 0), radius: picked ? 6 : 0, y: picked ? 3 : 0)
         .offset(x: picked ? 5 : 0)
-        .opacity(picked ? 1 : 0.86)
+        .opacity(row.moved ? (picked ? 0.6 : 0.45) : picked ? 1 : 0.86)
+        .saturation(row.moved ? 0 : 1)
         .animation(Motion.reduced ? nil : .spring(response: 0.22, dampingFraction: 0.8), value: picked)
         .padding(.horizontal, 10).padding(.vertical, 3)
     }
@@ -154,7 +163,8 @@ private struct BasketRowView: View {
                     .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
             }
         case .file:
-            Image(nsImage: NSWorkspace.shared.icon(forFile: row.url.path)).resizable().frame(width: 28, height: 28)
+            Image(nsImage: NSWorkspace.shared.icon(forFile: (realFiles(row.url).first ?? row.url).path))
+                .resizable().frame(width: 28, height: 28)
         default:
             EmptyView()
         }
@@ -314,7 +324,7 @@ struct KindTag: View {
 
 /// The chips above the basket list (T-047): all, text, links, images, each
 /// with how many the list holds. A click narrows the list, as Tab does.
-/// Files copied in Finder never fall into the basket, so they have none.
+/// Files copied in Finder come into the basket as their lists (T-049).
 struct BasketKindChips: View {
     @ObservedObject var line: Line
 
@@ -324,6 +334,7 @@ struct BasketKindChips: View {
             chip(.text, L("Text"), line.basketKindCounts[.text] ?? 0, color: KindTag.color(.text))
             chip(.link, L("Links"), line.basketKindCounts[.link] ?? 0, color: KindTag.color(.link))
             chip(.image, L("Images"), line.basketKindCounts[.image] ?? 0, color: KindTag.color(.image))
+            chip(.file, L("Files"), line.basketKindCounts[.file] ?? 0, color: KindTag.color(.file))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)

@@ -196,6 +196,9 @@ final class Line: ObservableObject {
         let used: Date
         let app: String?
         var id: URL { url }
+        /// Files copied in Finder that have all been moved or deleted since:
+        /// the row stays, greyed, and nothing pastes (T-049).
+        var moved: Bool { isFileList(url) && FileList.present(url).isEmpty }
     }
 
     /// One day, or one month further back, of the basket list.
@@ -406,7 +409,10 @@ final class Line: ObservableObject {
             return words.isEmpty ? (url.deletingPathExtension().lastPathComponent, nil)
                                  : (String(words.prefix(120)), url.deletingPathExtension().lastPathComponent)
         case .file:
-            return (url.lastPathComponent, url.deletingLastPathComponent().path)
+            guard isFileList(url) else { return (url.lastPathComponent, url.deletingLastPathComponent().path) }
+            let files = FileList.paths(url)
+            if files.count == 1, let file = files.first { return (file.lastPathComponent, file.deletingLastPathComponent().path) }
+            return (String(format: L("%d files"), files.count), files.prefix(3).map(\.lastPathComponent).joined(separator: ", "))
         }
     }
 
@@ -437,7 +443,7 @@ final class Line: ObservableObject {
     /// copying and pinning bring it back onto the line as the newest, as
     /// they do for any basket card.
     func basketPickCard() -> UUID? {
-        guard let url = basketPick else { return nil }
+        guard let url = basketPick, !(isFileList(url) && FileList.present(url).isEmpty) else { return nil }
         if let card = basketCards.first(where: { $0.url == url }) { return card.id }
         guard let thumb = makeThumbnail(url) else { return nil }
         let card = Pegged(url: url, thumb: thumb)
@@ -447,9 +453,12 @@ final class Line: ObservableObject {
 
     /// Quick Look on the list's pick, the rest of the list a key press away.
     func quickLookBasketPick() {
-        let urls = basketRows.map(\.url)
-        guard let index = urls.firstIndex(of: basketPick ?? urls.first ?? URL(fileURLWithPath: "/")) else { return }
-        QuickLook.shared.show(urls, at: index)
+        let rows = basketRows
+        guard let index = rows.firstIndex(where: { $0.url == basketPick }) else { return }
+        // A list of files shows the files themselves (T-049).
+        let shown = { (url: URL) in realFiles(url).isEmpty ? [url] : realFiles(url) }
+        let before = rows.prefix(index).reduce(0) { $0 + shown($1.url).count }
+        QuickLook.shared.show(rows.flatMap { shown($0.url) }, at: before)
     }
 
     /// What kind of thing an item is, for Tab while summoned.
@@ -491,7 +500,7 @@ final class Line: ObservableObject {
     private func matches(_ item: Pegged) -> Bool {
         // EnCopy's own pictures too: the history keeps the words read from the
         // original, which a shrunk thumbnail can no longer show (review #8).
-        if isText(item.url) || isKeptImage(item.url) {
+        if isText(item.url) || isKeptImage(item.url) || isFileList(item.url) {
             return searchFound.onLine.contains(item.url) || search.matches(item.url, SearchIndex.words(query))
         }
         return search.matches(item.url, SearchIndex.words(query))
@@ -504,8 +513,8 @@ final class Line: ObservableObject {
     private func recomputeSearch() {
         if basketOpen { loadBasket(); return }
         let words = SearchIndex.words(query)
-        // Everything on the line that the history also keeps: notes and EnCopy's own pictures.
-        let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url)) }.map(\.url)
+        // Everything on the line that the history also keeps: notes, EnCopy's own pictures, lists of files.
+        let liveText = items.filter { !$0.falling && (isText($0.url) || isKeptImage($0.url) || isFileList($0.url)) }.map(\.url)
         var lineMatches = 0
         if words.isEmpty {
             basketCards = []
@@ -572,6 +581,7 @@ final class Line: ObservableObject {
     /// picture's row, whose words come when they have been read.
     private func keep(_ url: URL) {
         if isText(url) { history.record(url) } else if isKeptImage(url) { history.recordImage(url, text: nil) }
+        else if isFileList(url), !history.contains(url) { history.recordFileList(url) }
     }
 
     /// Photos hung by hand. They hang together at the left end of the line,
@@ -1032,7 +1042,9 @@ final class Line: ObservableObject {
             onClipboard = (urls, pb.changeCount)
             return
         }
-        let entries = urls.map { url in
+        // Files copied in Finder go back as the files themselves, all of them,
+        // as Finder would put them (T-049, T-050).
+        let entries = urls.flatMap { isFileList($0) ? FileList.present($0) : [$0] }.map { url in
             let entry = NSPasteboardItem()
             // A note is its words, styled and plain, marked as EnCopy's
             // own so it is not hung again.
@@ -1089,7 +1101,7 @@ final class Line: ObservableObject {
         if isText(item.url), let link = Note.cached(item.url)?.link {
             NSWorkspace.shared.open(link)
         } else {
-            NSWorkspace.shared.open(item.url)
+            realFiles(item.url).forEach { NSWorkspace.shared.open($0) }
         }
     }
 
@@ -1097,7 +1109,7 @@ final class Line: ObservableObject {
     /// included, so one turned into a link by an edit can be edited back.
     func openFile(_ id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        NSWorkspace.shared.open(item.url)
+        realFiles(item.url).forEach { NSWorkspace.shared.open($0) }
     }
 
     func openLink(_ id: UUID) {
@@ -1460,7 +1472,9 @@ final class Line: ObservableObject {
         let all = shown, pinned = layoutPinned
         let onScreen = (Array(all.prefix(pinned)) + all.dropFirst(pinned).reversed()).filter { !$0.falling }
         guard let index = onScreen.firstIndex(where: { $0.id == id }) else { return nil }
-        return (onScreen.map(\.url), index)
+        // A list of files shows the files themselves, the first one first.
+        let before = onScreen.prefix(index).reduce(0) { $0 + max(1, realFiles($1.url).count) }
+        return (onScreen.flatMap { realFiles($0.url).isEmpty ? [$0.url] : realFiles($0.url) }, before)
     }
 
     func quickLook(_ id: UUID) {
@@ -1488,11 +1502,11 @@ final class Line: ObservableObject {
 
     func reveal(_ id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([item.url])
+        NSWorkspace.shared.activateFileViewerSelecting(realFiles(item.url))
     }
 
     func reveal(_ ids: [UUID]) {
-        let urls = actionItems(ids).map(\.url)
+        let urls = actionItems(ids).flatMap { realFiles($0.url) }
         guard !urls.isEmpty else { return }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
@@ -1809,6 +1823,68 @@ func isRecording(_ url: URL) -> Bool {
     ["mov", "mp4"].contains(url.pathExtension.lowercased())
 }
 
+/// What was copied in Finder (T-049, T-050): a small list of the files'
+/// paths, one per line, kept in EnCopy's own folder. The list is what hangs,
+/// goes into the history and the basket, expires and goes to 「最近清掉」;
+/// the files it names are never moved, copied or deleted.
+enum FileList {
+    static let ext = "files"
+    static var folder: URL { DataFolder.url.appendingPathComponent("Files", isDirectory: true) }
+
+    /// Every path the list names, in the order they were copied.
+    static func paths(_ url: URL) -> [URL] {
+        let key = url.path as NSString
+        if let known = cache.object(forKey: key) as? [URL] { return known }
+        let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .split(whereSeparator: \.isNewline).map { URL(fileURLWithPath: String($0)) }
+        cache.setObject(lines as NSArray, forKey: key)
+        return lines
+    }
+
+    /// Those still where they were.
+    static func present(_ url: URL) -> [URL] {
+        paths(url).filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The text the list is found by: each file's name and its folder's.
+    static func words(_ urls: [URL]) -> String {
+        urls.map { $0.lastPathComponent + " " + $0.deletingLastPathComponent().lastPathComponent }.joined(separator: "\n")
+    }
+
+    /// Writes a new list for these files and returns it.
+    static func make(_ urls: [URL], now: Date = Date()) -> URL? {
+        let fm = FileManager.default
+        let stamp = Int(now.timeIntervalSince1970 * 1000)
+        var url = folder.appendingPathComponent("Copied \(stamp).\(ext)")
+        var n = 2
+        while fm.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("Copied \(stamp) \(n).\(ext)"); n += 1
+        }
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            try urls.map(\.standardizedFileURL.path).joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            log.error("Could not keep the copied files: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        return url
+    }
+
+    private static let cache = NSCache<NSString, NSArray>()
+}
+
+/// A list of files copied in Finder, in EnCopy's own folder.
+func isFileList(_ url: URL) -> Bool {
+    url.pathExtension == FileList.ext
+        && url.standardizedFileURL.path.hasPrefix(FileList.folder.standardizedFileURL.path + "/")
+}
+
+/// The files an item stands for: a list's files still in place, or the item.
+func realFiles(_ url: URL) -> [URL] {
+    isFileList(url) ? FileList.present(url) : [url]
+}
+
 /// A file copied in Finder, hung where it is (T-029): anything that is not a
 /// note, a recording or a picture, folders included.
 func isFile(_ url: URL) -> Bool {
@@ -1929,19 +2005,30 @@ private struct FileCard: View {
     let url: URL
     let width: CGFloat
 
+    /// A list of files copied in Finder shows its first file, or how many
+    /// there are and the first names (T-049, T-050).
+    private var files: [URL] { isFileList(url) ? FileList.paths(url) : [url] }
+    private var title: String {
+        files.count == 1 ? (files.first?.lastPathComponent ?? "") : String(format: L("%d files"), files.count)
+    }
+    private var footer: String {
+        files.count == 1 ? (files.first?.deletingLastPathComponent().lastPathComponent ?? "")
+                         : files.prefix(3).map(\.lastPathComponent).joined(separator: ", ")
+    }
+
     var body: some View {
         let u = width / 136
         VStack(alignment: .leading, spacing: 4 * u) {
             HStack(alignment: .top, spacing: 6 * u) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                Image(nsImage: NSWorkspace.shared.icon(forFile: (files.first { FileManager.default.fileExists(atPath: $0.path) } ?? url).path))
                     .resizable().frame(width: 30 * u, height: 30 * u)
-                Text(url.lastPathComponent)
+                Text(title)
                     .font(.system(size: 10.5 * u, weight: .semibold))
                     .foregroundStyle(Color(red: 0.25, green: 0.2, blue: 0.1))
                     .lineLimit(3)
             }
             Spacer(minLength: 0)
-            Text(url.deletingLastPathComponent().lastPathComponent)
+            Text(footer)
                 .font(.system(size: 8 * u, design: .monospaced))
                 .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.19))
                 .lineLimit(1)

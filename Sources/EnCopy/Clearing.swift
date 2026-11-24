@@ -98,6 +98,8 @@ final class Clearing {
             }
             if isText(to) {
                 history.record(to, app: entry.app)
+            } else if isFileList(to) {
+                history.recordFileList(to, app: entry.app)
             } else {
                 history.recordImage(to, text: entry.words ?? "")
                 history.setApp(to, entry.app)
@@ -164,6 +166,10 @@ enum Retention {
             let image = isKeptImage(item.url)
             if isText(item.url) || (image && item.shrunk) {
                 if age > textDays * 86400 { result.expired.append(item.url) }
+            } else if isFileList(item.url) {
+                // Files copied in Finder (T-049): a year, like text; their
+                // list goes as soon as every file it names is gone.
+                if age > textDays * 86400 || FileList.present(item.url).isEmpty { result.expired.append(item.url) }
             } else if image {
                 guard FileManager.default.fileExists(atPath: item.url.path) else {
                     result.missing.append(item.url)

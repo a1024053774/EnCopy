@@ -131,6 +131,12 @@ struct CheckFailed: Error { let message: String }
         pump()
     }
 
+    /// The same files, whichever way the temporary folder is spelled
+    /// (/var or /private/var).
+    func samePaths(_ a: [URL], _ b: [URL]) -> Bool {
+        a.map { $0.resolvingSymlinksInPath().path } == b.map { $0.resolvingSymlinksInPath().path }
+    }
+
     var copiedURLs: [URL] {
         (pasteboard.pasteboardItems ?? []).compactMap { $0.string(forType: .fileURL).flatMap(URL.init(string:)) }
     }
@@ -403,6 +409,7 @@ struct CheckFailed: Error { let message: String }
         try checkBasketPapers()
         try checkBasketKeys()
         try checkKindChips()
+        try checkFilesInBasket()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -889,8 +896,9 @@ struct CheckFailed: Error { let message: String }
                   "Eleven minutes later the code is gone from the line, the disk and the index")
     }
 
-    /// T-029: a file copied in Finder hangs where it is, as a folder card,
-    /// found by its name; taking it down leaves the file alone.
+    /// T-029, and T-049 since: a file copied in Finder hangs as the list
+    /// EnCopy keeps of it, a folder card found by the file's name; copying it
+    /// back gives the file; taking it down leaves the file alone.
     func checkFiles() throws {
         UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
         UserDefaults.standard.set(true, forKey: "soundOff")
@@ -905,18 +913,20 @@ struct CheckFailed: Error { let message: String }
         let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
                                        onNew: { _ = files.hang($0, quietly: true) }, onAgain: { _ in })
         pasteboard.clearContents(); pasteboard.writeObjects([pdf as NSURL]); watcher.check()
-        try check(files.items.map(\.url) == [pdf] && files.kind(of: pdf) == .file, "A file copied in Finder hangs as itself, a file")
+        guard let list = files.items.first?.url else { throw CheckFailed(message: "Nothing hung for the copied file") }
+        try check(files.items.count == 1 && isFileList(list) && samePaths(FileList.paths(list), [pdf]) && files.kind(of: list) == .file,
+                  "A file copied in Finder hangs as the list EnCopy keeps of it, a file")
         try check(files.items.first.map { $0.thumb.size.width > 0 } == true, "It has a card to show")
-        files.search.update([pdf])
-        for _ in 0..<40 where !files.search.matches(pdf, SearchIndex.words("budget")) { pump(0.05) }
-        try check(files.search.matches(pdf, SearchIndex.words("budget 2027")) && files.search.matches(pdf, SearchIndex.words("quarterly")),
+        files.search.update([list])
+        for _ in 0..<40 where !files.search.matches(list, SearchIndex.words("budget")) { pump(0.05) }
+        try check(files.search.matches(list, SearchIndex.words("budget 2027")) && files.search.matches(list, SearchIndex.words("quarterly")),
                   "It is found by its name and by its folder")
         files.copy(files.items[0].id)
-        try check(copiedURLs == [pdf] && pasteboard.data(forType: .png) == nil, "Copying it back gives the file, with no picture")
+        try check(samePaths(copiedURLs, [pdf]) && pasteboard.data(forType: .png) == nil, "Copying it back gives the file, with no picture")
         watcher.check()
         try check(files.items.count == 1, "Copying it from the line does not hang it a second time")
         files.kindFilter = .file
-        try check(files.shown.map(\.url) == [pdf], "Tab's file filter shows it")
+        try check(files.shown.map(\.url) == [list], "Tab's file filter shows it")
         files.kindFilter = nil
         files.discard(files.items[0].id)
         try check(FileManager.default.fileExists(atPath: pdf.path), "Taking it down leaves the file where it is")
@@ -1502,7 +1512,7 @@ struct CheckFailed: Error { let message: String }
         for url in [picture, movie, doc] {
             pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check()
         }
-        try check(hung == [doc], "With Images off, pictures and videos copied in Finder are not kept; a PDF is")
+        try check(hung.count == 1 && samePaths(FileList.paths(hung[0]), [doc]), "With Images off, pictures and videos copied in Finder are not kept; a PDF is")
         ClipboardWatcher.imagesEnabled = true
         pasteboard.clearContents(); pasteboard.writeObjects([picture as NSURL]); watcher.check()
         try check(hung.last == picture, "With Images on, a picture copied in Finder hangs")
@@ -1535,11 +1545,13 @@ struct CheckFailed: Error { let message: String }
         pasteboard.clearContents(); pasteboard.writeObjects([doc as NSURL]); watcher.check()
         pasteboard.clearContents(); pasteboard.setString("something else", forType: .string); watcher.check()
         pasteboard.clearContents(); pasteboard.writeObjects([doc as NSURL]); watcher.check()
-        try check(new.filter { $0 == doc }.count == 1 && again == [doc], "A file copied again while on the line comes back to the head")
+        let docList = new.first(where: isFileList)
+        try check(new.filter(isFileList).count == 1 && docList.map { samePaths(FileList.paths($0), [doc]) } == true && again == [docList!],
+                  "A file copied again comes back to the head, as the list kept for it, not a second one")
 
         let image = NSImage(contentsOf: try png("Recopy picture.png", red: 0.3))!
         pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
-        guard let picture = new.last, picture != doc else { throw CheckFailed(message: "The picture did not hang") }
+        guard let picture = new.last, !isFileList(picture) else { throw CheckFailed(message: "The picture did not hang") }
         onLine.remove(picture)                                   // it fell into the basket
         pasteboard.clearContents(); pasteboard.setString("more words", forType: .string); watcher.check()
         pasteboard.clearContents(); pasteboard.writeObjects([image]); watcher.check(); pump(1.5)
@@ -1988,7 +2000,8 @@ struct CheckFailed: Error { let message: String }
     }
 
     /// Review 2, on #3: a file copied in an app set to clear in an hour
-    /// leaves the line after the hour; the file itself stays.
+    /// leaves the line after the hour; the file itself stays. Since T-049 the
+    /// card is the list EnCopy keeps of the file.
     func checkCopiedFilesClearToo() throws {
         let files = line()
         let rules = ClipboardWatcher.appRules
@@ -2001,7 +2014,10 @@ struct CheckFailed: Error { let message: String }
         watcher.fileLife = { files.setCardLife($0, $1) }
         let doc = root.appendingPathComponent("Hourly contract.pdf"); try Data("%PDF".utf8).write(to: doc)
         let other = root.appendingPathComponent("Everyday notes.pdf"); try Data("%PDF".utf8).write(to: other)
-        func onLine(_ url: URL) -> Bool { files.items.contains { $0.url == url && !$0.falling } }
+        // Since T-049 a copied file hangs as the list EnCopy keeps of it.
+        func onLine(_ url: URL) -> Bool {
+            files.items.contains { !$0.falling && isFileList($0.url) && samePaths(FileList.paths($0.url), [url]) }
+        }
         func copy(_ url: URL) { pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check() }
         copy(doc)
         front = "com.apple.finder"
@@ -2302,6 +2318,70 @@ struct CheckFailed: Error { let message: String }
                   && chips.tag(of: try png("Chip file.pdf")) == .file,
                   "Each thing is tagged with what it is: text, code, link, image, video, file")
         chips.closeBasket()
+    }
+
+    /// T-049: a file copied in Finder goes into the history and the basket
+    /// as its list; it is found there by name and folder and pastes back as
+    /// the file; when the file is gone the row says so and nothing pastes;
+    /// it expires like text; clearing it never moves the file itself.
+    func checkFilesInBasket() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let docs = root.appendingPathComponent("Basket Docs", isDirectory: true)
+        try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        let pdfA = docs.appendingPathComponent("Budget plan 2027.pdf"); try Data("%PDF a".utf8).write(to: pdfA)
+        let pdfB = docs.appendingPathComponent("Old contract.pdf"); try Data("%PDF b".utf8).write(to: pdfB)
+        let history = History(file: root.appendingPathComponent("files-basket.sqlite"))
+        let line = Line(pasteboard: pasteboard, desktop: root, history: history)
+        line.maxItems = 1; line.visibleCount = 8; line.revealed = true
+        let watcher = ClipboardWatcher(pasteboard: pasteboard, history: history, isSecureInput: { false }, frontApp: { "com.apple.finder" },
+                                       onNew: { _ = line.hang($0, quietly: true) }, onAgain: { _ in })
+        func copyFile(_ url: URL) { pasteboard.clearContents(); pasteboard.writeObjects([url as NSURL]); watcher.check() }
+        copyFile(pdfA)
+        guard let listA = line.items.last?.url, isFileList(listA) else { throw CheckFailed(message: "The file did not hang as a list") }
+        try check(history.contains(listA), "A file copied in Finder goes into the history, as its list")
+        copyFile(pdfB)
+        guard let listB = line.items.last?.url, isFileList(listB), listB != listA else { throw CheckFailed(message: "The second file did not hang") }
+        let note = try adoptedNote("files-basket-note", "a note to fill the line")
+        _ = line.hang(note, quietly: true)
+        pump(0.7); line.closeGaps()
+        line.openBasket()
+        try check(Set(line.basketRows.map(\.url)) == [listA, listB] && line.basketKindCounts[.file] == 2,
+                  "Off a full line, both lists are in the basket, counted under files")
+        line.query = "budget"
+        try check(line.basketRows.map(\.url) == [listA], "Found in the basket by the file's name")
+        line.query = "basket docs"
+        try check(Set(line.basketRows.map(\.url)) == [listA, listB], "And by its folder's name")
+        line.query = ""
+        line.pickBasket(listA)
+        var sent = 0
+        let paster = Paster(line: line, isTrusted: { true }, send: { _ in sent += 1 })
+        paster.pastePicked()
+        try check(sent == 1 && samePaths(copiedURLs, [pdfA]) && line.items.filter { !$0.falling }.last?.url == listA,
+                  "⏎ pastes the file itself, and its list comes back to the head of the line")
+        line.closeBasket()
+        let note2 = try adoptedNote("files-basket-note-2", "another note to fill the line")
+        _ = line.hang(note2, quietly: true)
+        pump(0.7); line.closeGaps()
+        try FileManager.default.removeItem(at: pdfB)                 // moved away in Finder
+        line.openBasket()
+        let rowB = line.basketRows.first { $0.url == listB }
+        try check(rowB?.moved == true && line.basketRows.first { $0.url == listA }?.moved == false,
+                  "A file moved away leaves its row, marked moved; one still in place is not")
+        pasteboard.clearContents(); pasteboard.setString("untouched", forType: .string)
+        line.pickBasket(listB)
+        paster.pastePicked()
+        try check(sent == 1 && pasteboard.string(forType: .string) == "untouched", "A moved file's row pastes nothing")
+        line.closeBasket()
+        let plan = Retention.plan(history: history, onLine: line.onLinePaths, isKeptImage: line.isKeptImage)
+        try check(plan.expired.contains(listB) && !plan.expired.contains(listA), "Retention clears a list whose files are gone, not one in place")
+        let later = Retention.plan(history: history, onLine: [], isKeptImage: line.isKeptImage, now: Date().addingTimeInterval(400 * 86400))
+        try check(later.expired.contains(listA), "A file unused for over a year expires, like text")
+        let clearing = Clearing(folder: root.appendingPathComponent("files-cleared", isDirectory: true))
+        clearing.clear([listA, listB], reason: "manual", history: history)
+        try check(FileManager.default.fileExists(atPath: pdfA.path) && !FileManager.default.fileExists(atPath: listA.path)
+                  && !history.contains(listA),
+                  "Clearing moves only the list into 「最近清掉」; the file stays where it is")
     }
 
     func checkDesktopCopies() throws {
