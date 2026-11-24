@@ -27,6 +27,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onTab: (Int) -> Void = { _ in }
     /// ↓ and ↑: open the basket list, and move along it (T-044).
     var onVertical: (Int) -> Void = { _ in }
+    /// ⌘↓ in the list: open or close the picked stack of files (T-050).
+    var onToggleStack: () -> Void = {}
 
     var isShown: Bool { panel.isVisible }
     /// The line's frame it was last shown under, to grow from when the
@@ -95,6 +97,7 @@ final class SearchBar: NSObject, NSWindowDelegate {
         if mods == .shift, event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) { onPlainReturn(); return true }
         if mods == .command, key == "p" { onPin(); return true }
         if mods == .command, key == "y" { onQuickLook(); return true }
+        if mods == .command, event.keyCode == UInt16(kVK_DownArrow), line.basketOpen { onToggleStack(); return true }
         if event.keyCode == UInt16(kVK_Tab), mods.isEmpty || mods == .shift { onTab(mods == .shift ? -1 : 1); return true }
         guard mods.isEmpty else { return false }
         switch event.keyCode {

@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         searchBar.onMove = { [weak self] in self?.line.horizontalArrow($0) }
         searchBar.onReturn = { [weak self] in self?.paster.pastePicked() }
         searchBar.onVertical = { [weak self] in self?.line.verticalArrow($0) }
+        searchBar.onToggleStack = { [weak self] in self?.line.toggleBasketStack() }
         line.onOpenBasket = { [weak self] in self?.openBasketFromHandle() }
         searchBar.onTab = { [weak self] step in
             guard let self else { return }
