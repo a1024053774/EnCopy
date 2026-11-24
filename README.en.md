@@ -28,7 +28,7 @@ Press ⌥C and the line drops onto the screen the pointer is on and takes the ke
 
 <img src="docs/shots/line-en.png" width="860" alt="The line after ⌥C: receipts, tractor-feed paper and tags, each with a kind tag on its top edge (Text, Code, Link), and Basket 6 ↓ at the lower right">
 
-Text, links and code you copy are recorded out of the box, files copied in Finder hang on the line too, and you can pause recording from the menu bar. Screenshots can be handed to it as well: a screenshot hangs on the line the moment you take it.
+Text, links and code you copy are recorded out of the box, files copied in Finder hang on the line too (only their paths are kept, nothing is copied; several copied at once are one "N files" card that pastes them all back) and go into the basket when they fall, and you can pause recording from the menu bar. Screenshots can be handed to it as well: a screenshot hangs on the line the moment you take it.
 
 - Text is a receipt, code is tractor-feed paper, a link is a kraft tag, an image is a polaroid, a file is a folder; wooden pegs and two-strand twine. Each card carries a kind tag in its top corner (text, code, link, image, video, file), one colour per kind. Each card shows the icon of the app it was copied from, which you can turn off.
 - Pinned items hang left of the knot; the newest hangs first right of the knot, older ones further right.
@@ -62,7 +62,7 @@ Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope
 <img src="promo/readme/en/privacy.png" width="720" alt="Three papers on the line: Stays on your Mac; Skips passwords; Codes expire">
 
 - Each app can be set to record as usual, clear after an hour, or not record; Passwords and Keychain Access are not recorded by default. Verification codes clear after 10 minutes, and one thrown away early is not left in the Trash.
-- Text is kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass 1 GB in total, the oldest shrink first.
+- Text and files from Finder are kept for a year; screenshot originals shrink to thumbnails after 30 days and their text stays searchable; when originals pass the cap (1 GB by default), the oldest shrink first. All of it is on the Keeping page in Settings, where you set the cap and see how much originals take and what the next run will clear.
 - Expired items go to Recently Cleared first and can be put back in batches for 7 days. Clean Up History… in the menu bar clears a batch by kind, age, app or text.
 
 ### Motion

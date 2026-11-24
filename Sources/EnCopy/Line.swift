@@ -923,6 +923,11 @@ final class Line: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "originalsCap") }
     }
 
+    /// For the Settings window's 「保留」 page (T-051), with the cap as set.
+    func retentionStatus(now: Date = Date()) -> Retention.Status {
+        Retention.status(history: history, onLine: onLinePaths, isKeptImage: isKeptImage, now: now, cap: Line.originalsCap)
+    }
+
     /// T-004's daily rules: see `Retention`. Nothing on the line is touched.
     @discardableResult
     func runRetention(now: Date = Date(), cap: Int64 = Line.originalsCap, inBackground: Bool = false) -> Retention.Result {

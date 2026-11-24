@@ -48,8 +48,6 @@ final class CleanupModel: ObservableObject {
     private var pendingRefresh: DispatchWorkItem?
     @Published private(set) var candidates: [URL] = []
     @Published private(set) var batches: [Clearing.Batch] = []
-    @Published private(set) var plan = Retention.Result()
-    @Published var cap = Line.originalsCap { didSet { Line.originalsCap = cap; refresh() } }
     @Published var confirming = false
 
     init(line: Line) {
@@ -64,7 +62,6 @@ final class CleanupModel: ObservableObject {
     func refresh() {
         candidates = line.cleanupCandidates(filter)
         batches = line.clearing.batches()
-        plan = Retention.plan(history: line.history, onLine: line.onLinePaths, isKeptImage: line.isKeptImage, cap: cap)
         confirming = false
     }
 
@@ -91,7 +88,6 @@ private struct CleanupView: View {
 
     private let ages: [(Double?, String)] = [(nil, L("Any time")), (1, L("Over a day ago")), (7, L("Over a week ago")),
                                             (30, L("Over a month ago")), (90, L("Over three months ago")), (365, L("Over a year ago"))]
-    private let caps: [(Int64, String)] = [(512 << 20, "512 MB"), (1 << 30, "1 GB"), (2 << 30, "2 GB"), (5 << 30, "5 GB")]
 
     var body: some View {
         Form {
@@ -143,15 +139,6 @@ private struct CleanupView: View {
                         Button(L("Put Back")) { model.putBack(batch.id) }
                     }
                 }
-            }
-            Section(L("Keeping")) {
-                Text(L("Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires."))
-                    .font(.callout).foregroundStyle(.secondary)
-                Picker(L("Originals may use up to"), selection: $model.cap) {
-                    ForEach(caps, id: \.0) { Text($0.1).tag($0.0) }
-                }
-                Text(String(format: L("Next run: %d expire, %d originals shrink."), model.plan.expired.count, model.plan.shrunk.count))
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

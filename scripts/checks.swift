@@ -411,6 +411,7 @@ struct CheckFailed: Error { let message: String }
         try checkKindChips()
         try checkFilesInBasket()
         try checkFileStack()
+        try checkRetentionStatus()
         try checkNewestByKnot()
         try checkMotion()
         try checkMenuBarIcon()
@@ -2433,6 +2434,41 @@ struct CheckFailed: Error { let message: String }
         try FileManager.default.removeItem(at: files[0]); try FileManager.default.removeItem(at: files[2])
         try check(FileList.present(stack).count == 23 && line.basketSummary(stack).title == String(format: L("%d files"), 23),
                   "Two files moved away: the stack shows the twenty-three still in place")
+    }
+
+    /// T-051: the 「保留」 page shows what the rules would do, the same as the
+    /// rules' own plan; how much the originals take; and the cap as set,
+    /// which the rules then use.
+    func checkRetentionStatus() throws {
+        UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
+        UserDefaults.standard.set(true, forKey: "soundOff")
+        let saved = Inbox.folder
+        defer { Inbox.folder = saved; UserDefaults.standard.removeObject(forKey: "originalsCap") }
+        Inbox.folder = DataFolder.url.appendingPathComponent("Status check shots", isDirectory: true)
+        let history = History(file: root.appendingPathComponent("retention-status.sqlite"))
+        let keep = Line(pasteboard: pasteboard, desktop: root, history: history)
+        keep.maxItems = 1; keep.visibleCount = 8; keep.revealed = true
+        let a = try png("Status A.png", in: Inbox.folder), b = try png("Status B.png", in: Inbox.folder, red: 0.8)
+        let old = try adoptedNote("status-old", "a note unused for over a year")
+        for url in [a, b] { _ = keep.hang(url, quietly: true); history.recordImage(url, text: "status words") }
+        history.record(old, text: "a note unused for over a year")
+        let last = try adoptedNote("status-last", "the one left hanging")
+        _ = keep.hang(last, quietly: true)
+        pump(0.7); keep.closeGaps()
+        let now = Date()
+        history.setUsed(old, now.addingTimeInterval(-400 * 86400))
+        history.setUsed(a, now.addingTimeInterval(-3 * 86400)); history.setUsed(b, now.addingTimeInterval(-2 * 86400))
+        let bytes = [a, b].reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        let status = keep.retentionStatus(now: now)
+        let plan = Retention.plan(history: history, onLine: keep.onLinePaths, isKeptImage: keep.isKeptImage, now: now, cap: Line.originalsCap)
+        try check(status.willExpire == plan.expired.count && status.willExpire == 1 && status.willShrink == 0,
+                  "The page says one note will expire and no original shrink, as the rules plan")
+        try check(status.originalsBytes == bytes && status.cap == Retention.defaultCap, "It shows what the two originals take, against 1 GB")
+        Line.originalsCap = bytes / 2
+        let tight = keep.retentionStatus(now: now)
+        let tightPlan = Retention.plan(history: history, onLine: keep.onLinePaths, isKeptImage: keep.isKeptImage, now: now, cap: bytes / 2)
+        try check(tight.cap == bytes / 2 && tight.willShrink == tightPlan.shrunk.count && tightPlan.shrunk == [a],
+                  "A smaller cap set there is what the rules use: the older original would shrink")
     }
 
     func checkDesktopCopies() throws {

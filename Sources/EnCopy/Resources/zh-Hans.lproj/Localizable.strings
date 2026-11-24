@@ -152,7 +152,6 @@
 "%d cleared by you" = "%d 件是你清的";
 "Put Back" = "放回";
 "Keeping" = "保留";
-"Text stays a year after its last use. Screenshot originals shrink to thumbnails after 30 days; their text can still be found. What hangs on the line never expires." = "文字在最后一次用到一年后过期。截图原图 30 天后缩成缩略图，图里的字照样搜得到。挂在绳上的不过期。";
 "Originals may use up to" = "原图最多占用";
 "Next run: %d expire, %d originals shrink." = "下一次：%d 件过期，%d 张原图缩小。";
 
@@ -197,3 +196,17 @@
 "%d files" = "%d 个文件";
 "Moved away" = "已移走";
 "Show the files" = "展开看文件";
+
+/* Keeping page in Settings (T-051) */
+"What EnCopy keeps" = "EnCopy 留多久";
+"Kept a year after its last use" = "最后一次用到后留一年";
+"Screenshots and images" = "截图和图片";
+"Originals shrink to thumbnails after 30 days; the words in them can still be found" = "原图 30 天后缩成缩略图，图里的字还能搜";
+"Files from Finder" = "访达里的文件";
+"Their paths are kept a year; the files themselves are never moved" = "路径留一年，文件本身从来不动";
+"On the line and pinned" = "绳上的和收藏的";
+"Never expire" = "不过期";
+"Room for originals" = "原图占的空间";
+"Past it, the oldest originals shrink first" = "超过了就从最旧的原图先缩";
+"Originals use %@ of %@" = "原图已用 %@，上限 %@";
+"What expires waits 7 days in Recently Cleared, and can be put back" = "清掉的先在「最近清掉」放 7 天，能整批放回";
