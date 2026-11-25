@@ -72,16 +72,9 @@ final class SettingsModel: ObservableObject {
                 set: { set($0); then?(); self.reload() })
     }
 
-    /// The apps listed under By app: the one in front first, then every app
-    /// that has a rule, by name.
     var ruleApps: [String] {
         _ = version
-        var ids = ClipboardWatcher.appRules.keys.sorted { (History.appName($0) ?? $0) < (History.appName($1) ?? $1) }
-        if let front = frontApp, front != Bundle.main.bundleIdentifier {
-            ids.removeAll { $0 == front }
-            ids.insert(front, at: 0)
-        }
-        return ids
+        return ClipboardWatcher.listedApps(front: frontApp == Bundle.main.bundleIdentifier ? nil : frontApp)
     }
 
     func rule(_ id: String) -> Binding<ClipboardWatcher.AppRule> {
@@ -185,7 +178,9 @@ struct SettingsView: View {
             SettingsSheet(title: L("By app")) {
                 let apps = model.ruleApps
                 ForEach(Array(apps.enumerated()), id: \.element) { i, id in
-                    SettingsRow(History.appName(id) ?? id, last: i == apps.count - 1) {
+                    SettingsRow(History.appName(id) ?? id,
+                                detail: id == model.frontApp ? L("The app you were using before Settings") : nil,
+                                last: i == apps.count - 1) {
                         Picker("", selection: model.rule(id)) {
                             Text(L("Record normally")).tag(ClipboardWatcher.AppRule.normal)
                             Text(L("Clear after an hour")).tag(ClipboardWatcher.AppRule.hourly)
