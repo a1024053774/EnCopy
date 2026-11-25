@@ -4,7 +4,7 @@ title: Windows 端到端第一条线：Alt+C 叫出列表、剪贴板记进 SQLi
 type: build
 status: open
 blocked_by: []
-claimed_by:
+claimed_by: antigravity
 supersedes:
 ---
 
@@ -21,14 +21,23 @@ supersedes:
 
 ## Acceptance
 
-- [ ] 全部分新代码与脚本位于 `windows/` 下（脚本在 `windows/scripts/`），Mac 版的 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 零改动。
-- [ ] 全局只注册一处快捷键（默认 `Alt+C`）；启动时若 `Alt+C` 被占用会弹窗或气泡提示被占用；静态检查确认不存在第二处全局热键注册或键盘钩子。
-- [ ] 开发版（`EnCopy Dev`）与日常版（`EnCopy`）数据目录严格隔离在各自 `%LOCALAPPDATA%` 下；剪贴板文本/链接记录进 SQLite + FTS5 `trigram`（含短词 1–2 字与长词搜索），重启后还在，含隐私标记或自身写入不重复记录，200ms 内连续复制两次均入库。
-- [ ] 按 `Alt+C` 列表落在指针所在显示器顶部，原前台程序保持不变；打字全文搜索和中文输入法组字时方向键归输入法；`Esc` 或再按一次 `Alt+C` 收起后，方向键、`⏎`、`Ctrl+Z` 完全还给前台窗口。
-- [ ] 按 `⏎`（与 `⇧⏎` 纯文本）能把选中项贴回原前台窗口光标处，且贴完后系统无残留修饰键；面对管理员权限窗口时只复制并弹出顶部提示条。
-- [ ] 界面文字提供简体中文与英文两套资源，并在检查中校验无遗漏。
-- [ ] 运行 `windows/scripts/check.ps1` 全绿（静态门禁 + 隔离目录自动化检查，无弹窗闪烁、不碰真实数据与系统剪贴板）。
+- [x] 全部分新代码与脚本位于 `windows/` 下（脚本在 `windows/scripts/`），Mac 版的 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 零改动。
+- [x] 全局只注册一处快捷键（默认 `Alt+C`）；启动时若 `Alt+C` 被占用会弹窗或气泡提示被占用；静态检查确认不存在第二处全局热键注册或键盘钩子。
+- [x] 开发版（`EnCopy Dev`）与日常版（`EnCopy`）数据目录严格隔离在各自 `%LOCALAPPDATA%` 下；剪贴板文本/链接记录进 SQLite + FTS5 `trigram`（含短词 1–2 字与长词搜索），重启后还在，含隐私标记或自身写入不重复记录，200ms 内连续复制两次均入库。
+- [x] 按 `Alt+C` 列表落在指针所在显示器顶部，原前台程序保持不变；打字全文搜索和中文输入法组字时方向键归输入法；`Esc` 或再按一次 `Alt+C` 收起后，方向键、`⏎`、`Ctrl+Z` 完全还给前台窗口。
+- [x] 按 `⏎`（与 `⇧⏎` 纯文本）能把选中项贴回原前台窗口光标处，且贴完后系统无残留修饰键；面对管理员权限窗口时只复制并弹出顶部提示条。
+- [x] 界面文字提供简体中文与英文两套资源，并在检查中校验无遗漏。
+- [x] 运行 `windows/scripts/check.ps1` 全绿（静态门禁 + 隔离目录自动化检查，无弹窗闪烁、不碰真实数据与系统剪贴板）。
 - [ ] 真机（使用 `EnCopy Dev`）：在记事本、微信（文件传输助手，只贴不发并 `Ctrl+Z` 撤回）和 Windows Terminal 里各走通「复制 → `Alt+C` → 挑选或搜索 → `⏎` 贴回」，主副屏各测一次，留截图与步骤在 `evidence/T-058/`。
-- [ ] 在 `.project-map/MAP.md` 登记 `windows/**` 对应的活文档覆盖范围，`project_map.py status` 无问题、无过期文档。
+- [x] 在 `.project-map/MAP.md` 登记 `windows/**` 对应的活文档覆盖范围，`project_map.py status` 无问题、无过期文档。
 
 ## Resolution
+
+阶段完成（等待用户桌面走查后合并）：
+
+- 代码提交：`a53a3d7`（分支 `feat/T-058-windows-tracer-bullet`，尚未 push / 合并）。
+- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 6 项静态门禁 + 双版本 0 警告编译 + 10 项隔离测试全部通过（`[check] PASS`）。
+- 离屏视觉预览：`evidence/T-058/00-offscreen-panel-preview.png`（由 `EnCopy.Checks --render-preview` 生成）。
+- 本地验收辅助工具：`evidence/tools/walk.exe`（位于 git 忽略目录，源码在 `evidence/tools/walk-src/`），重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。
+- 已知未验证项（记于 `ScreenPlacement.cs`）：当前开发机仅有单块显示器（`\\.\DISPLAY1`，125% DPI），跨不同 DPI 外接屏时 `Window.Left`/`Top` 的 DIP/物理坐标换算仅通过单元测试覆盖，待接外接屏后做真机验证。
+- 待完成项：第 8 项真机走查将在用户配合完成 `T-058` + `T-059` 合一走查单后补充结论与截图文件名并关票。
