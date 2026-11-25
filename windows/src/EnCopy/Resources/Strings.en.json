@@ -1,0 +1,19 @@
+{
+  "Show line": "Show line",
+  "Hide line": "Hide line",
+  "Pause recording": "Pause recording",
+  "Nothing you copy is kept while this is on": "Nothing you copy is kept while this is on",
+  "Open data folder": "Open data folder",
+  "Quit EnCopy": "Quit EnCopy",
+  "Search all history": "Search all history",
+  "{0} of {1}": "{0} of {1}",
+  "Link": "Link",
+  "Code": "Code",
+  "Text": "Text",
+  "The line is empty": "The line is empty",
+  "Nothing matches": "Nothing matches",
+  "Copied. Press Ctrl+V to paste.": "Copied. Press Ctrl+V to paste.",
+  "Shortcut {0} is in use by another app.": "Shortcut {0} is in use by another app.",
+  "Alt+C could not be registered": "Alt+C could not be registered",
+  "Up/Down pick · Enter paste · Shift+Enter plain · Esc close": "Up/Down pick · Enter paste · Shift+Enter plain · Esc close"
+}

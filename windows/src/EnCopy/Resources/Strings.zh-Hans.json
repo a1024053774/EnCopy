@@ -1,0 +1,19 @@
+{
+  "Show line": "显示晾衣绳",
+  "Hide line": "隐藏晾衣绳",
+  "Pause recording": "暂停记录",
+  "Nothing you copy is kept while this is on": "打开后，复制的内容都不记",
+  "Open data folder": "打开数据文件夹",
+  "Quit EnCopy": "退出 EnCopy",
+  "Search all history": "搜索全部历史",
+  "{0} of {1}": "{0} / {1}",
+  "Link": "链接",
+  "Code": "代码",
+  "Text": "文字",
+  "The line is empty": "晾衣绳上是空的",
+  "Nothing matches": "没有对上的内容",
+  "Copied. Press Ctrl+V to paste.": "已复制，按 Ctrl+V 粘贴",
+  "Shortcut {0} is in use by another app.": "快捷键 {0} 已被其他程序占用。",
+  "Alt+C could not be registered": "未能注册 Alt+C",
+  "Up/Down pick · Enter paste · Shift+Enter plain · Esc close": "↑↓ 挑一件 · ⏎ 贴回 · ⇧⏎ 纯文本 · Esc 收起"
+}

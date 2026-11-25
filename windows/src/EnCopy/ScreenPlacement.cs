@@ -1,0 +1,143 @@
+using System.Runtime.InteropServices;
+
+namespace EnCopy;
+
+public readonly record struct PixelRect(int Left, int Top, int Right, int Bottom)
+{
+    public int Width => Right - Left;
+    public int Height => Bottom - Top;
+    public bool Contains(int x, int y) => x >= Left && x < Right && y >= Top && y < Bottom;
+}
+
+public readonly record struct DisplayMonitor(PixelRect Bounds, PixelRect WorkArea, double DpiScale, bool IsPrimary);
+
+public readonly record struct DipRect(double Left, double Top, double Width, double Height);
+
+/// <summary>
+/// 按鼠标所在显示器及该屏 DPI 计算面板顶部居中位置，同时支持真实显示器与测试注入显示器列表。
+/// </summary>
+public static class ScreenPlacement
+{
+    public static DisplayMonitor PickMonitor(int cursorPhysicalX, int cursorPhysicalY, IReadOnlyList<DisplayMonitor> monitors)
+    {
+        if (monitors.Count == 0)
+        {
+            return new DisplayMonitor(new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1.0, true);
+        }
+        foreach (var m in monitors)
+        {
+            if (m.Bounds.Contains(cursorPhysicalX, cursorPhysicalY))
+            {
+                return m;
+            }
+        }
+        foreach (var m in monitors)
+        {
+            if (m.IsPrimary) return m;
+        }
+        return monitors[0];
+    }
+
+    // Known unverified (T-058 / T-059): Current dev machine has a single display (\\.\DISPLAY1 at 125% DPI),
+    // so mixed-DPI multi-monitor Window.Left/Top DIP-to-physical conversion is covered by unit math
+    // (TestScreenPlacementMultiMonitorDpi) rather than hardware transition across monitors.
+    // Impact: Secondary monitor placement at a different DPI scale may need post-SourceInitialized physical SetWindowPos adjustment.
+    // Removal condition: Verify live on a physical external monitor with differing DPI scale and remove or adjust.
+    public static DipRect TopCenterPanel(
+        int cursorPhysicalX,
+        int cursorPhysicalY,
+        IReadOnlyList<DisplayMonitor> monitors,
+        double preferredWidth = 680,
+        double preferredHeight = 440,
+        double topMargin = 12)
+    {
+        var mon = PickMonitor(cursorPhysicalX, cursorPhysicalY, monitors);
+        double scale = mon.DpiScale > 0 ? mon.DpiScale : 1.0;
+        double workLeft = mon.WorkArea.Left / scale;
+        double workTop = mon.WorkArea.Top / scale;
+        double workWidth = mon.WorkArea.Width / scale;
+        double workHeight = mon.WorkArea.Height / scale;
+
+        double width = Math.Min(preferredWidth, Math.Max(320, workWidth - 32));
+        double height = Math.Min(preferredHeight, Math.Max(220, workHeight - topMargin - 24));
+        double left = workLeft + (workWidth - width) / 2.0;
+        double top = workTop + topMargin;
+        return new DipRect(left, top, width, height);
+    }
+
+    public static DipRect TopBanner(
+        int cursorPhysicalX,
+        int cursorPhysicalY,
+        IReadOnlyList<DisplayMonitor> monitors,
+        double width,
+        double height,
+        double topMargin = 10)
+    {
+        var mon = PickMonitor(cursorPhysicalX, cursorPhysicalY, monitors);
+        double scale = mon.DpiScale > 0 ? mon.DpiScale : 1.0;
+        double workLeft = mon.WorkArea.Left / scale;
+        double workTop = mon.WorkArea.Top / scale;
+        double workWidth = mon.WorkArea.Width / scale;
+        double left = workLeft + (workWidth - width) / 2.0;
+        double top = workTop + topMargin;
+        return new DipRect(left, top, width, height);
+    }
+
+    public static (int X, int Y) CurrentCursorPhysical()
+    {
+        return GetCursorPos(out var pt) ? (pt.X, pt.Y) : (0, 0);
+    }
+
+    public static IReadOnlyList<DisplayMonitor> EnumerateMonitors()
+    {
+        var list = new List<DisplayMonitor>();
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMon, IntPtr hdc, ref RECT rect, IntPtr data) =>
+        {
+            var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (GetMonitorInfo(hMon, ref info))
+            {
+                double scale = 1.0;
+                if (GetDpiForMonitor(hMon, 0, out uint dpiX, out _) == 0 && dpiX > 0)
+                {
+                    scale = dpiX / 96.0;
+                }
+                list.Add(new DisplayMonitor(
+                    new PixelRect(info.rcMonitor.Left, info.rcMonitor.Top, info.rcMonitor.Right, info.rcMonitor.Bottom),
+                    new PixelRect(info.rcWork.Left, info.rcWork.Top, info.rcWork.Right, info.rcWork.Bottom),
+                    scale,
+                    (info.dwFlags & 1) != 0));
+            }
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
+
+    private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+}
