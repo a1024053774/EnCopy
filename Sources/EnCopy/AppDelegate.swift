@@ -958,7 +958,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The shortcut is off while recording, so pressing it records it
     /// instead of summoning the line.
-    private func changeShortcut() {
+    private func changeShortcut(then done: @escaping () -> Void) {
         hotKey = nil
         ShortcutRecorder.shared.record { [weak self] result in
             guard let self else { return }
@@ -973,6 +973,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
             registerShortcut()
+            done()
         }
     }
 
@@ -1115,7 +1116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setSize: { [weak self] in self?.setSize($0) },
             hideZoom: { [weak self] in self?.zoom.hide() },
             refresh: { [weak self] in self?.refresh() },
-            changeShortcut: { [weak self] in self?.changeShortcut() },
+            changeShortcut: { [weak self] done in self?.changeShortcut(then: done) },
             toggleLaunchAtLogin: { AppDelegate.toggleLaunchAtLogin() },
             soundOn: { [weak self] in self?.line.soundOn ?? false },
             setSoundOn: { [weak self] in self?.line.soundOn = $0 },

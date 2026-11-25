@@ -41,6 +41,12 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 - [T-056 Windows 版的截图、系统能力替代与发布红线](tickets/T-056-windows-platform-and-release.md): 截图复制进 `EnCopy\Screenshots\` 原件不动；`Windows.Media.Ocr`；内置预览/标记/裁剪；绝不单发占 `releases/latest` 的包
 - [T-057 补齐 AGENTS.md 的 Windows 检查、构建、真机验收与发布约定](tickets/T-057-windows-agents-doc.md): 保留 Mac 原文，补齐 Windows 脚本、双版本隔离、发布护栏与 `evidence/` 验收工具约定
 
+## GitHub issues
+
+GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，这里一个 issue 一行，指到它的工单；状态只看工单。还没落成工单的 issue 不列。
+
+- [#107 更改快捷键后，设置里显示的还是旧快捷键](https://github.com/a1024053774/EnCopy/issues/107) → [T-068](tickets/T-068-shortcut-display.md)
+
 ## Not yet specified
 
 - 真机：两次走查见各工单。没确认的：⏎ 飞向指针、菜单栏小夹子晃一下（截帧没抓到）、拖出、真的清掉一批再放回。
