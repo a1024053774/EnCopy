@@ -115,6 +115,7 @@
 
 /* App rules (T-027) */
 "By app" = "按 App 记录";
+"The app you were using before Settings" = "打开设置前你在用的 App";
 "Record normally" = "正常记录";
 "Clear after an hour" = "一小时后清";
 "Don't record" = "不记";

@@ -117,6 +117,7 @@
 
 /* App rules (T-027) */
 "By app" = "By app";
+"The app you were using before Settings" = "The app you were using before Settings";
 "Record normally" = "Record normally";
 "Clear after an hour" = "Clear after an hour";
 "Don't record" = "Don't record";

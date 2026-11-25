@@ -78,6 +78,21 @@ final class ClipboardWatcher {
         set { UserDefaults.standard.set(newValue.mapValues(\.rawValue), forKey: rulesKey) }
     }
 
+    /// The apps Settings lists under By app: `front`, the app in front
+    /// before Settings opened, first, then every app with a rule, by name. A
+    /// rule for an app not on this Mac is left out: Passwords, a preset, only
+    /// exists from macOS 15, and an app you removed would otherwise show as
+    /// its bare bundle id.
+    static func listedApps(front: String?) -> [String] {
+        var ids = appRules.keys.compactMap { id in History.appName(id).map { (id, $0) } }
+            .sorted { $0.1 < $1.1 }.map(\.0)
+        if let front {
+            ids.removeAll { $0 == front }
+            ids.insert(front, at: 0)
+        }
+        return ids
+    }
+
     static func rule(for app: String?) -> AppRule { app.flatMap { appRules[$0] } ?? .normal }
 
     /// How long copies under the hourly rule stay after their last use.

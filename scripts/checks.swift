@@ -947,6 +947,10 @@ struct CheckFailed: Error { let message: String }
         func copy(_ text: String) { pasteboard.clearContents(); pasteboard.setString(text, forType: .string); watcher.check() }
         try check(ClipboardWatcher.rule(for: "com.apple.Passwords") == .skip && ClipboardWatcher.rule(for: "com.apple.keychainaccess") == .skip
                   && ClipboardWatcher.rule(for: "com.apple.finder") == .normal, "Passwords and Keychain Access are preset to never record")
+        ClipboardWatcher.appRules = ["com.example.not-installed": .skip, "com.apple.finder": .skip]
+        try check(ClipboardWatcher.listedApps(front: "com.apple.TextEdit") == ["com.apple.TextEdit", "com.apple.finder"],
+                  "By app lists the front app first, then rules for apps on this Mac, never a bare bundle id")
+        UserDefaults.standard.removeObject(forKey: "appRules")
         copy("secret from passwords")
         try check(hung.isEmpty && history.count == 0 && rules.liveCount == 0
                   && history.search(SearchIndex.words("secret"), onLine: [], limit: 5).basketTotal == 0,
