@@ -428,6 +428,8 @@ private struct SettingsBackdrop: View {
         case .minimal: Color(white: 0.95)
         case .neon: Color(red: 0.04, green: 0.04, blue: 0.09)
         case .washi: Color(red: 0.96, green: 0.93, blue: 0.86)
+        case .christmas: LinearGradient(colors: [Color(red: 0.07, green: 0.30, blue: 0.18), Color(red: 0.04, green: 0.20, blue: 0.12)],
+                                        startPoint: .top, endPoint: .bottom)
         }
     }
 }
@@ -486,6 +488,7 @@ private struct ThemeSwatch: View {
                         paper(.link, tilt: 3)
                     }
                     .padding(.top, 12)
+                    if theme.isSeasonal { SeasonRibbon() }
                 }
                 .frame(width: 150, height: 70)
                 .environment(\.colorScheme, theme == .neon ? .dark : .light)
@@ -519,6 +522,25 @@ private struct ThemeSwatch: View {
             }
             .overlay(alignment: .top) { ThemePeg(theme: theme).scaleEffect(0.55).offset(y: -9) }
             .rotationEffect(.degrees(tilt), anchor: .top)
+    }
+}
+
+/// A gift ribbon across the corner of a seasonal theme's card (T-072):
+/// red with gold edges, reading 季节限定.
+private struct SeasonRibbon: View {
+    var body: some View {
+        Text(L("Seasonal"))
+            .font(.system(size: 9, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 96, height: 15)
+            .background(Theme.christmasRed)
+            .overlay(alignment: .top) { Rectangle().fill(Color(red: 0.98, green: 0.80, blue: 0.30)).frame(height: 1.5) }
+            .overlay(alignment: .bottom) { Rectangle().fill(Color(red: 0.98, green: 0.80, blue: 0.30)).frame(height: 1.5) }
+            .rotationEffect(.degrees(35))
+            .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+            .offset(x: 46, y: 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .allowsHitTesting(false)
     }
 }
 
