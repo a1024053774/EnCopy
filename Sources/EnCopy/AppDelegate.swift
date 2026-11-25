@@ -857,10 +857,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The card under the pointer opens larger below the line. Not while
-    /// dragging, in a card's menu, or while one of our windows is in front,
-    /// like Quick Look.
+    /// dragging, in a card's menu, or while another of our windows is in
+    /// front, like Quick Look or Settings. The search field that ⌥C brings
+    /// does not count: it holds the keyboard the whole time the line is
+    /// summoned (T-069). The basket list under it does, since the larger
+    /// copy would cover the list.
     private func updateZoom(_ mouse: NSPoint) {
-        guard Zoom.isEnabled, !GrabView.isDragging, !GrabView.isShowingMenu, NSApp.keyWindow == nil,
+        let key = NSApp.keyWindow
+        let inFront = key != nil && !(searchBar?.owns(key) == true && !line.basketOpen)
+        guard Zoom.isEnabled, !GrabView.isDragging, !GrabView.isShowingMenu, !inFront,
               let screen = panel.screen else {
             zoom.hide()
             return

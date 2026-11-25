@@ -31,6 +31,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onToggleStack: () -> Void = {}
 
     var isShown: Bool { panel.isVisible }
+    /// Whether `window` is the search field's own panel.
+    func owns(_ window: NSWindow?) -> Bool { window === panel }
     /// The line's frame it was last shown under, to grow from when the
     /// basket list opens.
     private var lineFrame = NSRect.zero
