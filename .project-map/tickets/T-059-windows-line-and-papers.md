@@ -4,7 +4,7 @@ title: Windows 屏幕顶部的绳子与五种纸，接上篮子列表
 type: build
 status: open
 blocked_by: [T-058]
-claimed_by:
+claimed_by: antigravity
 supersedes:
 ---
 
@@ -23,10 +23,19 @@ supersedes:
 ## Acceptance
 
 - [ ] 绳子面板在主屏、副屏与不同 DPI 缩放下位置贴合顶栏，空白透明区点击与滚轮完全穿透到底下应用，卡片与把手响应点击。
-- [ ] 收藏卡在绳结左、普通卡最新贴近绳结右；双击贴、单击复制或重复复制同内容会把非收藏项挪回绳头；绳满后最老项掉进篮子且不丢失历史记录。
-- [ ] 文本、代码、链接正确渲染对应纸张形状、种类标签与暗黑/浅色配色；键盘全部绑定（`←`/`→`/`Shift+←/→`/`Tab`/`Ctrl+P`/`Ctrl+Backspace`/`Ctrl+Z`/`↓`/`↑`/`⏎`/`⇧⏎`/`Esc`）与点击交互符合词汇表与设计方案。
-- [ ] 支持在快捷键录制界面修改与清除全局唤起快捷键并重启保留；运行 `windows/scripts/install.ps1` 能把日常版安装到 `%LOCALAPPDATA%\Programs\EnCopy\`，与开发版 `EnCopy Dev` 数据和进程互不干扰。
-- [ ] `windows/scripts/check.ps1` 新增针对纸张分类、绳槽顺序、挪回绳头、篮子分组与撤销步的测试并全绿通过。
+- [x] 收藏卡在绳结左、普通卡最新贴近绳结右；双击贴、单击复制或重复复制同内容会把非收藏项挪回绳头；绳满后最老项掉进篮子且不丢失历史记录。
+- [x] 文本、代码、链接正确渲染对应纸张形状、种类标签与暗黑/浅色配色；键盘全部绑定（`←`/`→`/`Shift+←/→`/`Tab`/`Ctrl+P`/`Ctrl+Backspace`/`Ctrl+Z`/`↓`/`↑`/`⏎`/`⇧⏎`/`Esc`）与点击交互符合词汇表与设计方案。
+- [x] 支持在快捷键录制界面修改与清除全局唤起快捷键并重启保留；运行 `windows/scripts/install.ps1` 能把日常版安装到 `%LOCALAPPDATA%\Programs\EnCopy\`，与开发版 `EnCopy Dev` 数据和进程互不干扰。
+- [x] `windows/scripts/check.ps1` 新增针对纸张分类、绳槽顺序、挪回绳头、篮子分组与撤销步的测试并全绿通过。
 - [ ] 真机走查：使用 `EnCopy Dev` 挂满一屏以上内容并验证掉进篮子、展开篮子列表、搜索筛选、收藏/取下/撤销、单双屏与深浅色外观，留截图与步骤在 `evidence/T-059/`。
 
 ## Resolution
+
+阶段完成（等待用户桌面走查后合并）：
+
+- 代码提交：`b99ce01`（分支 `feat/T-059-windows-line-and-papers`，基于 `feat/T-058-windows-tracer-bullet`，尚未 push / 合并）。
+- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 全绿通过（6 项静态门禁 + 双版本 0 警告编译 + 16 项隔离测试 `[check] PASS`，含 5 种纸与 Markdown 渲染、`CardClickCoordinator` 防双击竞态、多选取下与 `Ctrl+Z` 原顺序放回、`IOException` 两阶段回滚、模态篮子空筛选防穿孔、滚动偏移夹紧、离屏 `alpha == 0` / `HitTest == null` 点击穿透校验以及 `install.ps1` 隔离安装校验）。
+- 失败-修复证据：按 `evidence-first-testing` 先证伪从篮子 `Ctrl+P` 收藏后 `Ctrl+Z` 未回退篮子的缺陷（`Red`），再补全 `PutBack` 同步路径后验证全绿（`Green`）。
+- 独立代码审查：`design-integrity-review`（`same-model review`）首轮指出 P1/P2/P3 与复审指出的 1 处回滚缺陷全部修复并补回归测试，随后整套重跑全绿；`windows/build/EnCopy Dev/EnCopy Dev.exe` 已重编就绪且已跑完 `clean-dev.ps1`。
+- 离屏视觉预览：`evidence/T-059/00-offscreen-line-light.png`、`evidence/T-059/00-offscreen-basket-dark.png`、`evidence/T-059/00-offscreen-shortcut-recorder.png`（已目视复核布局与深浅对比度）。
+- 待完成项：第 1、6 项真机表现（含桌面鼠标/滚轮穿透、双屏混合 DPI 及深浅切换）等待用户按 `T-058` + `T-059` 合一走查单验证后补充截图并关票。
