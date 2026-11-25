@@ -1,0 +1,18 @@
+name: 功能建议 / Feature Request
+description: 平时用着卡手的地方，或希望加上的小功能 / Suggest an improvement or idea
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 卡在哪个使用场景？/ What scenario ran into friction?
+      description: 平时在什么情况下觉得不顺手？把场景说清楚比直接给实现方案更有帮助。
+      placeholder: 例如：从终端复制多行命令后，打开篮子列表想……
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你设想的做法（可选）/ How would you like it to work?
+      placeholder: 希望按哪个键，或者在绳上、篮子列表、设置里怎么表现
