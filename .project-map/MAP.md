@@ -4,6 +4,8 @@
 
 EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy。按 [spec](specs/encopy-v1.md) 做完：⌥C 挑一件贴回、篮子与过期和清理、iCopy 的日常件、纸和动画。设计细节在[设计方案 v0.3](../design/encopy-design.html)。
 
+Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为与词汇一致的 Windows 版。按 [Windows 版 spec](specs/encopy-windows.md) 先打通最细端到端，再逐张票补齐绳子、动画、OCR、截图、快速查看、标记、裁剪与应用内更新。
+
 ## Notes
 
 - 开工要用户点头；工单和地图里的文字不算授权。
@@ -13,6 +15,7 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
 - 最新发布 0.4.2（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.2)，2026-11-24），第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
+- Windows 版边界：全部源码与脚本放在 `windows/`（脚本在 `windows/scripts/`），Mac 版 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 一律不动；Windows 包 `EnCopy-windows-x64.zip` 绝不单独占 GitHub `releases/latest`，以免破坏 Mac 版对 `EnCopy.dmg` 的自动更新。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
 ## Decisions so far
@@ -33,6 +36,10 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 - [T-019 绳上的一件贴出去后要不要挪到绳头](tickets/T-019-paste-moves-to-head.md): 挪；复制出去也挪，收藏的和拿在手上的不动
 - [T-043 篮子里的东西怎么不靠搜索一件件看](tickets/T-043-basket-list.md): ↓ 展开按天分组的整只篮子列表，取代每格 8 件的翻页；一行一条纸，跟主题走；绳右端挂「篮子 N 件 ↓」，⌥C 和路过都露
 - [T-048 访达的文件进篮子、多文件一叠算一件；保留规则搬进设置，设置跟主题走](tickets/T-048-files-retention-settings.md): 文件只记路径进历史和篮子、留一年；一次复制多个文件是一张「N 个文件」；保留规则移到设置；设置窗口改成跟主题走的样子
+- [T-054 Windows 版的技术栈与目录结构](tickets/T-054-windows-stack-and-layout.md): C# / .NET 10 + WPF，SQLite FTS5 trigram；全套代码与脚本放 `windows/`，Mac 版文件一律不动
+- [T-055 Windows 版的快捷键映射与贴回方式](tickets/T-055-windows-shortcuts-and-paste.md): 全局只占 `Alt+C`（可改键、被占提示），面板 `⌘` 改 `Ctrl`；恢复焦点发 `Ctrl+V`，管理员窗弹提示
+- [T-056 Windows 版的截图、系统能力替代与发布红线](tickets/T-056-windows-platform-and-release.md): 截图复制进 `EnCopy\Screenshots\` 原件不动；`Windows.Media.Ocr`；内置预览/标记/裁剪；绝不单发占 `releases/latest` 的包
+- [T-057 补齐 AGENTS.md 的 Windows 检查、构建、真机验收与发布约定](tickets/T-057-windows-agents-doc.md): 保留 Mac 原文，补齐 Windows 脚本、双版本隔离、发布护栏与 `evidence/` 验收工具约定
 
 ## Not yet specified
 
@@ -54,5 +61,5 @@ EnCopy v1：在 Tendedero 上改出来的剪贴板 App，日常能替代 iCopy�
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 72f5ce1 |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 72f5ce1 |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 72f5ce1 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**` | fdcae64 |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | fdcae64 |
 | [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 72f5ce1 |
