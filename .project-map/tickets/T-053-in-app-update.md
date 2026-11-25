@@ -2,7 +2,7 @@
 id: T-053
 title: 在 App 里检查更新，点一下就更新并重启
 type: build
-status: done
+status: closed
 blocked_by: []
 claimed_by:
 supersedes:

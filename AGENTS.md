@@ -46,6 +46,7 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 
 - 发一个版本：先把 `scripts/build-app.sh` 里的 `VERSION` 改好，合并进 `main`；在 `main` 上跑 `scripts/make-dmg.sh`，再 `gh release create v<版本> build/EnCopy-<版本>.dmg build/EnCopy.dmg --repo a1024053774/EnCopy --target <main 的提交>`。不带版本号的 `EnCopy.dmg` 每次都要传，产品页和 README 的下载链接 `releases/latest/download/EnCopy.dmg` 靠它。
 - 这台 Mac 没有 Developer ID，DMG 没有经过 Apple 公证；发布说明里要写第一次打开怎么点「仍要打开」。
+- 从 0.4.1 之后的第一个发布起，EnCopy 会自己从最新发布的 `EnCopy.dmg` 更新（[T-053](.project-map/tickets/T-053-in-app-update.md)）。所以发布的 App 必须用这台机器的固定签名构建（`scripts/make-signing-identity.sh` 建的那个）：签名换了，所有人的更新都会被拒，只能去发布页手动下载。发布说明的第一段（第一个标题下、到下一个标题或 `---` 为止）就是更新确认框里显示的「新东西」，安装步骤写在它后面。
 - 日常那份要装成发布出去的那一份时，从 DMG 里拷，不要重新构建：照 `scripts/install.sh` 的做法先退出正在运行的 EnCopy，再 `ditto` 进 `/Applications`。
 - 产品页是 `docs/index.html`，一个文件，GitHub Pages 从 `main` 的 `docs/` 发布到 <https://a1024053774.github.io/EnCopy/>。页上写的功能、版本号、DMG 大小都要和最新发布的一致；App 的行为变了，合并前看一眼它是不是还对。
 
