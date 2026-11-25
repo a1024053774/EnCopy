@@ -28,7 +28,7 @@ issue: 108
 
 2026-11-25。放大的「有窗口在前面」判断里，把 ⌥C 的搜索框除外；篮子列表展开时搜索框照旧算在前面，不放大。
 
-- 先在没改的开发版上复现：从菜单栏放下来悬停能放大，收回再放下来也能（`evidence/T-055/00-revealed.png`、`02-second-hover.png`，工单号定下前的目录）；⌥C 叫出来再停在截图上不放大（`03-summoned-hover.png`）。
+- 先在没改的开发版上复现：从菜单栏放下来悬停能放大，收回再放下来也能（`evidence/T-069/old-00-revealed.png`、`old-02-second-hover.png`）；⌥C 叫出来再停在截图上不放大（`old-03-summoned-hover.png`）。
 - 改后的开发版（虚拟屏上走）：⌥C 叫出来悬停放大，Esc 收起后连着两轮再 ⌥C 悬停都放大（`evidence/T-069/03-summoned-again-hover.png`、`04-third-summon-hover.png`）；⌥C 后按 ↓ 展开篮子列表，悬停不放大（`05-basket-list-hover.png`）；从菜单栏放下来悬停照旧放大（`06-menubar-hover.png`）。放大的图在搜索框下面，不挡搜索框。
 - `ENCOPY_CHECKS_SCREEN="EnCopy walk screen" scripts/check.sh`：468 checks passed。放大和 AppDelegate 不在本地检查编译的范围里，这一条只靠真机。
 
