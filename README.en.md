@@ -12,6 +12,8 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 The latest version is [0.4.2](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
 
+From 0.4.2 on, EnCopy updates itself from inside the app. Versions 0.4.1 and earlier (see the menu bar icon → About EnCopy) never tell you about updates: download the DMG once more and install it over the old one, and you won't need to again.
+
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. Or run this line in Terminal to remove the quarantine flag the browser added when it downloaded the app; after that it opens with a double-click:
 
 ```bash
