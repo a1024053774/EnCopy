@@ -14,7 +14,9 @@ struct SettingsActions {
     var setSize: (Layout.Size) -> Void
     var hideZoom: () -> Void
     var refresh: () -> Void
-    var changeShortcut: () -> Void
+    /// Records a new shortcut; calls back once recording ends, whatever
+    /// came of it, so the row can show the one now in use (T-068).
+    var changeShortcut: (@escaping () -> Void) -> Void
     var toggleLaunchAtLogin: () -> Void
     var soundOn: () -> Bool
     var setSoundOn: (Bool) -> Void
@@ -165,7 +167,7 @@ struct SettingsView: View {
                 Toggle("", isOn: model.binding(model.actions.soundOn, model.actions.setSoundOn)).labelsHidden()
             }
             SettingsRow(L("Shortcut"), detail: { _ = model.version; return Shortcut.current?.display ?? L("None") }()) {
-                Button(L("Change Shortcut…")) { model.actions.changeShortcut() }
+                Button(L("Change Shortcut…")) { model.actions.changeShortcut { model.reload() } }
             }
         }
     }
