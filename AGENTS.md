@@ -8,6 +8,12 @@ EnCopy 是 [Tendedero](https://github.com/alejandrobujan/tendedero) 的 fork。�
 python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 ```
 
+Windows 下：
+
+```powershell
+python "$env:USERPROFILE\.gemini\config\skills\project-map\scripts\project_map.py" status --root .
+```
+
 ## 命令
 
 | 做什么 | 命令 |
@@ -31,6 +37,19 @@ python3 ~/.agents/skills/project-map/scripts/project_map.py status --root .
 DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scripts/check.sh
 ```
 
+Windows 版全部源码、测试、构建产物和脚本放在 `windows/` 下，Mac 版的 `Sources/`、`Package.swift` 和 `scripts/` 一律不动。
+
+| 做什么（Windows） | 命令 |
+| --- | --- |
+| 本地检查，每次改完都跑 | `powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` |
+| 构建开发版，产物是 `windows/build/EnCopy Dev/` | `powershell -ExecutionPolicy Bypass -File windows/scripts/build-app.ps1` |
+| 构建日常版并装到 `%LOCALAPPDATA%\Programs\EnCopy\` | `powershell -ExecutionPolicy Bypass -File windows/scripts/install.ps1` |
+| 退出开发版，删掉它的设置和数据文件夹 | `powershell -ExecutionPolicy Bypass -File windows/scripts/clean-dev.ps1` |
+| 给本机构建一个固定的自签名证书，每台机器跑一次 | `powershell -ExecutionPolicy Bypass -File windows/scripts/make-signing-identity.ps1` |
+| 打发布包 `windows/build/EnCopy-windows-x64.zip` | `powershell -ExecutionPolicy Bypass -File windows/scripts/make-package.ps1` |
+
+Windows 本地检查在临时目录与模拟剪贴板中离屏运行，不在屏幕弹窗闪烁，不读写 `%LOCALAPPDATA%\EnCopy` 和系统剪贴板；绕过 `windows/scripts/check.ps1` 直接跑检查程序会报错退出。构建和检查使用 `.NET 10 SDK`（`Microsoft.DotNet.SDK.10`）。
+
 ## Git
 
 - 远端：`origin` 是 `a1024053774/EnCopy`，地址走 `ssh.github.com:443`（这台机器连不上 22 端口）；`upstream` 是原仓库 `alejandrobujan/tendedero`，只拉不推。
@@ -41,6 +60,8 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - PR 用 merge commit 合并：`gh pr merge --merge --delete-branch`。分支上的提交号合并后不变，工单里记的提交号一直有效。
 - 日常用的 EnCopy 在 `/Applications/EnCopy.app`，bundle id 是 `app.encopy.EnCopy`。`build/` 里的开发版是另一个 App：名字 EnCopy Dev，bundle id `app.encopy.EnCopy.dev`，设置、数据文件夹（`~/Library/Application Support/EnCopy Dev/`）和系统权限都记在它自己名下，真机验收写不进日常那份的历史（[T-017](.project-map/tickets/T-017-dev-copy-own-data.md)）。两份都要占 ⌥C、都会接管截图，不能同时开：真机验收前先退出日常那份（菜单栏图标 → 退出 EnCopy），验收完跑 `scripts/clean-dev.sh`，再打开日常那份。
 - 真机验收的截图和录屏放 `evidence/<工单号>/`，这个目录不进 git：仓库是公开的，截图可能带到屏幕上别的内容。工单的 Resolution 写步骤、结果和文件名。
+- Windows 版全部代码与脚本放在 `windows/`，一张工单一个分支（如 `feat/T-058-windows-tracer-bullet`），各自开 PR 合进 `main`（同样带 `--repo a1024053774/EnCopy --base main`，用 `gh pr merge --merge --delete-branch`）。提交用本机默认 git 身份，不加 `--author`。Windows 功能每张票按收尾顺序自己走完：本地检查通过 → 真机走一遍 → 提交 → push 分支 → 开 PR → 合并 → 在 `main` 上跑 `windows/scripts/install.ps1`（`T-059` 落地后）→ 删分支 → 清缓存，整批做完再汇报一次。
+- Windows 日常用的 EnCopy 在 `%LOCALAPPDATA%\Programs\EnCopy\EnCopy.exe`，数据文件夹在 `%LOCALAPPDATA%\EnCopy\`。`windows/build/EnCopy Dev/` 里的开发版名字是 `EnCopy Dev`，单实例互斥名、注册表登录项和数据文件夹（`%LOCALAPPDATA%\EnCopy Dev\`）都记在自己名下，真机验收写不进日常那份的历史。两份都要占 `Alt+C`、都会接管截图，不能同时开：真机验收前先退出日常那份（托盘图标 → 退出 EnCopy），验收完跑 `windows/scripts/clean-dev.ps1`，再打开日常那份。
 
 ## 发布和产品页
 
@@ -49,6 +70,8 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 从 0.4.1 之后的第一个发布起，EnCopy 会自己从最新发布的 `EnCopy.dmg` 更新（[T-053](.project-map/tickets/T-053-in-app-update.md)）。所以发布的 App 必须用这台机器的固定签名构建（`scripts/make-signing-identity.sh` 建的那个）：签名换了，所有人的更新都会被拒，只能去发布页手动下载。发布说明的第一段（第一个标题下、到下一个标题或 `---` 为止）就是更新确认框里显示的「新东西」，安装步骤写在它后面。
 - 日常那份要装成发布出去的那一份时，从 DMG 里拷，不要重新构建：照 `scripts/install.sh` 的做法先退出正在运行的 EnCopy，再 `ditto` 进 `/Applications`。
 - 产品页是 `docs/index.html`，一个文件，GitHub Pages 从 `main` 的 `docs/` 发布到 <https://a1024053774.github.io/EnCopy/>。页上写的功能、版本号、DMG 大小都要和最新发布的一致；App 的行为变了，合并前看一眼它是不是还对。
+- Windows 安装包是 `windows/build/EnCopy-windows-x64.zip`，必须用 `windows/scripts/make-signing-identity.ps1` 建的本机固定自签名证书做 Authenticode 签名（保证 Windows 应用内更新验签通过）。**绝不能单独建一个非预发布的 Windows Release 占住 `releases/latest`**：Mac 版的自动更新和产品页都靠 `releases/latest/download/EnCopy.dmg`，单发 Windows 正式版会让所有 Mac 用户的更新失败。Windows 的包要么跟 Mac 版放进同一个 Release，要么发成 `prerelease`；怎么发、什么时候发都要先问用户，不要擅自建 GitHub Release，不要改 `docs/index.html`。
+- 这台 Windows 机器没有商业代码签名证书，首次运行会被 SmartScreen 拦截；发布说明里要写第一次打开怎么点「更多信息 → 仍要运行」。
 
 ## 真机走一遍
 
@@ -68,6 +91,10 @@ DEVELOPER_DIR=/Volumes/WD-Elements/Applications/Xcode.app/Contents/Developer scr
 - 开发版的设置是空的时，打开它会依次出现两个框：「让 EnCopy 接管你的截图？」和「EnCopy 会记下你复制的文字」。第一个框里的「登录时打开」默认勾着，先取消勾选再点按钮，开发版不进登录项。日常那份的登录项不受影响。系统第一次还会问开发版能不能访问「桌面」文件夹，点「不允许」（验收用不到），之后不再问。
 - 开发版开着提示框时退不掉，`scripts/clean-dev.sh` 会停下并提示；关掉提示框再跑。
 - 在微信里只用文件传输助手，只贴不发。输入框里可能有用户的草稿：贴完用 ⌘Z 撤掉，不要全选删除。
+- Windows 真机验收用的辅助小程序和脚本（屏幕截图、`UIAutomation` 读控件树、`SendInput` 发按键和点击、修饰键查看与清零）跟 Mac 一样放在 `evidence/tools/` 下（`evidence/` 已被 git 忽略，公开仓库不进验收工具）；每张工单的 `Resolution` 里写清用了哪些工具、怎么重建。
+- 合成按键只在按下时带修饰键，抬起一律清零修饰键，发完检查修饰键状态防止卡键；合成鼠标点击保持 120 毫秒按住时间。
+- 真机验收第一次开始前问用户一次有没有别的自动化在跑（之后不用再问），每次开始前确认前台窗口和输入空闲，不抢正在使用的鼠标键盘、不串改系统剪贴板。双屏验收优先用真实外接屏；只有单屏时说明单屏验收范围。
+- 开发版首次打开出现引导框时，先取消勾选「登录时打开」，不让开发版进注册表启动项。在记事本、微信（只用文件传输助手，只贴不发，贴完用 `Ctrl+Z` 撤掉，不要全选删除）和 Windows Terminal 走查，截图存进 `evidence/<工单号>/`。
 
 ## 清缓存
 
@@ -83,3 +110,13 @@ scripts/clean-dev.sh
 - `scripts/clean-dev.sh` 删的是开发版的设置和数据文件夹，真机验收时挂到开发版绳上的测试件跟着一起没了。日常那份的设置和数据它不碰。系统给开发版的权限（辅助功能、要不要访问「桌面」文件夹）它也不碰，下次构建接着用；要一起清掉，跑 `tccutil reset All app.encopy.EnCopy.dev`。
 - 真机验收时放到桌面的测试截图，验收完删掉。`/Applications/EnCopy.app` 是日常用的那份，不删。
 - `evidence/` 是验收证据，不是缓存，不清。
+
+Windows 下清缓存：
+
+```powershell
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue windows/build
+Get-ChildItem -Path windows -Include bin,obj -Recurse -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+powershell -ExecutionPolicy Bypass -File windows/scripts/clean-dev.ps1
+```
+
+- `windows/build/` 与 `bin/`、`obj/` 是编译缓存，都能重新生成；`clean-dev.ps1` 只清开发版的 `%LOCALAPPDATA%\EnCopy Dev\` 与开发版登录项，不碰日常版的 `%LOCALAPPDATA%\Programs\EnCopy\`、`%LOCALAPPDATA%\EnCopy\`、`%LOCALAPPDATA%\EnCopySigning\` 固定签名证书和 `evidence/`。
