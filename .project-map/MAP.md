@@ -46,6 +46,7 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，这里一个 issue 一行，指到它的工单；状态只看工单。还没落成工单的 issue 不列。
 
 - [#107 更改快捷键后，设置里显示的还是旧快捷键](https://github.com/a1024053774/EnCopy/issues/107) → [T-068](tickets/T-068-shortcut-display.md)
+- [#108 悬停放大只出现一次，绳子收回再叫出来后不再放大](https://github.com/a1024053774/EnCopy/issues/108) → [T-069](tickets/T-069-zoom-while-summoned.md)
 
 ## Not yet specified
 
@@ -64,8 +65,8 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 9df9e79 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 724e960 |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 72f5ce1 |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 72f5ce1 |
 | [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | fdcae64 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 9df9e79 |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 724e960 |
