@@ -54,7 +54,7 @@ When the line is full, the oldest item falls into the basket instead of the Tras
 
 ### Six themes
 
-Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one in Settings → The line.
+Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one from the cards in Settings → Appearance.
 
 | Paper | Pixel |
 | --- | --- |
