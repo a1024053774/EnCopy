@@ -14,9 +14,8 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
-- 最新发布 0.4.2（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.2)，2026-11-24），第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
+- 最新发布 0.4.3（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.3)，2026-11-25）：#107–#109 的修复和设置「外观」页。0.4.2 是第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
 - Windows 版边界：全部源码与脚本放在 `windows/`（脚本在 `windows/scripts/`），Mac 版 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 一律不动；Windows 包 `EnCopy-windows-x64.zip` 绝不单独占 GitHub `releases/latest`，以免破坏 Mac 版对 `EnCopy.dmg` 的自动更新。
-- 下一个发布的说明里要写：0.4.1 及以前没有应用内更新，用户点「检查更新」打开的就是最新发布页，在最前面写一句「从 0.4.1 或更早升级：重新下载一次 DMG 覆盖安装」（用户 2026-11-25 要的；README 和产品页已写）。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
 ## Decisions so far
@@ -53,7 +52,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 ## Not yet specified
 
 - 真机：两次走查见各工单。没确认的：⏎ 飞向指针、菜单栏小夹子晃一下（截帧没抓到）、拖出、真的清掉一批再放回。
-- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.2。
+- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.3。
 
 ## Out of scope
 
@@ -70,5 +69,5 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 8c32c2b |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | becec6e |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | becec6e |
-| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | becec6e |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | fbe78ab |
 | [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | becec6e |
