@@ -720,6 +720,15 @@ struct CheckFailed: Error { let message: String }
                   "An arrow while composing stays with the input method")
         try check(!bar.takes(keyDown(0), composing: false) && moves.isEmpty,
                   "A letter key stays with the field")
+        // T-070: with the caret inside what was typed, ← → edit the query.
+        try check(!bar.takes(keyDown(UInt16(kVK_LeftArrow)), composing: false, caretAtEnd: false) && moves.isEmpty,
+                  "Left with the caret inside the query moves the caret")
+        try check(!bar.takes(keyDown(UInt16(kVK_RightArrow)), composing: false, caretAtEnd: false) && moves.isEmpty,
+                  "Right with the caret inside the query moves the caret")
+        try check(bar.takes(keyDown(UInt16(kVK_RightArrow)), composing: false, caretAtEnd: true) && moves == [1],
+                  "Right with the caret back at the end picks again")
+        try check(bar.takes(keyDown(UInt16(kVK_DownArrow)), composing: false, caretAtEnd: false),
+                  "Down still opens the basket list with the caret inside the query")
     }
 
     /// T-021: what is used goes to the head of the line — pasted after ⌥C,

@@ -47,6 +47,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 
 - [#107 更改快捷键后，设置里显示的还是旧快捷键](https://github.com/a1024053774/EnCopy/issues/107) → [T-068](tickets/T-068-shortcut-display.md)
 - [#108 悬停放大只出现一次，绳子收回再叫出来后不再放大](https://github.com/a1024053774/EnCopy/issues/108) → [T-069](tickets/T-069-zoom-while-summoned.md)
+- [#109 搜索框里 ← → 不能移动光标](https://github.com/a1024053774/EnCopy/issues/109) → [T-070](tickets/T-070-search-caret.md)
 
 ## Not yet specified
 
@@ -66,7 +67,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 | Doc | Covers | Verified |
 | --- | --- | --- |
 | [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 724e960 |
-| [README.md](../README.md) | `scripts/**`, `Package.swift` | 72f5ce1 |
-| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 72f5ce1 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | fdcae64 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 724e960 |
+| [README.md](../README.md) | `scripts/**`, `Package.swift` | becec6e |
+| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | becec6e |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | becec6e |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | becec6e |
