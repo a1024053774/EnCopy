@@ -168,6 +168,9 @@
 "%@ seconds" = "%@ 秒";
 "Show the app it came from" = "显示来源 App";
 "Theme" = "主题";
+"Appearance" = "外观";
+"Show Details" = "展开说明";
+"Hide Details" = "收起说明";
 "Paper" = "纸";
 "Pixel" = "像素";
 "Skeuomorphic" = "拟物";

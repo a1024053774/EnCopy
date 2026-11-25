@@ -170,6 +170,9 @@
 "%@ seconds" = "%@ seconds";
 "Show the app it came from" = "Show the app it came from";
 "Theme" = "Theme";
+"Appearance" = "Appearance";
+"Show Details" = "Show Details";
+"Hide Details" = "Hide Details";
 "Paper" = "Paper";
 "Pixel" = "Pixel";
 "Skeuomorphic" = "Skeuomorphic";

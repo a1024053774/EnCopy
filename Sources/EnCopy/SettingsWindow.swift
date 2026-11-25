@@ -115,6 +115,8 @@ final class SettingsModel: ObservableObject {
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     @State private var tab: Int
+    /// 保留's long note on storage starts folded (T-071).
+    @State private var showsStorage = false
 
     init(model: SettingsModel, initialTab: Int = 0) {
         self.model = model
@@ -124,8 +126,8 @@ struct SettingsView: View {
     private var theme: Theme { _ = model.version; return model.actions.theme() }
 
     private var tabs: [(String, String)] {
-        [(L("General"), "gearshape"), (L("Hang what you copy"), "doc.on.clipboard"), (L("Screenshots"), "camera.viewfinder"),
-         (L("The line"), "line.diagonal"), (L("Keeping"), "archivebox")]
+        [(L("General"), "gearshape"), (L("Appearance"), "paintpalette"), (L("Hang what you copy"), "doc.on.clipboard"),
+         (L("Screenshots"), "camera.viewfinder"), (L("The line"), "line.diagonal"), (L("Keeping"), "archivebox")]
     }
 
     var body: some View {
@@ -141,9 +143,10 @@ struct SettingsView: View {
                 VStack(spacing: 14) {
                     switch tab {
                     case 0: general; updates
-                    case 1: recording
-                    case 2: screenshots
-                    case 3: lineTab
+                    case 1: appearance
+                    case 2: recording
+                    case 3: screenshots
+                    case 4: lineTab
                     default: keeping
                     }
                 }
@@ -288,15 +291,7 @@ struct SettingsView: View {
                 }
             }
             SettingsSheet(title: nil) {
-                SettingsRow(L("Theme")) {
-                    Picker("", selection: Binding(
-                        get: { _ = model.version; return model.actions.theme() },
-                        set: { model.actions.setTheme($0); model.reload() })) {
-                        ForEach(Theme.allCases) { Text($0.title).tag($0) }
-                    }
-                    .labelsHidden().fixedSize()
-                }
-                SettingsRow(L("Keep on line")) {
+                SettingsRow(L("Keep on line"), last: true) {
                     Picker("", selection: Binding(
                         get: { _ = model.version; return Line.keepOnLine ?? 0 },
                         set: { model.actions.setKeep($0 == 0 ? nil : $0); model.reload() })) {
@@ -305,6 +300,28 @@ struct SettingsView: View {
                     }
                     .labelsHidden().fixedSize()
                 }
+            }
+        }
+    }
+
+    /// 外观 (T-071): the theme, picked from scraps of each, and how the
+    /// cards look. It used to be a menu halfway down 晾衣绳, and people
+    /// could not find it.
+    private var appearance: some View {
+        let current = theme
+        return Group {
+            SettingsSheet(title: L("Theme")) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 14) {
+                    ForEach(Theme.allCases) { t in
+                        ThemeSwatch(theme: t, selected: t == current) {
+                            model.actions.setTheme(t)
+                            model.reload()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 16)
+            }
+            SettingsSheet(title: nil) {
                 SettingsRow(L("Size")) {
                     Picker("", selection: Binding(
                         get: { _ = model.version; return Layout.size },
@@ -313,7 +330,7 @@ struct SettingsView: View {
                         Text(L("Medium")).tag(Layout.Size.medium)
                         Text(L("Large")).tag(Layout.Size.large)
                     }
-                    .labelsHidden().fixedSize()
+                    .labelsHidden().pickerStyle(.segmented).fixedSize()
                 }
                 SettingsRow(L("Show the app it came from")) {
                     Toggle("", isOn: model.binding({ Line.showsSourceApp }, { Line.showsSourceApp = $0 })).labelsHidden()
@@ -332,13 +349,6 @@ struct SettingsView: View {
         // Binary units, as the caps are counted: 1 << 30 reads "1 GB", as in the picker.
         let size = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .memory) }
         return Group {
-            SettingsSheet(title: L("What EnCopy keeps")) {
-                SettingsRow(L("Text"), detail: L("Kept a year after its last use")) { EmptyView() }
-                SettingsRow(L("Screenshots and images"),
-                            detail: L("Originals shrink to thumbnails after 30 days; the words in them can still be found")) { EmptyView() }
-                SettingsRow(L("Files from Finder"), detail: L("Their paths are kept a year; the files themselves are never moved")) { EmptyView() }
-                SettingsRow(L("On the line and pinned"), detail: L("Never expire"), last: true) { EmptyView() }
-            }
             SettingsSheet(title: L("Room for originals")) {
                 SettingsRow(L("Originals may use up to"),
                             detail: L("Past it, the oldest originals shrink first")) {
@@ -358,22 +368,36 @@ struct SettingsView: View {
                     Button(L("Clean Up History…")) { model.actions.openCleanup() }
                 }
             }
+            SettingsSheet(title: L("What EnCopy keeps")) {
+                SettingsRow(L("Text"), detail: L("Kept a year after its last use")) { EmptyView() }
+                SettingsRow(L("Screenshots and images"),
+                            detail: L("Originals shrink to thumbnails after 30 days; the words in them can still be found")) { EmptyView() }
+                SettingsRow(L("Files from Finder"), detail: L("Their paths are kept a year; the files themselves are never moved")) { EmptyView() }
+                SettingsRow(L("On the line and pinned"), detail: L("Never expire"), last: true) { EmptyView() }
+            }
             // T-052: how each kind is stored, as the code does it, so nobody
-            // has to wonder whether a copied file takes room twice.
+            // has to wonder whether a copied file takes room twice. Folded
+            // until asked for (T-071): the page opens on what can be set.
             SettingsSheet(title: L("How EnCopy stores things")) {
-                SettingsRow(L("Text, links and code"),
-                            detail: L("Each is a small file in EnCopy's folder; copying the same thing again adds nothing")) { EmptyView() }
-                SettingsRow(L("Screenshots and copied images"),
-                            detail: L("The original is kept in EnCopy's folder until it shrinks to a thumbnail")) { EmptyView() }
-                SettingsRow(L("Screen recordings"),
-                            detail: L("Kept in EnCopy's folder; off the line, they go to the Trash")) { EmptyView() }
-                SettingsRow(L("Files from Finder"),
-                            detail: L("Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list")) { EmptyView() }
-                SettingsRow(L("Pictures and videos from Finder"),
-                            detail: L("Shown from where they are, not copied; when they leave the line, the files stay put")) { EmptyView() }
                 SettingsRow(L("All on this Mac"),
-                            detail: L("EnCopy goes online only to ask GitHub for a newer version; nothing you copy leaves this Mac"), last: true) {
-                    Button(L("Show in Finder")) { NSWorkspace.shared.open(DataFolder.url) }
+                            detail: L("EnCopy goes online only to ask GitHub for a newer version; nothing you copy leaves this Mac"),
+                            last: !showsStorage) {
+                    HStack(spacing: 8) {
+                        Button(showsStorage ? L("Hide Details") : L("Show Details")) { showsStorage.toggle() }
+                        Button(L("Show in Finder")) { NSWorkspace.shared.open(DataFolder.url) }
+                    }
+                }
+                if showsStorage {
+                    SettingsRow(L("Text, links and code"),
+                                detail: L("Each is a small file in EnCopy's folder; copying the same thing again adds nothing")) { EmptyView() }
+                    SettingsRow(L("Screenshots and copied images"),
+                                detail: L("The original is kept in EnCopy's folder until it shrinks to a thumbnail")) { EmptyView() }
+                    SettingsRow(L("Screen recordings"),
+                                detail: L("Kept in EnCopy's folder; off the line, they go to the Trash")) { EmptyView() }
+                    SettingsRow(L("Files from Finder"),
+                                detail: L("Never copied and never linked: EnCopy writes their paths in a short list, and the files stay where they are, untouched. Clearing one deletes only the list")) { EmptyView() }
+                    SettingsRow(L("Pictures and videos from Finder"),
+                                detail: L("Shown from where they are, not copied; when they leave the line, the files stay put"), last: true) { EmptyView() }
                 }
             }
         }
@@ -439,6 +463,62 @@ private struct SettingsTag: View {
         .buttonStyle(.plain)
         .focusEffectDisabled()
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One theme on the 外观 page (T-071): a scrap of its line with two papers
+/// on it, over what the window lies on in that theme, and its name. The
+/// one in use is ringed in the current theme's pick colour.
+private struct ThemeSwatch: View {
+    let theme: Theme
+    let selected: Bool
+    let action: () -> Void
+    @Environment(\.settingsTheme) private var current
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack(alignment: .top) {
+                    SettingsBackdrop(theme: theme)
+                    Rope(width: 150, theme: theme).frame(width: 150, height: 70)
+                    HStack(alignment: .top, spacing: 16) {
+                        paper(.text, tilt: -4)
+                        paper(.link, tilt: 3)
+                    }
+                    .padding(.top, 12)
+                }
+                .frame(width: 150, height: 70)
+                .environment(\.colorScheme, theme == .neon ? .dark : .light)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(selected ? current.picked : Color.black.opacity(0.15), lineWidth: selected ? 3 : 1)
+                }
+                Text(theme.title)
+                    .font(current.font(11.5, bold: selected))
+                    // Ink, not the pick colour: pixel's yellow is unreadable on its cream paper.
+                    .foregroundStyle(current.ink(.text))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .accessibilityLabel(theme.title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func paper(_ card: Theme.Card, tilt: Double) -> some View {
+        ThemeCardBackground(theme: theme, card: card)
+            .frame(width: 44, height: 38)
+            .overlay(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Capsule().fill(theme.ink(card).opacity(0.75)).frame(width: 28, height: 3)
+                    Capsule().fill(theme.soft(card).opacity(0.75)).frame(width: 20, height: 3)
+                }
+                .padding(.top, 12).padding(.leading, 7)
+            }
+            .overlay(alignment: .top) { ThemePeg(theme: theme).scaleEffect(0.55).offset(y: -9) }
+            .rotationEffect(.degrees(tilt), anchor: .top)
     }
 }
 
