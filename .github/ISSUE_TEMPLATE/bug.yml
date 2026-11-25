@@ -1,0 +1,35 @@
+name: 问题反馈 / Bug Report
+description: 用起来不对劲、崩溃、没贴上去或显示异常 / Something isn't working right
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么 / What happened?
+      description: 做了哪一步、实际出现了什么结果？
+      placeholder: 例如：按 ⌥C 叫出绳子后按 ⏎，没有贴进前台的某某 App……
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: EnCopy 版本 / EnCopy version
+      description: 菜单栏图标 →「关于 EnCopy」里的版本号
+      placeholder: 0.4.2
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本与芯片 / macOS version & chip
+      placeholder: macOS 15.4 (Apple Silicon) / macOS 14.7 (Intel)
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充说明或截图（可选）/ Screenshots or extra context
+      description: 如果和特定来源 App、「辅助功能」权限或外接屏幕有关，可以顺带写上。上传截图前请留意遮挡剪贴板里的私人内容。
