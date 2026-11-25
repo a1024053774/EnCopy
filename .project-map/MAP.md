@@ -47,6 +47,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 
 - [#107 更改快捷键后，设置里显示的还是旧快捷键](https://github.com/a1024053774/EnCopy/issues/107) → [T-068](tickets/T-068-shortcut-display.md)
 - [#108 悬停放大只出现一次，绳子收回再叫出来后不再放大](https://github.com/a1024053774/EnCopy/issues/108) → [T-069](tickets/T-069-zoom-while-summoned.md)
+- [#109 搜索框里 ← → 不能移动光标](https://github.com/a1024053774/EnCopy/issues/109) → [T-070](tickets/T-070-search-caret.md)
 
 ## Not yet specified
 
