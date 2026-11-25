@@ -10,7 +10,7 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 
 ## 下载
 
-最新版是 [0.4.2](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
+最新版是 [0.4.3](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
 
 0.4.2 起 EnCopy 在 App 里就能更新。还在用 0.4.1 或更早版本的（菜单栏图标 →「关于 EnCopy」里看版本号），这些版本不会提醒你更新，请重新下载一次 DMG 覆盖安装，之后就不用再手动下了。
 
