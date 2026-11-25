@@ -19,7 +19,6 @@
 "Open screenshots folder" = "Open screenshots folder";
 "Sounds" = "Sounds";
 "Open at login" = "Open at login";
-"Check for Updates…" = "Check for Updates…";
 "Quit EnCopy" = "Quit EnCopy";
 "Could not change the login setting" = "Could not change the login setting";
 "Move EnCopy to the Applications folder and try again." = "Move EnCopy to the Applications folder and try again.";
@@ -226,4 +225,31 @@
 "Pictures and videos from Finder" = "Pictures and videos from Finder";
 "Shown from where they are, not copied; when they leave the line, the files stay put" = "Shown from where they are, not copied; when they leave the line, the files stay put";
 "All on this Mac" = "All on this Mac";
-"EnCopy never goes online; Check for Updates only opens the releases page" = "EnCopy never goes online; Check for Updates only opens the releases page";
+
+/* In-app updates (T-053) */
+"Couldn't reach GitHub" = "Couldn't reach GitHub";
+"The download has no EnCopy in it" = "The download has no EnCopy in it";
+"The download is not this EnCopy" = "The download is not this EnCopy";
+"The download is not newer than this copy" = "The download is not newer than this copy";
+"The download's signature doesn't match this copy" = "The download's signature doesn't match this copy";
+"EnCopy couldn't replace itself where it is" = "EnCopy couldn't replace itself where it is";
+"Update EnCopy to %@?" = "Update EnCopy to %@?";
+"EnCopy will quit and open again." = "EnCopy will quit and open again.";
+"Update and Restart" = "Update and Restart";
+"Later" = "Later";
+"EnCopy wasn't updated" = "EnCopy wasn't updated";
+"This copy is unchanged. You can download the new version from the releases page." = "This copy is unchanged. You can download the new version from the releases page.";
+"Open Releases Page" = "Open Releases Page";
+"EnCopy %@ is available" = "EnCopy %@ is available";
+"Update to %@ and Restart…" = "Update to %@ and Restart…";
+"Updates" = "Updates";
+"Check for Updates" = "Check for Updates";
+"Update automatically" = "Update automatically";
+"Installs a new version and restarts by itself; when off, EnCopy only tells you" = "Installs a new version and restarts by itself; when off, EnCopy only tells you";
+"EnCopy goes online only to ask GitHub for a newer version; nothing you copy leaves this Mac" = "EnCopy goes online only to ask GitHub for a newer version; nothing you copy leaves this Mac";
+"This is version %@" = "This is version %@";
+"The development copy doesn't check for updates" = "The development copy doesn't check for updates";
+"Checking…" = "Checking…";
+"Up to date" = "Up to date";
+"Version %@ is out" = "Version %@ is out";
+"Updating…" = "Updating…";

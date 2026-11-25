@@ -73,7 +73,7 @@ cat > "$CHECK_APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 SOURCES=()
-for name in Line LineView BasketList LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown HotKey SearchBar Paste DataFolder History ClipboardWatcher Clearing Motion MenuBarIcon Theme CleanupPanel; do
+for name in Line LineView BasketList LinePanel PeggedView GrabArea Share Markup Trim QuickLook Localization ScreenshotWatcher SearchIndex NoteSheet Held Markdown HotKey SearchBar Paste DataFolder History ClipboardWatcher Clearing Motion MenuBarIcon Theme CleanupPanel Updater; do
     SOURCES+=("Sources/EnCopy/$name.swift")
 done
 swiftc -module-name EnCopy -target "$(uname -m)-apple-macosx14.0" -parse-as-library "${SOURCES[@]}" scripts/checks.swift \

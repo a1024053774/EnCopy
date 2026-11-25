@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import SQLite3
+import Security
 import Carbon
 import SwiftUI
 import UniformTypeIdentifiers
@@ -453,6 +454,114 @@ struct CheckFailed: Error { let message: String }
         try checkFinderPicturesByName()
         try checkTakeDownOnlyShown()
         try checkRecopyAnyPicture()
+        try checkUpdater()
+    }
+
+    /// T-053: what the updater accepts and refuses, without the network.
+    /// Each refusal leaves the app in place as it was.
+    func checkUpdater() throws {
+        try check(Updater.isNewer("0.10.0", than: "0.9.0") && Updater.isNewer("v0.4.2", than: "0.4.1")
+                  && !Updater.isNewer("0.4", than: "0.4.0") && !Updater.isNewer("0.4.0", than: "v0.4")
+                  && !Updater.isNewer("0.4.1", than: "0.4.2") && Updater.isNewer("1.0", than: "0.99.99"),
+                  "Versions compare number by number; 0.4 is 0.4.0 and a leading v is ignored")
+
+        func feed(tag: String, assets: [String], draft: Bool = false, prerelease: Bool = false) -> Data {
+            let list = assets.map { "{\"name\":\"\($0)\",\"browser_download_url\":\"https://example.com/\($0)\"}" }
+            return Data("{\"tag_name\":\"\(tag)\",\"body\":\"notes\",\"draft\":\(draft),\"prerelease\":\(prerelease),\"assets\":[\(list.joined(separator: ","))]}".utf8)
+        }
+        let found = try Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy-0.4.2.dmg", "EnCopy.dmg"]))
+        try check(found == Updater.Release(version: "0.4.2", notes: "notes", dmg: URL(string: "https://example.com/EnCopy.dmg")!),
+                  "A release's version and its EnCopy.dmg are read from GitHub's answer")
+        try check(try Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy-0.4.2.dmg"])) == nil
+                  && Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy.dmg"], draft: true)) == nil
+                  && Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy.dmg"], prerelease: true)) == nil,
+                  "A release without EnCopy.dmg, a draft or a prerelease offers no update")
+        let notes = "## 新东西\n\n- **设置里写清 EnCopy 怎么存。** 「保留」页\n- 文字存成小文件\n\n## 安装\n\n下载 EnCopy.dmg\n\n---\n\nNew: the Keeping page"
+        try check(Updater.whatsNew(notes) == "- 设置里写清 EnCopy 怎么存。 「保留」页\n- 文字存成小文件"
+                  && Updater.whatsNew("Just a line\n---\nEnglish") == "Just a line",
+                  "The update dialog shows only what is new, without the install steps, the English copy or Markdown marks")
+
+        let fm = FileManager.default
+        let dir = root.appendingPathComponent("updater", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        func makeApp(_ name: String, id: String, version: String, sign: Bool = true) throws -> URL {
+            let app = dir.appendingPathComponent(name).appendingPathComponent("EnCopy.app")
+            try fm.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+            try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: app.appendingPathComponent("Contents/MacOS/EnCopy"))
+            let info: NSDictionary = ["CFBundleIdentifier": id, "CFBundleShortVersionString": version,
+                                      "CFBundleExecutable": "EnCopy", "CFBundlePackageType": "APPL"]
+            try info.write(to: app.appendingPathComponent("Contents/Info.plist"))
+            if sign {
+                let codesign = Process()
+                codesign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                codesign.arguments = ["--force", "--sign", "-", app.path]
+                codesign.standardError = FileHandle.nullDevice
+                try codesign.run(); codesign.waitUntilExit()
+                guard codesign.terminationStatus == 0 else { throw CheckFailed(message: "codesign failed for the updater fixture") }
+            }
+            return app
+        }
+        var requirement: SecRequirement?
+        SecRequirementCreateWithString("identifier \"app.encopy.EnCopy\"" as CFString, [], &requirement)
+        func refusal(_ app: URL, id: String = "app.encopy.EnCopy", current: String = "0.4.1",
+                     requirement given: SecRequirement?) -> Updater.Failure? {
+            do { try Updater.verify(app, bundleID: id, newerThan: current, requirement: given); return nil }
+            catch { return error as? Updater.Failure }
+        }
+        let good = try makeApp("good", id: "app.encopy.EnCopy", version: "0.4.2")
+        try check(refusal(good, requirement: requirement) == nil, "This app, newer and signed to the running copy's requirement, is accepted")
+        try check(refusal(try makeApp("dev", id: "app.encopy.EnCopy.dev", version: "0.4.2"), requirement: requirement) == .wrongApp
+                  && refusal(try makeApp("same", id: "app.encopy.EnCopy", version: "0.4.1"), requirement: requirement) == .notNewer
+                  && refusal(try makeApp("unsigned", id: "app.encopy.EnCopy", version: "0.4.2", sign: false), requirement: requirement) == .signature
+                  && refusal(good, requirement: nil) == .signature,
+                  "Another app, an old version, an unsigned app, or no requirement to match is refused")
+        var other: SecRequirement?
+        SecRequirementCreateWithString("identifier \"app.encopy.EnCopy\" and certificate leaf = H\"0000000000000000000000000000000000000000\"" as CFString, [], &other)
+        try check(refusal(good, requirement: other) == .signature, "An app signed by another certificate is refused")
+        let tampered = try makeApp("tampered", id: "app.encopy.EnCopy", version: "0.4.2")
+        try Data("changed".utf8).write(to: tampered.appendingPathComponent("Contents/MacOS/EnCopy"))
+        try check(refusal(tampered, requirement: requirement) == .signature, "An app changed after it was signed is refused")
+
+        // The image is unpacked next to the target, and the swap replaces it.
+        let target = try makeApp("installed", id: "app.encopy.EnCopy", version: "0.4.1")
+        let source = try makeApp("release", id: "app.encopy.EnCopy", version: "0.4.2")
+        let dmg = dir.appendingPathComponent("EnCopy.dmg")
+        func hdiutil(_ args: [String]) throws {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            p.arguments = args
+            p.standardOutput = FileHandle.nullDevice
+            try p.run(); p.waitUntilExit()
+            guard p.terminationStatus == 0 else { throw CheckFailed(message: "hdiutil \(args[0]) failed") }
+        }
+        try hdiutil(["create", "-quiet", "-fs", "HFS+", "-srcfolder", source.deletingLastPathComponent().path, "-volname", "EnCopy", dmg.path])
+        let staged = try Updater.unpack(dmg: dmg, beside: target)
+        try check(refusal(staged, requirement: requirement) == nil
+                  && !fm.fileExists(atPath: staged.deletingLastPathComponent().appendingPathComponent("mount/EnCopy.app").path),
+                  "The app comes out of the image intact, and the image is detached")
+        let work = staged.deletingLastPathComponent()
+        try Updater.replace(target, with: staged)
+        try? fm.removeItem(at: work)
+        let installed = NSDictionary(contentsOf: target.appendingPathComponent("Contents/Info.plist"))
+        try check(installed?["CFBundleShortVersionString"] as? String == "0.4.2", "The new version takes the old one's place")
+
+        let empty = dir.appendingPathComponent("empty", isDirectory: true)
+        try fm.createDirectory(at: empty, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: empty.appendingPathComponent("readme.txt"))
+        let emptyDMG = dir.appendingPathComponent("Empty.dmg")
+        try hdiutil(["create", "-quiet", "-fs", "HFS+", "-srcfolder", empty.path, "-volname", "Empty", emptyDMG.path])
+        var noApp: Updater.Failure?
+        do { _ = try Updater.unpack(dmg: emptyDMG, beside: target) } catch { noApp = error as? Updater.Failure }
+        let locked = dir.appendingPathComponent("locked", isDirectory: true)
+        let lockedApp = try makeApp("locked", id: "app.encopy.EnCopy", version: "0.4.1")
+        let spare = try makeApp("spare", id: "app.encopy.EnCopy", version: "0.4.2")
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        var replaceFailure: Updater.Failure?
+        do { try Updater.replace(lockedApp, with: spare) } catch { replaceFailure = error as? Updater.Failure }
+        let kept = NSDictionary(contentsOf: lockedApp.appendingPathComponent("Contents/Info.plist"))
+        try check(noApp == .noApp && replaceFailure == .replace && kept?["CFBundleShortVersionString"] as? String == "0.4.1",
+                  "An image without EnCopy, or a place that can't be written, leaves the installed app as it was")
     }
 
     /// A note fixture adopted into the checks' own Notes folder, so `isText`

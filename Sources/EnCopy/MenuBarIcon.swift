@@ -9,7 +9,9 @@ enum MenuBarIcon {
 
     /// `tilt`: degrees the pegs swing on the rope, for the sway when
     /// something is copied while the line is tucked away (T-038).
-    static func image(watching: Bool, tilt: CGFloat = 0) -> NSImage {
+    /// `update`: a dot in the lower right corner, while a newer EnCopy is
+    /// waiting to be installed (T-053).
+    static func image(watching: Bool, tilt: CGFloat = 0, update: Bool = false) -> NSImage {
         let image = NSImage(size: size, flipped: true) { _ in
             NSColor.black.set()
             let rope = NSBezierPath()
@@ -34,6 +36,9 @@ enum MenuBarIcon {
                     peg.lineWidth = 0.8
                     peg.stroke()
                 }
+            }
+            if update {
+                NSBezierPath(ovalIn: NSRect(x: 14.5, y: 8.5, width: 3.5, height: 3.5)).fill()
             }
             return true
         }

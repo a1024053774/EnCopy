@@ -46,6 +46,7 @@ final class SettingsWindow {
             w.center()
             window = w
             self.model = model
+            Updater.shared.onChange = { [weak model] in model?.reload() }
         }
         model?.frontApp = frontApp
         model?.reload()
@@ -61,7 +62,24 @@ final class SettingsModel: ObservableObject {
     /// Bumped to redraw after a change made outside SwiftUI's bindings.
     @Published private(set) var version = 0
 
+    let updater = Updater.shared
+
     init(actions: SettingsActions) { self.actions = actions }
+
+    /// The version this is, and what the last look for a newer one found.
+    var updateStatus: String {
+        _ = version
+        let current = String(format: L("This is version %@"), Updater.currentVersion)
+        guard Updater.isOffered else { return current + " · " + L("The development copy doesn't check for updates") }
+        switch updater.state {
+        case .idle: return current
+        case .checking: return current + " · " + L("Checking…")
+        case .upToDate: return current + " · " + L("Up to date")
+        case .available(let release): return current + " · " + String(format: L("Version %@ is out"), release.version)
+        case .installing: return current + " · " + L("Updating…")
+        case .failed(let message): return current + " · " + message
+        }
+    }
 
     func reload() { version += 1 }
 
@@ -120,7 +138,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     switch tab {
-                    case 0: general
+                    case 0: general; updates
                     case 1: recording
                     case 2: screenshots
                     case 3: lineTab
@@ -149,8 +167,24 @@ struct SettingsView: View {
             SettingsRow(L("Shortcut"), detail: { _ = model.version; return Shortcut.current?.display ?? L("None") }()) {
                 Button(L("Change Shortcut…")) { model.actions.changeShortcut() }
             }
-            SettingsRow(nil, last: true) {
-                Button(L("Check for Updates…")) { NSWorkspace.shared.open(AppDelegate.updatesURL) }
+        }
+    }
+
+    /// T-053: 更新 and 自动更新, on the General page under the rest.
+    private var updates: some View {
+        SettingsSheet(title: nil) {
+            SettingsRow(L("Updates"), detail: model.updateStatus) {
+                if let release = model.updater.available {
+                    Button(String(format: L("Update to %@ and Restart…"), release.version)) { model.updater.confirmAndInstall() }
+                } else {
+                    Button(L("Check for Updates")) { model.updater.check(manual: true) }
+                        .disabled(!Updater.isOffered || [.checking, .installing].contains(model.updater.state))
+                }
+            }
+            SettingsRow(L("Update automatically"),
+                        detail: L("Installs a new version and restarts by itself; when off, EnCopy only tells you"), last: true) {
+                Toggle("", isOn: model.binding({ Updater.autoUpdate }, { Updater.autoUpdate = $0 })).labelsHidden()
+                    .disabled(!Updater.isOffered)
             }
         }
     }
@@ -336,7 +370,7 @@ struct SettingsView: View {
                 SettingsRow(L("Pictures and videos from Finder"),
                             detail: L("Shown from where they are, not copied; when they leave the line, the files stay put")) { EmptyView() }
                 SettingsRow(L("All on this Mac"),
-                            detail: L("EnCopy never goes online; Check for Updates only opens the releases page"), last: true) {
+                            detail: L("EnCopy goes online only to ask GitHub for a newer version; nothing you copy leaves this Mac"), last: true) {
                     Button(L("Show in Finder")) { NSWorkspace.shared.open(DataFolder.url) }
                 }
             }
