@@ -132,7 +132,7 @@ final class Updater {
         guard let release = available else { return }
         let alert = NSAlert()
         alert.messageText = String(format: L("Update EnCopy to %@?"), release.version)
-        let notes = release.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = Self.whatsNew(release.notes)
         let shortNotes = notes.count > 800 ? String(notes.prefix(800)) + "…" : notes
         alert.informativeText = [shortNotes, L("EnCopy will quit and open again.")].filter { !$0.isEmpty }.joined(separator: "\n\n")
         alert.addButton(withTitle: L("Update and Restart"))
@@ -189,6 +189,25 @@ final class Updater {
               let asset = feed.assets.first(where: { $0.name == assetName }) else { return nil }
         return Release(version: versionParts(feed.tag_name).map(String.init).joined(separator: "."),
                        notes: feed.body ?? "", dmg: asset.browser_download_url)
+    }
+
+    /// The release notes' first part, what is new, as plain text: up to the
+    /// second heading or a --- rule, which start the install steps and the
+    /// English copy; headings and ** marks dropped.
+    nonisolated static func whatsNew(_ notes: String) -> String {
+        var lines: [String] = []
+        var headings = 0
+        for line in notes.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" { break }
+            if trimmed.hasPrefix("#") {
+                headings += 1
+                if headings > 1 { break }
+                continue
+            }
+            lines.append(line.replacingOccurrences(of: "**", with: ""))
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Compared number by number: 0.10.0 is newer than 0.9.0, 0.4 is 0.4.0,

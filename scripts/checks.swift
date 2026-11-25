@@ -476,6 +476,10 @@ struct CheckFailed: Error { let message: String }
                   && Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy.dmg"], draft: true)) == nil
                   && Updater.release(from: feed(tag: "v0.4.2", assets: ["EnCopy.dmg"], prerelease: true)) == nil,
                   "A release without EnCopy.dmg, a draft or a prerelease offers no update")
+        let notes = "## 新东西\n\n- **设置里写清 EnCopy 怎么存。** 「保留」页\n- 文字存成小文件\n\n## 安装\n\n下载 EnCopy.dmg\n\n---\n\nNew: the Keeping page"
+        try check(Updater.whatsNew(notes) == "- 设置里写清 EnCopy 怎么存。 「保留」页\n- 文字存成小文件"
+                  && Updater.whatsNew("Just a line\n---\nEnglish") == "Just a line",
+                  "The update dialog shows only what is new, without the install steps, the English copy or Markdown marks")
 
         let fm = FileManager.default
         let dir = root.appendingPathComponent("updater", isDirectory: true)
