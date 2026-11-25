@@ -145,6 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setUpStatusItem()
         watchMenuBarClicks()
 
+        // T-053: a newer release marks the menu bar icon and the menu; an
+        // automatic update waits while you are picking from the line.
+        Updater.shared.canRestartNow = { [weak self] in
+            guard let self else { return true }
+            return !self.isRevealed && self.searchBar?.isShown != true
+        }
+        Updater.shared.onAvailable = { [weak self] in self?.updateStatusIcon() }
+        Updater.shared.start()
+
         // Hang on EnCopy, in the menu of images in Finder and other apps.
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
@@ -463,7 +472,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i + 1)) { [weak self] in
                 guard let self else { return }
                 if tilt == 0 { self.updateStatusIcon(); return }
-                let image = MenuBarIcon.image(watching: ClipboardWatcher.isEnabled, tilt: tilt)
+                let image = MenuBarIcon.image(watching: ClipboardWatcher.isEnabled, tilt: tilt,
+                                              update: Updater.shared.available != nil)
                 image.accessibilityDescription = button.image?.accessibilityDescription
                 button.image = image
             }
@@ -1010,15 +1020,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let count = line.liveCount
         let description = on ? L("EnCopy, hanging copied images") : "EnCopy"
         let state = count == 0 ? L("The line is empty") : String(format: L("%d on the line"), count)
-        let image = MenuBarIcon.image(watching: on)
-        image.accessibilityDescription = "\(description), \(state)"
+        let update = Updater.shared.available.map { String(format: L("EnCopy %@ is available"), $0.version) }
+        let image = MenuBarIcon.image(watching: on, update: update != nil)
+        image.accessibilityDescription = (["\(description), \(state)"] + [update].compactMap { $0 }).joined(separator: ", ")
         statusItem.button?.image = image
-        statusItem.button?.appearsDisabled = count == 0
-        statusItem.button?.toolTip = "\(description)\n\(state)"
+        statusItem.button?.appearsDisabled = count == 0 && update == nil
+        statusItem.button?.toolTip = (["\(description)", state] + [update].compactMap { $0 }).joined(separator: "\n")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+
+        if let release = Updater.shared.available {
+            menu.addItem(ClosureMenuItem(String(format: L("Update to %@ and Restart…"), release.version)) {
+                Updater.shared.confirmAndInstall()
+            })
+            menu.addItem(.separator())
+        }
 
         let toggleItem = ClosureMenuItem(isRevealed ? L("Hide line") : L("Show line")) { [weak self] in
             self?.summon()
@@ -1077,9 +1095,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: "retentionLastRun")
         line.runRetention(now: now, inBackground: true)
     }
-
-    /// EnCopy's releases on GitHub.
-    static let updatesURL = URL(string: "https://github.com/a1024053774/EnCopy/releases")!
 
     /// Settings, with the app in front before it opened offered first under By app.
     private func showSettings() {
