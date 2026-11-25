@@ -14,10 +14,51 @@ public readonly record struct DisplayMonitor(PixelRect Bounds, PixelRect WorkAre
 public readonly record struct DipRect(double Left, double Top, double Width, double Height);
 
 /// <summary>
-/// 按鼠标所在显示器及该屏 DPI 计算面板顶部居中位置，同时支持真实显示器与测试注入显示器列表。
+/// 按鼠标所在显示器及该屏 DPI 计算顶部晾衣绳面板、横幅与卡片容量，支持真实显示器与测试注入显示器列表。
 /// </summary>
 public static class ScreenPlacement
 {
+    public const double CardWidth = 148.0;
+    public const double CardHeight = 108.0;
+    public const double CardSpacing = 172.0;
+    public const double RopeTop = 10.0;
+    public const double LineBandHeight = 208.0;
+
+    // Known unverified (T-058 / T-059): Current dev machine has a single display (\\.\DISPLAY1 at 125% DPI),
+    // so mixed-DPI multi-monitor Window.Left/Top DIP-to-physical conversion is covered by unit math
+    // (TestScreenPlacementMultiMonitorDpi) rather than hardware transition across monitors.
+    // Impact: Secondary monitor placement at a different DPI scale may need post-SourceInitialized physical SetWindowPos adjustment.
+    // Removal condition: Verify live on a physical external monitor with differing DPI scale and remove or adjust.
+    public static DipRect TopLineStrip(
+        int cursorPhysicalX,
+        int cursorPhysicalY,
+        IReadOnlyList<DisplayMonitor> monitors,
+        double panelHeight)
+    {
+        var mon = PickMonitor(cursorPhysicalX, cursorPhysicalY, monitors);
+        double scale = mon.DpiScale > 0 ? mon.DpiScale : 1.0;
+        double workLeft = mon.WorkArea.Left / scale;
+        double workTop = mon.WorkArea.Top / scale;
+        double workWidth = mon.WorkArea.Width / scale;
+        double workHeight = mon.WorkArea.Height / scale;
+        double height = Math.Min(panelHeight, Math.Max(260, workHeight - 8));
+        return new DipRect(workLeft, workTop, workWidth, height);
+    }
+
+    public static int ComputeVisibleCapacity(double monitorWorkWidthDip)
+    {
+        return Math.Max(3, (int)Math.Floor((monitorWorkWidthDip - 160.0) / CardSpacing));
+    }
+
+    public static double RopeSag(double width) => Math.Min(28.0, width * 0.017);
+
+    public static double RopeY(double x, double width, double sagScale = 1.0)
+    {
+        if (width <= 0) return RopeTop;
+        double f = Math.Clamp(x / width, 0.0, 1.0);
+        return RopeTop + 4.0 * RopeSag(width) * sagScale * f * (1.0 - f);
+    }
+
     public static DisplayMonitor PickMonitor(int cursorPhysicalX, int cursorPhysicalY, IReadOnlyList<DisplayMonitor> monitors)
     {
         if (monitors.Count == 0)
@@ -36,33 +77,6 @@ public static class ScreenPlacement
             if (m.IsPrimary) return m;
         }
         return monitors[0];
-    }
-
-    // Known unverified (T-058 / T-059): Current dev machine has a single display (\\.\DISPLAY1 at 125% DPI),
-    // so mixed-DPI multi-monitor Window.Left/Top DIP-to-physical conversion is covered by unit math
-    // (TestScreenPlacementMultiMonitorDpi) rather than hardware transition across monitors.
-    // Impact: Secondary monitor placement at a different DPI scale may need post-SourceInitialized physical SetWindowPos adjustment.
-    // Removal condition: Verify live on a physical external monitor with differing DPI scale and remove or adjust.
-    public static DipRect TopCenterPanel(
-        int cursorPhysicalX,
-        int cursorPhysicalY,
-        IReadOnlyList<DisplayMonitor> monitors,
-        double preferredWidth = 680,
-        double preferredHeight = 440,
-        double topMargin = 12)
-    {
-        var mon = PickMonitor(cursorPhysicalX, cursorPhysicalY, monitors);
-        double scale = mon.DpiScale > 0 ? mon.DpiScale : 1.0;
-        double workLeft = mon.WorkArea.Left / scale;
-        double workTop = mon.WorkArea.Top / scale;
-        double workWidth = mon.WorkArea.Width / scale;
-        double workHeight = mon.WorkArea.Height / scale;
-
-        double width = Math.Min(preferredWidth, Math.Max(320, workWidth - 32));
-        double height = Math.Min(preferredHeight, Math.Max(220, workHeight - topMargin - 24));
-        double left = workLeft + (workWidth - width) / 2.0;
-        double top = workTop + topMargin;
-        return new DipRect(left, top, width, height);
     }
 
     public static DipRect TopBanner(

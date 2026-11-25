@@ -4,11 +4,49 @@ using System.Text.Json;
 
 namespace EnCopy;
 
+public sealed class SavedShortcut
+{
+    public uint Modifiers { get; set; }
+    public uint VirtualKey { get; set; }
+    public string Display { get; set; } = string.Empty;
+
+    public Shortcut ToShortcut() => new(Modifiers, VirtualKey, Display);
+
+    public static SavedShortcut From(Shortcut shortcut) => new()
+    {
+        Modifiers = shortcut.Modifiers,
+        VirtualKey = shortcut.VirtualKey,
+        Display = shortcut.Display
+    };
+}
+
 public sealed class AppSettings
 {
+    public static readonly int[] KeepChoices = [25, 50, 100];
+
     public bool RecordingPaused { get; set; }
     public bool TextEnabled { get; set; } = true;
     public bool LinksEnabled { get; set; } = true;
+    public int? KeepOnLine { get; set; }
+    public bool ShortcutCustomized { get; set; }
+    public SavedShortcut? CustomShortcut { get; set; }
+
+    public int? NormalizedKeepOnLine => KeepOnLine is { } n && KeepChoices.Contains(n) ? n : null;
+
+    public Shortcut? GetActiveShortcut()
+    {
+        if (!ShortcutCustomized)
+        {
+            return Shortcut.Standard;
+        }
+        return CustomShortcut is { VirtualKey: > 0 } saved ? saved.ToShortcut() : null;
+    }
+
+    public void SetActiveShortcut(Shortcut? shortcut)
+    {
+        ShortcutCustomized = true;
+        CustomShortcut = shortcut is { } s ? SavedShortcut.From(s) : null;
+    }
 }
 
 /// <summary>
