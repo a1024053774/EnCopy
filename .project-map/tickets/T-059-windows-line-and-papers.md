@@ -31,11 +31,11 @@ supersedes:
 
 ## Resolution
 
-阶段完成（等待用户桌面走查后合并）：
+阶段完成（已修复首轮走查及复查缺陷，待真机增量复验后合并）：
 
-- 代码提交：`b99ce01`（分支 `feat/T-059-windows-line-and-papers`，基于 `feat/T-058-windows-tracer-bullet`，尚未 push / 合并）。
-- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 全绿通过（6 项静态门禁 + 双版本 0 警告编译 + 16 项隔离测试 `[check] PASS`，含 5 种纸与 Markdown 渲染、`CardClickCoordinator` 防双击竞态、多选取下与 `Ctrl+Z` 原顺序放回、`IOException` 两阶段回滚、模态篮子空筛选防穿孔、滚动偏移夹紧、离屏 `alpha == 0` / `HitTest == null` 点击穿透校验以及 `install.ps1` 隔离安装校验）。
-- 失败-修复证据：按 `evidence-first-testing` 先证伪从篮子 `Ctrl+P` 收藏后 `Ctrl+Z` 未回退篮子的缺陷（`Red`），再补全 `PutBack` 同步路径后验证全绿（`Green`）。
-- 独立代码审查：`design-integrity-review`（`same-model review`）首轮指出 P1/P2/P3 与复审指出的 1 处回滚缺陷全部修复并补回归测试，随后整套重跑全绿；`windows/build/EnCopy Dev/EnCopy Dev.exe` 已重编就绪且已跑完 `clean-dev.ps1`。
-- 离屏视觉预览：`evidence/T-059/00-offscreen-line-light.png`、`evidence/T-059/00-offscreen-basket-dark.png`、`evidence/T-059/00-offscreen-shortcut-recorder.png`（已目视复核布局与深浅对比度）。
-- 待完成项：第 1、6 项真机表现（含桌面鼠标/滚轮穿透、双屏混合 DPI 及深浅切换）等待用户按 `T-058` + `T-059` 合一走查单验证后补充截图并关票。
+- 代码提交：`b99ce01`、合并 `T-058` 监听修复与篮子撤销补卡修复 `06f8c23`（分支 `feat/T-059-windows-line-and-papers`，尚未 push / 合并）。
+- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 全绿通过（6 项静态门禁 + 双版本 0 警告编译 + 16 项隔离测试 `[check] PASS`，含 5 种纸与 Markdown 渲染、`CardClickCoordinator` 防双击竞态、多选取下与 `Ctrl+Z` 原顺序放回、`IOException` 两阶段回滚、模态篮子空筛选防穿孔、滚动偏移夹紧、满绳篮子 `Ctrl+P` 再 `Ctrl+Z` 按序补回（含 `[Pin -> AddNew -> Undo]` / `[Pin1 -> Pin2 -> Undo -> Undo]` 与 `KeepOnLine=25` 未挤卡零回填约束）、`canUndoQuery` 放行判定、离屏 `alpha == 0` / `HitTest == null` 点击穿透校验以及 `install.ps1` 隔离安装校验）。
+- 失败-修复证据（`evidence-first-testing`）：针对真机走查报告 `evidence/walk-report.md` 发现的「绳满时从篮子 `Ctrl+P` 收藏再 `Ctrl+Z` 撤销导致绳上少一张」以及复审指出的「`KeepOnLine=25` 未挤下卡时误回填无关篮子卡」「`[Pin -> AddNew -> Undo]` 时序倒挂」均先立红灯测试再修正 `TrimToCapacity` + `PutBack()` 补回上界与最近使用优先级后全绿。
+- 独立代码审查：`design-integrity-review`（`same-model review`）两轮审查共识别的 `[P1]` 暂停态监听空转/滞留与 `[P2]` 无界回填已全部修复、加单测并重跑全绿。
+- 离屏视觉预览：`evidence/T-059/00-offscreen-line-light.png`、`evidence/T-059/00-offscreen-basket-dark.png`、`evidence/T-059/00-offscreen-shortcut-recorder.png`。
+- 真机增量进度：`evidence/walk-report.md` 已实测通过双屏（含 `100% + 125%` 混合缩放位置）、深浅切换、篮子展开筛选、单击/双击、透明点击穿透、绳上取下撤销；`evidence/tools/walk.exe` 已补齐 `right-click`、`wheel`、`tray` 子命令；`windows/build/EnCopy Dev/EnCopy Dev.exe` 已重编（保留现有 `evidence/` 与开发版历史待增量复验），待补测「不收起面板滚轮穿透、托盘右键改键与 `06f8c23` 篮子撤销」后补充截图并关票。
