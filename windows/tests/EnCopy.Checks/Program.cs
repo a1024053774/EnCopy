@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -170,7 +171,83 @@ public static class Program
         var lineBurstReopen = new Line(historyBurstReopen);
         Check(lineBurstReopen.ShownItems[0].FullText == "Same-ms item one",
             $"Duplicate copy after same-ms burst must stay first after reopen (got '{lineBurstReopen.ShownItems[0].FullText}')");
+
+        // 7. 异步突发合并复现：队列中有连续两份快照只触发一次 Changed 时，首条与次条都必须入库
+        backend.QueueSnapshotWithoutNotify(new ClipboardSnapshot(100, false, false, false, "EC_RAPID_FIRST", null));
+        backend.QueueSnapshotWithoutNotify(new ClipboardSnapshot(101, false, false, false, "EC_RAPID_SECOND", null));
+        backend.NotifyChanged();
+        Check(history.NoteHolding("EC_RAPID_FIRST") is not null && history.NoteHolding("EC_RAPID_SECOND") is not null,
+            "Coalesced burst notification must persist both EC_RAPID_FIRST and EC_RAPID_SECOND");
+        Check(line.ShownItems[0].FullText == "EC_RAPID_SECOND",
+            $"EC_RAPID_SECOND must sit at head after coalesced burst (got '{line.ShownItems[0].FullText}')");
+
+        // 8. 瞬时返回 null 时不能提前推进 _lastSequence，下次读到同一序号时仍应正常入库
+        backend.FailNextReadsWithNull(1);
+        backend.Push(new ClipboardSnapshot(102, false, false, false, "After transient lock", null));
+        Check(history.NoteHolding("After transient lock") is null, "First CheckNow sees null transiently");
+        watcher.CheckNow();
+        Check(history.NoteHolding("After transient lock") is not null,
+            "Subsequent CheckNow at same SequenceNumber must still record item after transient null read");
+
+        // 9. 纯 Win32 HGLOBAL 读取辅助校验（零碰系统剪贴板）
+        TestWin32GlobalReaders();
     }
+
+    private static void TestWin32GlobalReaders()
+    {
+        static T WithMoveableGlobal<T>(byte[] bytes, Func<IntPtr, T> probe)
+        {
+            IntPtr hMem = GlobalAlloc(0x0002, (nuint)bytes.Length);
+            Check(hMem != IntPtr.Zero, "GlobalAlloc(GMEM_MOVEABLE) succeeds");
+            try
+            {
+                IntPtr ptr = GlobalLock(hMem);
+                Check(ptr != IntPtr.Zero, "GlobalLock succeeds");
+                try
+                {
+                    Marshal.Copy(bytes, 0, ptr, bytes.Length);
+                }
+                finally
+                {
+                    GlobalUnlock(hMem);
+                }
+                return probe(hMem);
+            }
+            finally
+            {
+                GlobalFree(hMem);
+            }
+        }
+
+        // CF_UNICODETEXT 带尾随 \0 与额外对齐填充
+        var unicodeBytes = Encoding.Unicode.GetBytes("EC_RAPID_你好\0extra");
+        var parsedUnicode = WithMoveableGlobal(unicodeBytes, Win32ClipboardBackend.ReadUnicodeFromGlobal);
+        Check(parsedUnicode == "EC_RAPID_你好", $"ReadUnicodeFromGlobal trims at null terminator (got '{parsedUnicode}')");
+
+        // RTF 带尾随 \0 剥离后可被 Note.ExtractTextFromRtf 正常解析
+        var rtfBytes = Encoding.ASCII.GetBytes(@"{\rtf1\ansi {\b Hi} Win32}" + "\0\0");
+        var parsedRtf = WithMoveableGlobal(rtfBytes, Win32ClipboardBackend.ReadRtfFromGlobal);
+        Check(parsedRtf is not null && parsedRtf[^1] == (byte)'}', "ReadRtfFromGlobal strips trailing null terminators");
+        Check(Note.ExtractTextFromRtf(parsedRtf!) == "Hi Win32", "Stripped RTF parses cleanly");
+
+        // CanIncludeInClipboardHistory DWORD 0 vs 1
+        var zeroDword = BitConverter.GetBytes(0);
+        var oneDword = BitConverter.GetBytes(1);
+        Check(WithMoveableGlobal(zeroDword, Win32ClipboardBackend.IsZeroDwordGlobal), "DWORD 0 detected as privacy blocked");
+        Check(!WithMoveableGlobal(oneDword, Win32ClipboardBackend.IsZeroDwordGlobal), "DWORD 1 allowed");
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GlobalAlloc(uint uFlags, nuint dwBytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GlobalFree(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GlobalUnlock(IntPtr hMem);
 
     private static void TestFts5TrigramAndShortWordSearch()
     {
@@ -910,7 +987,9 @@ public static class Program
 
     private sealed class FakeClipboardBackend : IClipboardBackend
     {
+        private readonly Queue<ClipboardSnapshot> _queue = new();
         private ClipboardSnapshot? _current;
+        private int _nullReadsRemaining;
         public event EventHandler? Changed;
         public uint SequenceNumber { get; private set; }
 
@@ -921,7 +1000,37 @@ public static class Program
             Changed?.Invoke(this, EventArgs.Empty);
         }
 
-        public ClipboardSnapshot? TryRead() => _current;
+        public void QueueSnapshotWithoutNotify(ClipboardSnapshot snap)
+        {
+            SequenceNumber = snap.SequenceNumber;
+            _current = snap;
+            _queue.Enqueue(snap);
+        }
+
+        public void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
+
+        public void FailNextReadsWithNull(int count) => _nullReadsRemaining = count;
+
+        public bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot)
+        {
+            if (_queue.Count > 0)
+            {
+                snapshot = _queue.Dequeue();
+                return true;
+            }
+            snapshot = null;
+            return false;
+        }
+
+        public ClipboardSnapshot? TryRead()
+        {
+            if (_nullReadsRemaining > 0)
+            {
+                _nullReadsRemaining--;
+                return null;
+            }
+            return _current;
+        }
 
         public bool TryWrite(string text, byte[]? rtfBytes)
         {
