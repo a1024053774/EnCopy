@@ -801,11 +801,22 @@ public partial class LinePanel : Window
             : DragDropEffects.Copy;
 
         _isDraggingOut = true;
+        var dragStartedUtc = DateTime.UtcNow;
         try
         {
             var result = DragDrop.DoDragDrop(cardVisual, data, allowed);
-            // Windows Explorer 同卷优化移动可能自行移走文件并返回 DragDropEffects.None，统一检查文件是否仍在原处
-            _line.PruneMissingFromLine();
+            // Windows Explorer 同卷优化移动或拖入桌面回收站可能自行移走文件并返回 DragDropEffects.None，统一检查文件是否仍在原处并识别回收站项记入撤销栈
+            _line.PruneMissingFromLine(dragStartedUtc);
+            if (allMovablePrivate)
+            {
+                var delayedCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                delayedCheckTimer.Tick += (_, _) =>
+                {
+                    delayedCheckTimer.Stop();
+                    _line.PruneMissingFromLine(dragStartedUtc);
+                };
+                delayedCheckTimer.Start();
+            }
             if (result != DragDropEffects.None && (result & DragDropEffects.Move) == 0)
             {
                 var stamp = DateTime.UtcNow;
@@ -949,8 +960,10 @@ public partial class LinePanel : Window
                 AddMenuItem(menu, Localization.L("Move to Recycle Bin"), () =>
                 {
                     var rect = GetVisualScreenDip(cardVisual);
-                    FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
-                    _line.TakeDownNotes([note], sendToRecycleBin: true);
+                    if (_line.TakeDownNotes([note], sendToRecycleBin: true))
+                    {
+                        FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
+                    }
                 });
             }
 

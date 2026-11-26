@@ -1301,9 +1301,36 @@ public static class Program
         history.Record(privImg, "Clipboard movable", DateTime.UtcNow);
         line.AddNew(privImg);
         var imgNote = line.ShownItems.First(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase));
-        Check(line.TakeDownNotes([imgNote], sendToRecycleBin: true), "TakeDownNotes sends private image to Recycle Bin or stash");
-        Check(!File.Exists(privImg), "Original private image moved out of DataFolder");
+
+        static bool DiscardedIsEmpty() =>
+            !Directory.Exists(DataFolder.DiscardedFolder) ||
+            !Directory.EnumerateFileSystemEntries(DataFolder.DiscardedFolder).Any();
+
+        // 复审回归 P2：移入系统回收站失败时绝不能静默退化到私有 DiscardedFolder
+        RecycleBinInterop.SetSimulateFailureForChecks(true);
+        try
+        {
+            Check(!line.TakeDownNotes([imgNote], sendToRecycleBin: true), "Failed Recycle Bin operation must return false instead of silently stashing");
+            Check(File.Exists(privImg) && DiscardedIsEmpty(), "Failed Recycle Bin operation leaves file in place without DiscardedFolder fallback");
+        }
+        finally
+        {
+            RecycleBinInterop.SetSimulateFailureForChecks(false);
+        }
+
+        Check(line.TakeDownNotes([imgNote], sendToRecycleBin: true), "TakeDownNotes sends private image to system Recycle Bin");
+        Check(!File.Exists(privImg) && DiscardedIsEmpty(), "Recycled private image moved to system Recycle Bin without DiscardedFolder copy");
         Check(line.PutBack() && File.Exists(privImg), "Ctrl+Z PutBack restores recycled image back to DataFolder");
+
+        // 复审回归 P1：外部拖拽落入桌面回收站（Explorer 已将文件移入 $Recycle.Bin）后对账必须生成 Ctrl+Z 撤销记录
+        var dragImgNote = line.ShownItems.First(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase));
+        Check(RecycleBinInterop.MoveFileToRecycleBin(privImg, out var explorerRecycledPath) && !string.IsNullOrEmpty(explorerRecycledPath),
+            "Explorer drop moves private image into $Recycle.Bin");
+        line.PruneMissingFromLine();
+        Check(!line.ShownItems.Any(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase)),
+            "Dragged-to-Recycle-Bin card leaves the line");
+        Check(line.PutBack() && File.Exists(privImg) && line.ShownItems.Any(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase)),
+            "Ctrl+Z PutBack restores card dragged into Recycle Bin");
 
         // 审查回归 5b（P2）：损坏图片执行 Hold 不抛异常
         var corruptImg = Path.Combine(DataFolder.Root, "Corrupt.png");

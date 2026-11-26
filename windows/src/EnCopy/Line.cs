@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -101,15 +102,39 @@ public sealed class Line : INotifyPropertyChanged
         return TakeDownNotes(targets);
     }
 
-    public void PruneMissingFromLine()
+    public void PruneMissingFromLine(DateTime? minRecycleDeletedUtc = null)
     {
         var missing = _lineItems.Where(n => !File.Exists(n.FilePath) && !Directory.Exists(n.FilePath)).ToList();
         if (missing.Count == 0) return;
 
+        var preIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < _lineItems.Count; i++)
+        {
+            preIndices[Path.GetFullPath(_lineItems[i].FilePath)] = i;
+        }
+
+        var cutoffUtc = minRecycleDeletedUtc ?? DateTime.UtcNow.AddSeconds(-15);
+        var recycledUndoEntries = new List<UndoEntry>();
         bool heldChanged = false;
         foreach (var item in missing)
         {
             var full = Path.GetFullPath(item.FilePath);
+            if (!item.Pinned && DataFolder.IsMovablePrivateItem(item.FilePath) &&
+                RecycleBinInterop.TryFindRecycledFile(full, cutoffUtc) is { } recycledPath)
+            {
+                recycledUndoEntries.Add(new UndoEntry(
+                    OriginalPath: item.FilePath,
+                    StashedPath: recycledPath,
+                    PlainText: item.FullText,
+                    AppName: item.AppName,
+                    OriginalUsedUtc: item.UsedAt.ToUniversalTime(),
+                    WasOnLine: true,
+                    WasPinned: false,
+                    OldScreenIndex: preIndices.GetValueOrDefault(full, 0),
+                    IsPinChange: false,
+                    InSystemRecycleBin: true));
+            }
+
             if (_heldPaths.Remove(full)) heldChanged = true;
             if (DataFolder.Contains(item.FilePath))
             {
@@ -118,12 +143,17 @@ public sealed class Line : INotifyPropertyChanged
             _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
         }
 
+        if (recycledUndoEntries.Count > 0)
+        {
+            PushUndoStep(recycledUndoEntries);
+        }
         if (heldChanged)
         {
             OnPropertyChanged(nameof(HeldPaths));
         }
         SaveLineState();
         RefreshCurrentView();
+        if (BasketOpen) LoadBasket();
     }
 
     public IReadOnlyList<string> SaveToDesktop(IReadOnlyList<Note> notes, string? desktopFolderOverride = null)
@@ -676,25 +706,18 @@ public sealed class Line : INotifyPropertyChanged
                 bool isPrivate = DataFolder.Contains(note.FilePath);
                 bool canRecycle = sendToRecycleBin && !wasPinned && DataFolder.IsMovablePrivateItem(note.FilePath);
 
-                if (File.Exists(note.FilePath) && canRecycle)
+                if (sendToRecycleBin)
                 {
-                    if (RecycleBinInterop.MoveFileToRecycleBin(note.FilePath, out var recycledPath))
+                    if (!canRecycle || !File.Exists(note.FilePath) ||
+                        !RecycleBinInterop.MoveFileToRecycleBin(note.FilePath, out var recycledPath) ||
+                        string.IsNullOrEmpty(recycledPath))
                     {
-                        stashed = recycledPath;
-                        inSystemRecycleBin = true;
-                        if (recycledPath is not null)
-                        {
-                            movedToStash.Add((note.FilePath, recycledPath));
-                        }
+                        RollbackMovedToStash(movedToStash);
+                        return false;
                     }
-                    else if (isPrivate)
-                    {
-                        Directory.CreateDirectory(DataFolder.DiscardedFolder);
-                        var dest = Path.Combine(DataFolder.DiscardedFolder, $"{stepId}_{Path.GetFileName(note.FilePath)}");
-                        File.Move(note.FilePath, dest, overwrite: true);
-                        movedToStash.Add((note.FilePath, dest));
-                        stashed = dest;
-                    }
+                    stashed = recycledPath;
+                    inSystemRecycleBin = true;
+                    movedToStash.Add((note.FilePath, recycledPath));
                 }
                 else if (File.Exists(note.FilePath) && isPrivate)
                 {
@@ -720,13 +743,7 @@ public sealed class Line : INotifyPropertyChanged
         }
         catch (IOException)
         {
-            foreach (var (orig, stash) in movedToStash)
-            {
-                if (File.Exists(stash) && !File.Exists(orig))
-                {
-                    try { File.Move(stash, orig, overwrite: false); } catch { }
-                }
-            }
+            RollbackMovedToStash(movedToStash);
             return false;
         }
 
@@ -873,6 +890,10 @@ public sealed class Line : INotifyPropertyChanged
                 var dir = Path.GetDirectoryName(entry.OriginalPath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                 File.Move(entry.StashedPath, entry.OriginalPath, overwrite: true);
+                if (entry.InSystemRecycleBin)
+                {
+                    RecycleBinInterop.CleanupCompanionMetadataFile(entry.StashedPath);
+                }
             }
             else if (!File.Exists(entry.OriginalPath) && !Directory.Exists(entry.OriginalPath))
             {
@@ -1207,6 +1228,25 @@ public sealed class Line : INotifyPropertyChanged
         _lineItems.AddRange(loose);
     }
 
+    private static void RollbackMovedToStash(List<(string Original, string Stashed)> movedToStash)
+    {
+        foreach (var (orig, stash) in movedToStash)
+        {
+            if (File.Exists(stash) && !File.Exists(orig))
+            {
+                try
+                {
+                    File.Move(stash, orig, overwrite: false);
+                    RecycleBinInterop.CleanupCompanionMetadataFile(stash);
+                }
+                catch
+                {
+                    // 回滚尽力恢复已搬移项
+                }
+            }
+        }
+    }
+
     private void PushUndoStep(List<UndoEntry> entries)
     {
         _undoSteps.Add(new UndoStep(entries));
@@ -1519,12 +1559,25 @@ public static class RecycleBinInterop
         [In] ref Guid riid,
         [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
 
+    private static bool _simulateFailureForChecks;
+
+    public static void SetSimulateFailureForChecks(bool fail)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable(DataFolder.ChecksRunnerEnv), "1", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SetSimulateFailureForChecks is only allowed inside the isolated check runner.");
+        }
+        _simulateFailureForChecks = fail;
+    }
+
     public static bool MoveFileToRecycleBin(string path, out string? recycledPath)
     {
         recycledPath = null;
+        if (_simulateFailureForChecks) return false;
         if (!File.Exists(path)) return false;
 
         var full = Path.GetFullPath(path);
+        var startedUtc = DateTime.UtcNow;
         Guid iid = IidShellItem;
         if (SHCreateItemFromParsingName(full, IntPtr.Zero, ref iid, out var shellItem) < 0 || shellItem is null)
         {
@@ -1549,8 +1602,10 @@ public static class RecycleBinInterop
                 return false;
             }
 
-            recycledPath = sink.RecycledPath;
-            return true;
+            recycledPath = !string.IsNullOrWhiteSpace(sink.RecycledPath) && File.Exists(sink.RecycledPath)
+                ? sink.RecycledPath
+                : TryFindRecycledFile(full, startedUtc);
+            return !string.IsNullOrWhiteSpace(recycledPath) && File.Exists(recycledPath);
         }
         catch (COMException)
         {
@@ -1566,6 +1621,125 @@ public static class RecycleBinInterop
             {
                 Marshal.ReleaseComObject(shellItem);
             }
+        }
+    }
+
+    public static string? TryFindRecycledFile(string originalFullPath, DateTime minDeletedUtc)
+    {
+        if (string.IsNullOrWhiteSpace(originalFullPath)) return null;
+        var full = Path.GetFullPath(originalFullPath);
+        var root = Path.GetPathRoot(full);
+        var sid = WindowsIdentity.GetCurrent().User?.Value;
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(sid)) return null;
+
+        var recycleDir = Path.Combine(root, "$Recycle.Bin", sid);
+        if (!Directory.Exists(recycleDir)) return null;
+
+        IEnumerable<string> metaFiles;
+        try
+        {
+            metaFiles = Directory.EnumerateFiles(recycleDir, "$I*")
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .ToArray();
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        var floorUtc = minDeletedUtc.AddSeconds(-5);
+        foreach (var iFile in metaFiles)
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(iFile) < floorUtc) continue;
+                var bytes = File.ReadAllBytes(iFile);
+                if (!TryParseRecycleMetadata(bytes, out var origFromMeta, out var deletedUtc)) continue;
+                if (deletedUtc != DateTime.MinValue && deletedUtc < floorUtc) continue;
+                if (!string.Equals(origFromMeta, full, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var metaName = Path.GetFileName(iFile);
+                if (metaName.Length < 3) continue;
+                var rFile = Path.Combine(recycleDir, "$R" + metaName[2..]);
+                if (File.Exists(rFile))
+                {
+                    return rFile;
+                }
+            }
+            catch (IOException)
+            {
+                // 跳过并发写入中的回收站元数据项
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 跳过无权限读取的项
+            }
+        }
+        return null;
+    }
+
+    public static void CleanupCompanionMetadataFile(string recycledDataPath)
+    {
+        if (string.IsNullOrWhiteSpace(recycledDataPath)) return;
+        var name = Path.GetFileName(recycledDataPath);
+        var dir = Path.GetDirectoryName(recycledDataPath);
+        if (string.IsNullOrEmpty(dir) || name.Length < 3 || !name.StartsWith("$R", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        var iFile = Path.Combine(dir, "$I" + name[2..]);
+        if (File.Exists(iFile))
+        {
+            try { File.Delete(iFile); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static bool TryParseRecycleMetadata(byte[] bytes, out string originalFullPath, out DateTime deletedUtc)
+    {
+        originalFullPath = string.Empty;
+        deletedUtc = DateTime.MinValue;
+        if (bytes.Length < 28) return false;
+
+        long version = BitConverter.ToInt64(bytes, 0);
+        long fileTime = BitConverter.ToInt64(bytes, 16);
+        if (fileTime > 0)
+        {
+            try { deletedUtc = DateTime.FromFileTimeUtc(fileTime); } catch (ArgumentOutOfRangeException) { }
+        }
+
+        string raw;
+        if (version == 2)
+        {
+            int charCount = BitConverter.ToInt32(bytes, 24);
+            if (charCount <= 0 || charCount > 32768 || 28 + charCount * 2 > bytes.Length) return false;
+            raw = Encoding.Unicode.GetString(bytes, 28, charCount * 2);
+        }
+        else if (version == 1 && bytes.Length >= 544)
+        {
+            raw = Encoding.Unicode.GetString(bytes, 24, 520);
+        }
+        else
+        {
+            return false;
+        }
+
+        int nul = raw.IndexOf('\0');
+        if (nul >= 0) raw = raw[..nul];
+        if (raw.StartsWith(@"\\?\", StringComparison.Ordinal)) raw = raw[4..];
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        try
+        {
+            originalFullPath = Path.GetFullPath(raw);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 }
