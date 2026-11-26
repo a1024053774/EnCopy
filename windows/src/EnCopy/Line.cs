@@ -1098,16 +1098,29 @@ public sealed class Line : INotifyPropertyChanged
                 continue;
             }
 
+            if (DataFolder.Contains(full) && File.Exists(full))
+            {
+                try
+                {
+                    File.Delete(full);
+                }
+                catch (IOException)
+                {
+                    // 文件被临时占用时保留数据库行，待下一轮到期检查重试删除，防止私密文件孤立残留
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+            }
+
             if (_heldPaths.Remove(full)) heldChanged = true;
             if (lineIdx >= 0)
             {
                 _lineItems.RemoveAt(lineIdx);
             }
             History.Remove(full);
-            if (DataFolder.Contains(full) && File.Exists(full))
-            {
-                try { File.Delete(full); } catch (IOException) { }
-            }
             removedCount++;
         }
 
@@ -1153,7 +1166,7 @@ public sealed class Line : INotifyPropertyChanged
         var staleToPrune = new List<string>();
         long estimatedBytes = 0;
 
-        foreach (var item in History.AllEntriesWithMeta())
+        foreach (var item in History.KeptEntries())
         {
             var full = Path.GetFullPath(item.FullPath);
             if (!filter.IncludePinnedAndOnLine && onLine.Contains(full))

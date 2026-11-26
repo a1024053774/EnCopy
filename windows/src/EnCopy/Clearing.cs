@@ -324,7 +324,7 @@ public static class Retention
                 {
                     missing.Add(full);
                 }
-                else if (ageSeconds > TextDays * 86400.0 || FileList.PresentPaths(full).Count == 0)
+                else if (ageSeconds > TextDays * 86400.0 || FileList.AreAllTargetsMissing(full))
                 {
                     expired.Add(full);
                 }

@@ -1503,6 +1503,23 @@ public static class Program
             Check(!File.Exists(hourlyPath) && line.Clearing.Batches().Count == clearedBatchCountBeforeTtl,
                 "Hourly app item deletes directly after 60m without entering Recently Cleared");
 
+            // 3b. 边界回归：清理历史（CleanupFilter）不把带 TTL 的验证码/一小时项送进「最近清掉」；到期文件被锁定时保留 DB 行以便下次重试删除
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "动态码 654321", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            var lockedCodePath = line.LineItems[line.PinnedCount].FilePath;
+            var allCleanupCandidates = line.PreviewCleanup(new CleanupFilter(Kind: KindFilter.All, OlderThanDays: null, IncludePinnedAndOnLine: true));
+            Check(!allCleanupCandidates.CandidatePaths.Any(p => string.Equals(p, lockedCodePath, StringComparison.OrdinalIgnoreCase)),
+                "Temporary TTL items (verification codes / hourly items) are excluded from Recently Cleared manual cleanup");
+
+            using (var lockStream = new FileStream(lockedCodePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                line.ClearExpired(DateTime.UtcNow.AddMinutes(15));
+                Check(history.Contains(lockedCodePath) && File.Exists(lockedCodePath),
+                    "Locked expired code file keeps History row so next expiry tick retries deletion");
+            }
+            line.ClearExpired(DateTime.UtcNow.AddMinutes(15));
+            Check(!history.Contains(lockedCodePath) && !File.Exists(lockedCodePath),
+                "Unlocked expired code file deletes cleanly on retry");
+
             // 4. 保留规则：原图超上限或满 30 天缩成 <=640px 缩略图并保留原图识别词；文字超 1 年与失效清单进「最近清掉」
             var bigImgPath = Path.Combine(DataFolder.ScreenshotsFolder, "BigOriginal.png");
             WritePatternPng(bigImgPath, 1400, 980);

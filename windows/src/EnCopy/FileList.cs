@@ -113,6 +113,23 @@ public static class FileList
             .Where(p => File.Exists(p) || Directory.Exists(p))
             .ToArray();
 
+    public static bool AreAllTargetsMissing(string manifestPath)
+    {
+        if (!File.Exists(manifestPath)) return false;
+        try
+        {
+            var all = File.ReadAllLines(manifestPath, Utf8NoBom)
+                .Select(l => l.Trim())
+                .Where(l => !string.IsNullOrEmpty(l))
+                .ToArray();
+            return all.Length > 0 && !all.Any(p => File.Exists(p) || Directory.Exists(p));
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
     public static string Words(IReadOnlyList<string> paths)
     {
         var sb = new StringBuilder();
