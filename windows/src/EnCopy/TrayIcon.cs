@@ -52,7 +52,9 @@ public sealed class TrayIcon : IDisposable
         Func<bool> hasHeldItems,
         Action onOpenShortcutRecorder,
         Func<Shortcut?> getActiveShortcut,
-        Action onQuit)
+        Action onQuit,
+        Action? onOpenCleanup = null,
+        Action? onOpenSettings = null)
     {
         _isSummoned = isSummoned;
         _isPaused = isPaused;
@@ -124,6 +126,12 @@ public sealed class TrayIcon : IDisposable
 
         _shortcutItem = new WF.ToolStripMenuItem(FormatShortcutLabel(getActiveShortcut()), null, (_, _) => onOpenShortcutRecorder());
 
+        var cleanupItem = onOpenCleanup is not null
+            ? new WF.ToolStripMenuItem(Localization.L("Clean Up History…"), null, (_, _) => onOpenCleanup())
+            : null;
+        var settingsItem = onOpenSettings is not null
+            ? new WF.ToolStripMenuItem(Localization.L("Settings…"), null, (_, _) => onOpenSettings())
+            : null;
         var openFolderItem = new WF.ToolStripMenuItem(Localization.L("Open data folder"), null, (_, _) => OpenDataFolder());
         var quitItem = new WF.ToolStripMenuItem(Localization.L("Quit EnCopy"), null, (_, _) => onQuit());
 
@@ -138,6 +146,8 @@ public sealed class TrayIcon : IDisposable
         menu.Items.Add(_hangAllBackItem);
         menu.Items.Add(_shortcutItem);
         menu.Items.Add(new WF.ToolStripSeparator());
+        if (cleanupItem is not null) menu.Items.Add(cleanupItem);
+        if (settingsItem is not null) menu.Items.Add(settingsItem);
         menu.Items.Add(openFolderItem);
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(quitItem);

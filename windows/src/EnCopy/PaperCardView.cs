@@ -267,6 +267,7 @@ public static class PaperCardView
                     isCopied,
                     isHeld,
                     isDark,
+                    line.ShowsSourceApp,
                     stickerNumber,
                     extraSway,
                     hopOffset,
@@ -397,7 +398,11 @@ public static class PaperCardView
         bool isPicked,
         bool isDark,
         Action<BasketRow> onSelect,
-        Action<BasketRow> onActivate)
+        Action<BasketRow> onActivate,
+        bool showSourceApp = true,
+        IReadOnlyList<string>? stackFiles = null,
+        bool isStackExpanded = false,
+        Action? onToggleStack = null)
     {
         _ = isDark;
         var note = row.Note;
@@ -462,11 +467,69 @@ public static class PaperCardView
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
-        if (!string.IsNullOrWhiteSpace(note.AppName))
+
+        if (stackFiles is { Count: > 1 } && onToggleStack is not null)
         {
+            var stackBtn = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = ThemePalette.Brush(Color.FromArgb(0x1C, 0x00, 0x00, 0x00)),
+                Padding = new Thickness(7, 2.5, 7, 2.5),
+                Margin = new Thickness(0, 0, 8, 0),
+                Cursor = Cursors.Hand,
+                ToolTip = Localization.L("Show the files"),
+                Child = new TextBlock
+                {
+                    Text = $"{stackFiles.Count} {(isStackExpanded ? "▴" : "▾")}",
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.SemiBold,
+                    FontFamily = MonoFont,
+                    Foreground = ink
+                }
+            };
+            stackBtn.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                onToggleStack();
+            };
+            rightPanel.Children.Add(stackBtn);
+        }
+
+        if (note.IsMovedAway)
+        {
+            rightPanel.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(9),
+                Background = ThemePalette.Brush(Color.FromArgb(0x28, 0x6A, 0x64, 0x5C)),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = Localization.L("Moved away"),
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = soft
+                }
+            });
+        }
+
+        if (showSourceApp && !string.IsNullOrWhiteSpace(note.DisplayAppName))
+        {
+            if (SourceApp.GetAppIcon(note.AppName) is { } appIcon)
+            {
+                rightPanel.Children.Add(new Image
+                {
+                    Source = appIcon,
+                    Width = 15,
+                    Height = 15,
+                    Margin = new Thickness(0, 0, 4, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
             rightPanel.Children.Add(new TextBlock
             {
-                Text = note.AppName,
+                Text = note.DisplayAppName,
                 FontSize = 10.5,
                 Foreground = soft,
                 Margin = new Thickness(0, 0, 8, 0),
@@ -488,11 +551,14 @@ public static class PaperCardView
         inner.Children.Add(grid);
 
         double corner = Math.Max(3.0, ThemePalette.CardCorner(theme));
+        double baseOpacity = note.IsMovedAway
+            ? (isPicked ? 0.62 : 0.46)
+            : (isPicked ? 1.0 : 0.88);
         var container = new Grid
         {
             Margin = new Thickness(10, 3, 10, 3),
-            Cursor = Cursors.Hand,
-            Opacity = isPicked ? 1.0 : 0.88,
+            Cursor = note.IsMovedAway ? Cursors.Arrow : Cursors.Hand,
+            Opacity = baseOpacity,
             RenderTransform = new TranslateTransform(isPicked ? 4.0 : 0.0, 0.0),
             Effect = isPicked
                 ? new DropShadowEffect { BlurRadius = 8, ShadowDepth = 2, Opacity = 0.28, Color = Colors.Black }
@@ -528,6 +594,81 @@ public static class PaperCardView
         return container;
     }
 
+    public static UIElement BuildStackFileRow(
+        string filePath,
+        LineTheme theme,
+        bool isPicked,
+        bool isDark,
+        Action onSelect,
+        Action onActivate)
+    {
+        var icon = SourceApp.GetFileIcon(filePath, large: false);
+        var fileName = FileList.NameOf(filePath);
+        var dirPath = System.IO.Path.GetDirectoryName(filePath.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)) ?? string.Empty;
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        if (icon is not null)
+        {
+            var img = new Image
+            {
+                Source = icon,
+                Width = 18,
+                Height = 18,
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(img, 0);
+            grid.Children.Add(img);
+        }
+
+        var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(new TextBlock
+        {
+            Text = fileName,
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = ThemePalette.Brush(ThemePalette.ChromeText(isDark)),
+            TextTrimming = TextTrimming.CharacterEllipsis
+        });
+        if (!string.IsNullOrEmpty(dirPath))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = dirPath,
+                FontSize = 10,
+                FontFamily = MonoFont,
+                Foreground = ThemePalette.Brush(ThemePalette.ChromeSubText(isDark)),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+        }
+        Grid.SetColumn(stack, 1);
+        grid.Children.Add(stack);
+
+        var border = new Border
+        {
+            Margin = new Thickness(74, 2, 14, 2),
+            Padding = new Thickness(12, 5, 12, 5),
+            CornerRadius = new CornerRadius(6),
+            Background = ThemePalette.Brush(isPicked
+                ? (isDark ? Color.FromArgb(0x36, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x22, 0x00, 0x00, 0x00))
+                : (isDark ? Color.FromArgb(0x16, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0D, 0x00, 0x00, 0x00))),
+            BorderBrush = isPicked ? ThemePalette.Brush(ThemePalette.PickedColor(theme)) : null,
+            BorderThickness = new Thickness(isPicked ? 2.0 : 0.0),
+            Cursor = Cursors.Hand,
+            Child = grid
+        };
+        border.MouseLeftButtonDown += (_, e) =>
+        {
+            e.Handled = true;
+            if (e.ClickCount >= 2) onActivate();
+            else onSelect();
+        };
+        return border;
+    }
+
     private static (FrameworkElement Host, RotateTransform Rotate, TranslateTransform Hop, ScaleTransform PegScale) BuildPeggedCard(
         Note note,
         LineTheme theme,
@@ -536,6 +677,7 @@ public static class PaperCardView
         bool isCopied,
         bool isHeld,
         bool isDark,
+        bool showSourceApp,
         int? stickerNumber,
         double extraSway,
         double hopOffset,
@@ -565,10 +707,10 @@ public static class PaperCardView
             }
         };
 
-        var cardSurface = BuildPaperCardBody(note, theme, isSelected, isDark);
+        var cardSurface = BuildPaperCardBody(note, theme, isSelected, isDark, showSourceApp);
         cardSurface.Margin = new Thickness(8, 16, 8, 4);
-        cardSurface.Cursor = Cursors.Hand;
-        cardSurface.Opacity = isHeld ? 0.28 : 1.0;
+        cardSurface.Cursor = note.IsMovedAway ? Cursors.Arrow : Cursors.Hand;
+        cardSurface.Opacity = isHeld ? 0.28 : (note.IsMovedAway ? 0.56 : 1.0);
         if (isPicked)
         {
             cardSurface.Margin = new Thickness(8, 20, 8, 0);
@@ -775,7 +917,7 @@ public static class PaperCardView
         return (host, rotateTx, hopTx, pegScaleTx);
     }
 
-    private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark)
+    private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark, bool showSourceApp = true)
     {
         double w = ScreenPlacement.CardWidth;
         double h = ScreenPlacement.CardHeight;
@@ -826,26 +968,26 @@ public static class PaperCardView
             {
                 case PaperKind.Tractor:
                     root.Children.Add(BuildTractorCardSurface(w, h));
-                    root.Children.Add(BuildTractorContent(note, theme));
+                    root.Children.Add(BuildTractorContent(note, theme, showSourceApp));
                     break;
 
                 case PaperKind.Tag:
                     root.Children.Add(BuildTagCardSurface(w, h));
-                    root.Children.Add(BuildTagContent(note, theme));
+                    root.Children.Add(BuildTagContent(note, theme, showSourceApp));
                     break;
 
                 case PaperKind.Polaroid:
-                    root.Children.Add(BuildPolaroidContent(note, theme, w, h));
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp));
                     break;
 
                 case PaperKind.Folder:
                     root.Children.Add(BuildManilaCardSurface(w, h));
-                    root.Children.Add(BuildManilaContent(note, theme));
+                    root.Children.Add(BuildManilaContent(note, theme, showSourceApp));
                     break;
 
                 default:
                     root.Children.Add(BuildReceiptCardSurface(w, h));
-                    root.Children.Add(BuildReceiptContent(note, theme, isDark));
+                    root.Children.Add(BuildReceiptContent(note, theme, isDark, showSourceApp));
                     break;
             }
         }
@@ -855,19 +997,19 @@ public static class PaperCardView
             switch (note.Paper)
             {
                 case PaperKind.Tractor:
-                    root.Children.Add(BuildTractorContent(note, theme));
+                    root.Children.Add(BuildTractorContent(note, theme, showSourceApp));
                     break;
                 case PaperKind.Tag:
-                    root.Children.Add(BuildTagContent(note, theme));
+                    root.Children.Add(BuildTagContent(note, theme, showSourceApp));
                     break;
                 case PaperKind.Polaroid:
-                    root.Children.Add(BuildPolaroidContent(note, theme, w, h));
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp));
                     break;
                 case PaperKind.Folder:
-                    root.Children.Add(BuildManilaContent(note, theme));
+                    root.Children.Add(BuildManilaContent(note, theme, showSourceApp));
                     break;
                 default:
-                    root.Children.Add(BuildReceiptContent(note, theme, isDark));
+                    root.Children.Add(BuildReceiptContent(note, theme, isDark, showSourceApp));
                     break;
             }
         }
@@ -986,7 +1128,7 @@ public static class PaperCardView
         };
     }
 
-    private static UIElement BuildReceiptContent(Note note, LineTheme theme, bool isDark)
+    private static UIElement BuildReceiptContent(Note note, LineTheme theme, bool isDark, bool showSourceApp)
     {
         _ = isDark;
         var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Receipt));
@@ -1069,15 +1211,7 @@ public static class PaperCardView
         Grid.SetRow(contentStack, 0);
         grid.Children.Add(contentStack);
 
-        var caption = new TextBlock
-        {
-            Text = note.Caption,
-            FontSize = 7.5,
-            FontFamily = MonoFont,
-            Foreground = soft,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(0, 3, 0, 0)
-        };
+        var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: false, topMargin: 3);
         Grid.SetRow(caption, 1);
         grid.Children.Add(caption);
 
@@ -1125,7 +1259,7 @@ public static class PaperCardView
         };
     }
 
-    private static UIElement BuildTractorContent(Note note, LineTheme theme)
+    private static UIElement BuildTractorContent(Note note, LineTheme theme, bool showSourceApp)
     {
         var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Tractor));
         var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Tractor));
@@ -1148,14 +1282,7 @@ public static class PaperCardView
         Grid.SetRow(codeBlock, 0);
         grid.Children.Add(codeBlock);
 
-        var caption = new TextBlock
-        {
-            Text = note.Caption,
-            FontSize = 7.5,
-            FontFamily = MonoFont,
-            Foreground = soft,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        };
+        var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: false);
         Grid.SetRow(caption, 1);
         grid.Children.Add(caption);
 
@@ -1197,7 +1324,7 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildTagContent(Note note, LineTheme theme)
+    private static UIElement BuildTagContent(Note note, LineTheme theme, bool showSourceApp)
     {
         var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Tag));
         var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Tag));
@@ -1232,21 +1359,14 @@ public static class PaperCardView
         Grid.SetRow(stack, 0);
         grid.Children.Add(stack);
 
-        var caption = new TextBlock
-        {
-            Text = note.Caption,
-            FontSize = 7.5,
-            FontFamily = MonoFont,
-            Foreground = soft,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        };
+        var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: false);
         Grid.SetRow(caption, 1);
         grid.Children.Add(caption);
 
         return grid;
     }
 
-    private static UIElement BuildPolaroidContent(Note note, LineTheme theme, double w, double h)
+    private static UIElement BuildPolaroidContent(Note note, LineTheme theme, double w, double h, bool showSourceApp)
     {
         var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Polaroid));
         var outer = new Border
@@ -1324,16 +1444,7 @@ public static class PaperCardView
         Grid.SetRow(well, 0);
         grid.Children.Add(well);
 
-        var caption = new TextBlock
-        {
-            Text = note.Caption,
-            FontSize = 7.5,
-            FontFamily = MonoFont,
-            Foreground = soft,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(0, 4, 0, 0)
-        };
+        var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: true, topMargin: 4);
         Grid.SetRow(caption, 1);
         grid.Children.Add(caption);
 
@@ -1372,12 +1483,12 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildManilaContent(Note note, LineTheme theme)
+    private static UIElement BuildManilaContent(Note note, LineTheme theme, bool showSourceApp)
     {
         var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Folder));
         var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Folder));
 
-        var grid = new Grid { Margin = new Thickness(10, 20, 10, 8) };
+        var grid = new Grid { Margin = new Thickness(10, 18, 10, 8) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -1386,24 +1497,42 @@ public static class PaperCardView
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Center
         };
-        centerStack.Children.Add(new Border
+
+        var iconTarget = note.FileTargets.FirstOrDefault() ?? note.FilePath;
+        var fileIcon = SourceApp.GetFileIcon(iconTarget, large: true);
+        if (fileIcon is not null && note.FileTargets.Count <= 1)
         {
-            Width = 30,
-            Height = 22,
-            CornerRadius = new CornerRadius(3),
-            Background = ThemePalette.Brush(ThemePalette.TagColor(ItemKind.File)),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 5),
-            Child = new TextBlock
+            centerStack.Children.Add(new Image
             {
-                Text = note.FileTargets.Count > 1 ? note.FileTargets.Count.ToString() : "▤",
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
+                Source = fileIcon,
+                Width = 28,
+                Height = 28,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            }
-        });
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+        }
+        else
+        {
+            centerStack.Children.Add(new Border
+            {
+                Width = 30,
+                Height = 22,
+                CornerRadius = new CornerRadius(3),
+                Background = ThemePalette.Brush(ThemePalette.TagColor(ItemKind.File)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 5),
+                Child = new TextBlock
+                {
+                    Text = note.FileTargets.Count > 1 ? note.FileTargets.Count.ToString() : "▤",
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            });
+        }
+
         centerStack.Children.Add(new TextBlock
         {
             Text = note.Title,
@@ -1413,15 +1542,17 @@ public static class PaperCardView
             Foreground = ink,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
-            MaxHeight = 30,
+            MaxHeight = 28,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
-        if (!string.IsNullOrEmpty(note.Body))
+        var bodyLine = note.IsMovedAway ? Localization.L("Moved away") : note.Body;
+        if (!string.IsNullOrEmpty(bodyLine))
         {
             centerStack.Children.Add(new TextBlock
             {
-                Text = note.Body,
+                Text = bodyLine,
                 FontSize = 8.2,
+                FontWeight = note.IsMovedAway ? FontWeights.SemiBold : FontWeights.Normal,
                 FontFamily = MonoFont,
                 Foreground = soft,
                 TextAlignment = TextAlignment.Center,
@@ -1431,17 +1562,52 @@ public static class PaperCardView
         Grid.SetRow(centerStack, 0);
         grid.Children.Add(centerStack);
 
-        var caption = new TextBlock
+        var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: true);
+        Grid.SetRow(caption, 1);
+        grid.Children.Add(caption);
+
+        return grid;
+    }
+
+    private static UIElement BuildCardCaptionBar(Note note, Brush soft, bool showSourceApp, bool centered, double topMargin = 0)
+    {
+        var captionText = showSourceApp
+            ? note.Caption
+            : (note.Caption.Split(" · ", 2)[0]);
+
+        var grid = new Grid
         {
-            Text = note.Caption,
+            Margin = new Thickness(0, topMargin, 0, 0),
+            HorizontalAlignment = centered ? HorizontalAlignment.Center : HorizontalAlignment.Stretch
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var txt = new TextBlock
+        {
+            Text = captionText,
             FontSize = 7.5,
             FontFamily = MonoFont,
             Foreground = soft,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetRow(caption, 1);
-        grid.Children.Add(caption);
+        Grid.SetColumn(txt, 0);
+        grid.Children.Add(txt);
+
+        if (showSourceApp && SourceApp.GetAppIcon(note.AppName) is { } appIcon)
+        {
+            var img = new Image
+            {
+                Source = appIcon,
+                Width = 11,
+                Height = 11,
+                Margin = new Thickness(4, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(img, 1);
+            grid.Children.Add(img);
+        }
 
         return grid;
     }
@@ -1991,6 +2157,18 @@ public static class PaperCardView
 
         if (note.Paper == PaperKind.Folder)
         {
+            var iconTarget = note.FileTargets.FirstOrDefault() ?? note.FilePath;
+            if (SourceApp.GetFileIcon(iconTarget, large: true) is { } fileIcon && note.FileTargets.Count <= 1)
+            {
+                return new Image
+                {
+                    Source = fileIcon,
+                    Width = 24,
+                    Height = 24,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+            }
             return new Border
             {
                 Width = 24,

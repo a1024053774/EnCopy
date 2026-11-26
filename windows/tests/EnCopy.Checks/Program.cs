@@ -61,6 +61,7 @@ public static class Program
             ("SixThemesAndTrayIcon", () => TestSixThemesAndTrayIcon(previewDir)),
             ("TopEdgeHoverAndFullScreenAvoidance", TestTopEdgeHoverAndFullScreenAvoidance),
             ("HeldZoomDragAndTakeDownNeighbours", TestHeldZoomDragAndTakeDownNeighbours),
+            ("FilesImagesAppRulesAndRetentionContract", () => TestFilesImagesAppRulesAndRetentionContract(previewDir)),
             ("InstallScriptIsolated", TestInstallScriptIsolated),
         };
 
@@ -1344,6 +1345,309 @@ public static class Program
         Check(sharePayload.WebLink == new Uri("https://example.com/docs"), "Share payload extracts Uri for link cards");
     }
 
+    private static void TestFilesImagesAppRulesAndRetentionContract(string? previewDir)
+    {
+        Localization.SetLanguageOverride("zh-Hans");
+        var extDir = Path.Combine(Path.GetTempPath(), "encopy-ext-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(extDir);
+        try
+        {
+            var f1 = Path.Combine(extDir, "alpha.txt");
+            var f2 = Path.Combine(extDir, "beta.pdf");
+            var f3 = Path.Combine(extDir, "gamma.csv");
+            File.WriteAllText(f1, "Alpha content");
+            File.WriteAllText(f2, "Beta content");
+            File.WriteAllText(f3, "Gamma content");
+
+            var samplePngPath = Path.Combine(extDir, "sample-clip.png");
+            WriteSamplePng(samplePngPath, 160, 120);
+            var pngBytes = File.ReadAllBytes(samplePngPath);
+
+            using var history = new History();
+            var settingsStore = new SettingsStore();
+            var settings = new AppSettings
+            {
+                ImagesEnabled = true,
+                FilesEnabled = true,
+                TextEnabled = true,
+                LinksEnabled = true
+            };
+            var line = new Line(history);
+            line.SetVisibleCapacity(3);
+
+            var backend = new FakeClipboardBackend();
+            var watcher = new ClipboardWatcher(
+                backend,
+                history,
+                settings,
+                onNew: p => line.AddNew(p),
+                onAgain: (p, ts) => line.Use(p, ts));
+            watcher.Start();
+
+            // 1. 复制图片入库与字节哈希去重回绳头
+            uint seq = 1;
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, null, null, null, pngBytes, @"C:\Windows\System32\mspaint.exe"));
+            Check(line.LineItems.Count == 1 && line.LineItems[0].Kind == ItemKind.Image, "Copied PNG hangs on the line as Polaroid image");
+            var savedClipPng = line.LineItems[0].FilePath;
+            Check(DataFolder.Contains(savedClipPng) && File.Exists(savedClipPng), "Copied PNG stored inside DataFolder\\Screenshots");
+
+            // 再复制一条普通文本把图片挤到第二格，随后重复制同一张 PNG 验证去重且挪回绳头
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Intervening text note", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            long countBeforeReCopy = history.Count;
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, null, null, null, pngBytes, @"C:\Windows\System32\mspaint.exe"));
+            Check(history.Count == countBeforeReCopy && string.Equals(line.LineItems[0].FilePath, savedClipPng, StringComparison.OrdinalIgnoreCase),
+                "Re-copying identical PNG deduplicates without creating a second file and moves card back to rope head");
+
+            // 2. 资源管理器单/多文件 .files 清单、路径集合无序去重、篮子 Ctrl+↓ 展开栈单挑粘贴与「已移走」灰化
+            backend.Push(new ClipboardSnapshot(++seq, false, true, false, null, null, [f1, f2, f3], null, @"C:\Windows\explorer.exe"));
+            var stackNote = line.LineItems[0];
+            Check(stackNote.Kind == ItemKind.File && FileList.IsManifestPath(stackNote.FilePath) && stackNote.Title == "3 个文件",
+                $"Expected 3-file .files manifest card titled '3 个文件', got '{stackNote.Title}'");
+            Check(!DataFolder.Contains(f1) && File.Exists(f1), "Original Explorer files remain untouched outside DataFolder");
+
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Push stack note 1", null));
+            long countBeforeReverseFiles = history.Count;
+            backend.Push(new ClipboardSnapshot(++seq, false, true, false, null, null, [f3, f1, f2], null, @"C:\Windows\explorer.exe"));
+            Check(history.Count == countBeforeReverseFiles && string.Equals(line.LineItems[0].FilePath, stackNote.FilePath, StringComparison.OrdinalIgnoreCase),
+                "Copying the same files in different order deduplicates .files manifest and moves back to rope head");
+
+            // 连续复制 3 条普通文本把 3-文件清单挤进篮子
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Overflow push A", null));
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Overflow push B", null));
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Overflow push C", null));
+            line.OpenBasket();
+            var inBasketStack = line.BasketGroups.SelectMany(g => g.Rows).First(r => string.Equals(r.Note.FilePath, stackNote.FilePath, StringComparison.OrdinalIgnoreCase)).Note;
+            line.SelectBasketRow(inBasketStack);
+
+            bool stackOpened = LineKeyRouter.HandleKeyDown(
+                Key.Down,
+                ModifierKeys.Control,
+                isImeComposing: false,
+                currentQuery: string.Empty,
+                hasQuerySelection: false,
+                line,
+                paste: _ => { },
+                copyPicked: () => { },
+                dismiss: () => { },
+                clearQuery: () => { });
+            Check(stackOpened && line.BasketExpandedPath is not null, "Ctrl+Down expands multi-file stack in basket");
+
+            line.VerticalArrow(1); // 第 1 个子文件 alpha.txt
+            line.VerticalArrow(1); // 第 2 个子文件 beta.pdf
+            Check(string.Equals(line.BasketSubPickedFile, Path.GetFullPath(f2), StringComparison.OrdinalIgnoreCase),
+                $"Downx2 inside expanded stack selects second file beta.pdf, got '{line.BasketSubPickedFile}'");
+
+            var fakePaste = new FakePastePlatform();
+            var paster = new Paster(line, fakePaste);
+            Check(paster.PastePicked(new IntPtr(1001)), "Pasting single sub-picked file from expanded stack succeeds");
+            Check(fakePaste.LastWrittenFiles is { Count: 1 } wf && string.Equals(wf[0], Path.GetFullPath(f2), StringComparison.OrdinalIgnoreCase),
+                "Single-file stack paste writes only beta.pdf to clipboard FileDropList");
+            line.CloseBasket();
+
+            // 验证图片粘贴写剪贴板
+            Check(paster.WriteToClipboard(Note.Load(savedClipPng, "Screenshots/" + Path.GetFileName(savedClipPng), DateTime.Now)!),
+                "Image card writes bitmap/PNG to clipboard");
+            Check(string.Equals(fakePaste.LastWrittenImagePath, savedClipPng, StringComparison.OrdinalIgnoreCase),
+                "WriteClipboardImage received exact private PNG path");
+
+            // 删除全部外部原文件后验证清单标为「已移走」且拒绝贴出坏路径
+            File.Delete(f1);
+            File.Delete(f2);
+            File.Delete(f3);
+            var movedNote = Note.Load(stackNote.FilePath, "Files/" + Path.GetFileName(stackNote.FilePath), DateTime.Now)!;
+            Check(movedNote.IsMovedAway, "Deleting all target files marks .files manifest Note.IsMovedAway = true");
+            Check(!paster.WriteToClipboard(movedNote), "Moved-away file manifest refuses to write broken paths to clipboard");
+
+            // 3. 来源 App 三档（预设密码管理器不记 / 自定义不记 / 一小时后清）与 4–8 位验证码识别及 10 分钟直接过期
+            long countBeforeSkip = history.Count;
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "vault-secret-999", null, null, null, @"C:\Program Files\Bitwarden\Bitwarden.exe"));
+            Check(history.Count == countBeforeSkip, "Preset password manager (Bitwarden) is skipped out of the box");
+
+            SourceApp.SetRule(settings, @"C:\Windows\System32\notepad.exe", AppRule.Skip);
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Skipped notepad text", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            Check(history.Count == countBeforeSkip, "App configured as Don't record (Skip) leaves zero trace in History");
+
+            SourceApp.SetRule(settings, @"C:\Windows\System32\notepad.exe", AppRule.Hourly);
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "Hourly temporary note", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            var hourlyPath = line.LineItems[0].FilePath;
+            Check(history.GetTtl(hourlyPath) == 3600.0, "Hourly app rule assigns 3600s TTL");
+            SourceApp.SetRule(settings, @"C:\Windows\System32\notepad.exe", AppRule.Normal);
+
+            Check(ClipboardWatcher.IsVerificationCode("您的登录验证码是 482910，5分钟内有效", @"C:\Program Files\WeChat\WeChat.exe"), "Detects Chinese verification code");
+            Check(ClipboardWatcher.IsVerificationCode("Your security code: 739201", @"C:\Program Files\Google\Chrome\Application\chrome.exe"), "Detects English verification code");
+            Check(ClipboardWatcher.IsVerificationCode("826415", @"C:\Program Files\WindowsApps\olk.exe"), "Detects bare 6-digit code from Outlook");
+            Check(!ClipboardWatcher.IsVerificationCode("HTTP status code 404", null), "Excludes HTTP status code");
+            Check(!ClipboardWatcher.IsVerificationCode("My postal code 10001", null), "Excludes postal code");
+            Check(!ClipboardWatcher.IsVerificationCode("See ticket T-1024 code review", null), "Excludes ticket identifier T-1024");
+
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "登录验证码 482910", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            var codePath1 = line.LineItems[0].FilePath;
+            Check(history.GetTtl(codePath1) == 600.0, "Verification code gets 600s (10-min) TTL");
+
+            backend.Push(new ClipboardSnapshot(++seq, false, false, false, "登录验证码 918273", null, null, null, @"C:\Windows\System32\notepad.exe"));
+            var codePathPinned = line.LineItems[0].FilePath;
+            line.TogglePinByPath(codePathPinned);
+            Check(history.GetTtl(codePathPinned) is null, "Pinning a verification code clears its TTL so it never expires");
+
+            int clearedBatchCountBeforeTtl = line.Clearing.Batches().Count;
+            int expiredRemoved = line.ClearExpired(DateTime.UtcNow.AddMinutes(11));
+            Check(expiredRemoved >= 1 && !File.Exists(codePath1) && !history.Contains(codePath1),
+                "Unpinned verification code is deleted directly after 10 minutes");
+            Check(File.Exists(codePathPinned) && history.Contains(codePathPinned),
+                "Pinned verification code survives past 10 minutes");
+            Check(line.Clearing.Batches().Count == clearedBatchCountBeforeTtl,
+                "Expired verification code does NOT enter Recently Cleared");
+
+            // 1 小时后按 App 一小时规则的条目同样直接删除不进 Recently Cleared
+            line.ClearExpired(DateTime.UtcNow.AddMinutes(65));
+            Check(!File.Exists(hourlyPath) && line.Clearing.Batches().Count == clearedBatchCountBeforeTtl,
+                "Hourly app item deletes directly after 60m without entering Recently Cleared");
+
+            // 4. 保留规则：原图超上限或满 30 天缩成 <=640px 缩略图并保留原图识别词；文字超 1 年与失效清单进「最近清掉」
+            var bigImgPath = Path.Combine(DataFolder.ScreenshotsFolder, "BigOriginal.png");
+            WritePatternPng(bigImgPath, 1400, 980);
+            long origByteLen = new FileInfo(bigImgPath).Length;
+            history.RecordImage(bigImgPath, ocrWords: "报销凭证号 INV998877", pngBytesForHash: File.ReadAllBytes(bigImgPath), usedAt: DateTime.UtcNow.AddDays(-5), appName: @"C:\Windows\System32\mspaint.exe");
+
+            var oldNotePath = Path.Combine(DataFolder.NotesFolder, "OldYearNote.txt");
+            File.WriteAllText(oldNotePath, "Note from two years ago", new UTF8Encoding(false));
+            history.Record(oldNotePath, "Note from two years ago", usedAt: DateTime.UtcNow.AddDays(-400), appName: @"C:\Windows\System32\notepad.exe");
+
+            var retPlan = line.RunRetention(DateTime.UtcNow, capBytes: Math.Max(1024, origByteLen / 3));
+            Check(retPlan.ShrunkPaths.Any(p => string.Equals(p, bigImgPath, StringComparison.OrdinalIgnoreCase)),
+                "Retention shrinks private image when total unshrunk originals exceed OriginalsCapBytes");
+            Check(history.IsShrunk(bigImgPath), "Shrunk image marked shrunk=1 in History");
+
+            using (var shrunkStream = File.OpenRead(bigImgPath))
+            {
+                var dec = BitmapDecoder.Create(shrunkStream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+                Check(dec.Frames[0].PixelWidth == Retention.ThumbnailMaxPixels && new FileInfo(bigImgPath).Length < origByteLen,
+                    $"Shrunk image scaled to {Retention.ThumbnailMaxPixels}px long edge ({dec.Frames[0].PixelWidth}x{dec.Frames[0].PixelHeight}) and smaller on disk");
+            }
+            var ocrFound = history.Search(SearchText.Words("INV998877"), [], limit: 20);
+            Check(ocrFound.Basket.Any(p => string.Equals(p, bigImgPath, StringComparison.OrdinalIgnoreCase)),
+                "Shrinking original image strictly preserves its indexed OCR search words");
+
+            Check(!File.Exists(oldNotePath) && !File.Exists(stackNote.FilePath),
+                "365-day expired note and missing-target .files manifest moved into Recently Cleared");
+            var expiredBatch = line.Clearing.Batches().FirstOrDefault(b => b.Reason == "expired");
+            Check(expiredBatch is not null && expiredBatch.Entries.Count >= 2, "Recently Cleared records expired batch");
+
+            // 5. 手动清理面板（预览件数/字节估算与实际一致、Ctrl+Shift+Backspace 快捷键、7 天整批放回）
+            bool cleanupShortcutInvoked = false;
+            Check(LineKeyRouter.HandleKeyDown(
+                Key.Back,
+                ModifierKeys.Control | ModifierKeys.Shift,
+                isImeComposing: false,
+                currentQuery: string.Empty,
+                hasQuerySelection: false,
+                line,
+                paste: _ => { },
+                copyPicked: () => { },
+                dismiss: () => { },
+                clearQuery: () => { },
+                openCleanup: () => cleanupShortcutInvoked = true) && cleanupShortcutInvoked,
+                "Ctrl+Shift+Backspace triggers Clean Up History callback");
+
+            var cleanupWin = new CleanupWindow(line);
+            cleanupWin.SetFilterForTest(new CleanupFilter(Kind: KindFilter.Image, OlderThanDays: 1.0, App: "mspaint", QueryText: "INV998877", IncludePinnedAndOnLine: false));
+            var preview = cleanupWin.CurrentPreviewForTest;
+            long expectedBytes = preview.CandidatePaths.Where(File.Exists).Sum(p => new FileInfo(p).Length);
+            Check(preview.CandidatePaths.Count == 1 && preview.EstimatedFreedBytes == expectedBytes && expectedBytes > 0,
+                "Cleanup preview count and estimated freed bytes match candidate files on disk");
+
+            var manualBatch = cleanupWin.ExecuteCurrentCleanup();
+            Check(manualBatch is not null && manualBatch.Entries.Count == preview.CandidatePaths.Count && !File.Exists(bigImgPath),
+                "Cleanup execution moves exact previewed candidates into Recently Cleared");
+
+            var restoredPaths = line.PutBackClearedBatch(manualBatch!.Id);
+            Check(restoredPaths.Count == 1 && File.Exists(bigImgPath) && history.IsShrunk(bigImgPath),
+                "PutBack restores cleared image file and shrunk flag");
+            Check(history.Search(SearchText.Words("INV998877"), [], limit: 10).Basket.Count == 1,
+                "PutBack restores image OCR words and original metadata");
+
+            // 6. 五页主题化设置窗口持久化与离屏渲染落盘
+            var settingsWin = new SettingsWindow(
+                settings,
+                line,
+                new SettingsCallbacks(
+                    SaveAndApplySettings: () => settingsStore.Save(settings),
+                    ChangeShortcut: after => after(),
+                    OpenCleanup: () => { },
+                    OpenScreenshotsFolder: () => { },
+                    OpenDataFolder: () => { }),
+                frontApp: @"C:\Windows\System32\notepad.exe");
+
+            var outDir = previewDir ?? Path.Combine(FindRepoRoot(), "evidence", "T-061");
+            Directory.CreateDirectory(outDir);
+            for (int tab = 0; tab < 5; tab++)
+            {
+                settingsWin.SelectTab(tab);
+                settingsWin.RenderOffscreen(610, 640);
+                SaveVisualPng(settingsWin, 610, 640, Path.Combine(outDir, $"00-offscreen-settings-tab{tab}.png"));
+            }
+
+            settings.SetActiveTheme(LineTheme.Neon);
+            line.Theme = LineTheme.Neon;
+            settingsStore.Save(settings);
+            settingsWin.SelectTab(3);
+            settingsWin.RenderOffscreen(610, 640);
+            SaveVisualPng(settingsWin, 610, 640, Path.Combine(outDir, "00-offscreen-settings-neon.png"));
+
+            cleanupWin.RenderOffscreen(530, 650);
+            SaveVisualPng(cleanupWin, 530, 650, Path.Combine(outDir, "00-offscreen-cleanup.png"));
+
+            var reloadedSettings = settingsStore.Load();
+            Check(reloadedSettings.GetActiveTheme() == LineTheme.Neon && reloadedSettings.ImagesEnabled,
+                "SettingsWindow changes persist across SettingsStore reload");
+
+            settingsWin.Close();
+            cleanupWin.Close();
+        }
+        finally
+        {
+            Directory.Delete(extDir, recursive: true);
+        }
+    }
+
+    private static void WritePatternPng(string path, int width, int height)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        int stride = width * 4;
+        var pixels = new byte[stride * height];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                uint h = (uint)(x * 374761393u + y * 668265263u);
+                h = (h ^ (h >> 13)) * 1274126177u;
+                h ^= h >> 16;
+                int o = y * stride + x * 4;
+                pixels[o] = (byte)(h & 0xFF);
+                pixels[o + 1] = (byte)((h >> 8) & 0xFF);
+                pixels[o + 2] = (byte)((h >> 16) & 0xFF);
+                pixels[o + 3] = 255;
+            }
+        }
+        var bmp = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(bmp));
+        using var fs = File.Create(path);
+        enc.Save(fs);
+    }
+
+    private static void SaveVisualPng(Window win, int width, int height, string outputPath)
+    {
+        if (win.Content is not FrameworkElement root) return;
+        var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(root);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(rtb));
+        using var fs = File.Create(outputPath);
+        enc.Save(fs);
+    }
+
     private static void TestInstallScriptIsolated()
     {
         var repoRoot = FindRepoRoot();
@@ -1503,6 +1807,20 @@ public static class Program
             return true;
         }
 
+        public bool TryWriteFiles(IReadOnlyList<string> paths)
+        {
+            SequenceNumber++;
+            _current = new ClipboardSnapshot(SequenceNumber, ContainsSelfCopy: true, ContainsFiles: true, IsPrivacyBlocked: false, null, null, paths);
+            return true;
+        }
+
+        public bool TryWriteImage(string imagePath)
+        {
+            SequenceNumber++;
+            _current = new ClipboardSnapshot(SequenceNumber, ContainsSelfCopy: true, ContainsFiles: false, IsPrivacyBlocked: false, null, null);
+            return File.Exists(imagePath);
+        }
+
         public void Dispose() { }
     }
 
@@ -1513,12 +1831,26 @@ public static class Program
         public int HintCalls { get; private set; }
         public string? LastPlainText { get; private set; }
         public byte[]? LastRtfBytes { get; private set; }
+        public IReadOnlyList<string>? LastWrittenFiles { get; private set; }
+        public string? LastWrittenImagePath { get; private set; }
 
         public bool WriteClipboardText(string text, byte[]? rtfBytes)
         {
             LastPlainText = text;
             LastRtfBytes = rtfBytes;
             return true;
+        }
+
+        public bool WriteClipboardFiles(IReadOnlyList<string> paths)
+        {
+            LastWrittenFiles = paths;
+            return paths.Count > 0;
+        }
+
+        public bool WriteClipboardImage(string imagePath)
+        {
+            LastWrittenImagePath = imagePath;
+            return File.Exists(imagePath);
         }
 
         public void TuckAway(IntPtr restoreTargetWindow) { }
