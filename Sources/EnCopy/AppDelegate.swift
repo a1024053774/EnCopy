@@ -205,16 +205,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // Before "welcomed" is set below: a first install is not an update (T-074).
+        let news = WhatsNew.onLaunch(current: Updater.currentVersion)
+        // After whichever question this launch asks: those are modal.
+        let tellNews = { [weak self] in if let news { self?.showWhatsNew(news) } }
         if !Inbox.wasOffered {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 self?.offerInbox()
                 self?.explainRecording()
+                tellNews()
             }
         } else if !Self.recordingExplained {
             // Updated from a version that asked before keeping text: shown once.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.explainRecording() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.explainRecording(); tellNews() }
         } else if Self.shouldOfferLogin {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { Self.offerLogin() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { Self.offerLogin(); tellNews() }
+        } else if news != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { tellNews() }
         }
 
         if !UserDefaults.standard.bool(forKey: "welcomed") {
@@ -229,6 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.wanted = false
                 self.refresh()
             }
+        }
+    }
+
+    private func showWhatsNew(_ entry: WhatsNew.Entry) {
+        WhatsNewWindow.shared.show(entry, version: Updater.currentVersion, current: line.theme) { [weak self] theme in
+            self?.line.theme = theme
         }
     }
 

@@ -66,8 +66,8 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | d32baa2 |
-| [README.md](../README.md) | `scripts/**`, `Package.swift` | d32baa2 |
-| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | d32baa2 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | d32baa2 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | d32baa2 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**` | 57a429e |
+| [README.md](../README.md) | `scripts/**`, `Package.swift` | 57a429e |
+| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 57a429e |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | 57a429e |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 57a429e |

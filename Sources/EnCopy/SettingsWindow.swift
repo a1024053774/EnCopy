@@ -480,18 +480,8 @@ private struct ThemeSwatch: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                ZStack(alignment: .top) {
-                    SettingsBackdrop(theme: theme)
-                    Rope(width: 150, theme: theme).frame(width: 150, height: 70)
-                    HStack(alignment: .top, spacing: 16) {
-                        paper(.text, tilt: -4)
-                        paper(.link, tilt: 3)
-                    }
-                    .padding(.top, 12)
-                    if theme.isSeasonal { SeasonRibbon() }
-                }
-                .frame(width: 150, height: 70)
-                .environment(\.colorScheme, theme == .neon ? .dark : .light)
+                ThemeScene(theme: theme)
+                    .overlay { if theme.isSeasonal { SeasonRibbon() } }
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -510,17 +500,42 @@ private struct ThemeSwatch: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
+}
+
+/// A scrap of a theme's line (T-071, T-074): what the window lies on in that
+/// theme, a length of its rope and two papers on its pegs. The 外观 cards and
+/// the new-version window draw it; `scale` grows the papers, not the rope.
+struct ThemeScene: View {
+    let theme: Theme
+    var width: CGFloat = 150
+    var height: CGFloat = 70
+    var scale: CGFloat = 1
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            SettingsBackdrop(theme: theme)
+            Rope(width: width, theme: theme).frame(width: width, height: height)
+            HStack(alignment: .top, spacing: 16 * scale) {
+                paper(.text, tilt: -4)
+                paper(.link, tilt: 3)
+            }
+            .padding(.top, 12)
+        }
+        .frame(width: width, height: height)
+        .environment(\.colorScheme, theme == .neon ? .dark : .light)
+    }
+
     private func paper(_ card: Theme.Card, tilt: Double) -> some View {
         ThemeCardBackground(theme: theme, card: card)
-            .frame(width: 44, height: 38)
+            .frame(width: 44 * scale, height: 38 * scale)
             .overlay(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Capsule().fill(theme.ink(card).opacity(0.75)).frame(width: 28, height: 3)
-                    Capsule().fill(theme.soft(card).opacity(0.75)).frame(width: 20, height: 3)
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Capsule().fill(theme.ink(card).opacity(0.75)).frame(width: 28 * scale, height: 3 * scale)
+                    Capsule().fill(theme.soft(card).opacity(0.75)).frame(width: 20 * scale, height: 3 * scale)
                 }
-                .padding(.top, 12).padding(.leading, 7)
+                .padding(.top, 12 * scale).padding(.leading, 7 * scale)
             }
-            .overlay(alignment: .top) { ThemePeg(theme: theme).scaleEffect(0.55).offset(y: -9) }
+            .overlay(alignment: .top) { ThemePeg(theme: theme).scaleEffect(0.55 * scale).offset(y: -9 * scale) }
             .rotationEffect(.degrees(tilt), anchor: .top)
     }
 }
