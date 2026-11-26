@@ -24,11 +24,8 @@ public static class ScreenPlacement
     public const double RopeTop = 10.0;
     public const double LineBandHeight = 208.0;
 
-    // Known unverified (T-058 / T-059): Current dev machine has a single display (\\.\DISPLAY1 at 125% DPI),
-    // so mixed-DPI multi-monitor Window.Left/Top DIP-to-physical conversion is covered by unit math
-    // (TestScreenPlacementMultiMonitorDpi) rather than hardware transition across monitors.
-    // Impact: Secondary monitor placement at a different DPI scale may need post-SourceInitialized physical SetWindowPos adjustment.
-    // Removal condition: Verify live on a physical external monitor with differing DPI scale and remove or adjust.
+    // Verified 2026-11-26 on live dual-monitor desktop with 100% primary + 125% secondary DPI:
+    // LinePanel landed cleanly at secondary top edge (evidence/T-059/mixed-dpi-secondary-placement.png); higher secondary DPI scales (>=175%/200%) remain covered by unit math.
     public static DipRect TopLineStrip(
         int cursorPhysicalX,
         int cursorPhysicalY,

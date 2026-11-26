@@ -506,7 +506,7 @@ public sealed class Line : INotifyPropertyChanged
 
         int pinIdx = PinnedCount;
         _lineItems.Insert(pinIdx, loaded);
-        TrimToCapacity(protectPaths: [full]);
+        var displaced = TrimToCapacity(protectPaths: [full]);
 
         PushUndoStep([
             new UndoEntry(
@@ -518,7 +518,8 @@ public sealed class Line : INotifyPropertyChanged
                 WasOnLine: false,
                 WasPinned: false,
                 OldScreenIndex: pinIdx,
-                IsPinChange: true)
+                IsPinChange: true,
+                DisplacedLoosePaths: displaced.Select(d => d.FilePath).ToList())
         ]);
 
         SaveLineState();
@@ -634,6 +635,86 @@ public sealed class Line : INotifyPropertyChanged
                         _lineItems.Insert(insertAt, reverted);
                         SortPinnedBeforeLoosePreservingRelativeOrder();
                         firstRestored ??= reverted;
+                    }
+                    else if (entry.DisplacedLoosePaths is { Count: > 0 } displacedPaths)
+                    {
+                        var allEntries = History.AllEntries();
+                        var byFullPath = new Dictionary<string, History.StoredEntry>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var histEntry in allEntries)
+                        {
+                            byFullPath[Path.GetFullPath(histEntry.FullPath)] = histEntry;
+                        }
+                        var onLine = OnLinePathSet();
+                        int maxToRestore = displacedPaths.Count;
+                        int restoredCount = 0;
+
+                        bool TryAppendLoose(History.StoredEntry histEntry, string histFull)
+                        {
+                            if (restoredCount >= maxToRestore || _lineItems.Count >= EffectiveMaxItems)
+                            {
+                                return false;
+                            }
+                            var usedLocal = DateTimeOffset.FromUnixTimeMilliseconds((long)(histEntry.UsedUnix * 1000)).LocalDateTime;
+                            if (Note.Load(histEntry.FullPath, histEntry.RelativePath, usedLocal, pinned: false, appName: histEntry.AppName) is not { } restoredLoose)
+                            {
+                                return false;
+                            }
+                            _lineItems.Add(restoredLoose);
+                            restoredPaths.Add(histFull);
+                            restoredCount++;
+                            return true;
+                        }
+
+                        double? maxDisplacedUnix = null;
+                        foreach (var displacedPath in displacedPaths)
+                        {
+                            var displacedFull = Path.GetFullPath(displacedPath);
+                            if (byFullPath.TryGetValue(displacedFull, out var dEntry))
+                            {
+                                maxDisplacedUnix = maxDisplacedUnix is { } m ? Math.Max(m, dEntry.UsedUnix) : dEntry.UsedUnix;
+                            }
+                        }
+
+                        // 若pin之后又有更新的卡被新复制挤进篮子，先按最近使用时间补回这些更新卡，再恢复被该次pin挤下的卡
+                        if (maxDisplacedUnix is { } cutoffUnix)
+                        {
+                            foreach (var histEntry in allEntries)
+                            {
+                                if (restoredCount >= maxToRestore || _lineItems.Count >= EffectiveMaxItems) break;
+                                if (histEntry.UsedUnix <= cutoffUnix) break;
+                                var histFull = Path.GetFullPath(histEntry.FullPath);
+                                if (string.Equals(histFull, full, StringComparison.OrdinalIgnoreCase) || !onLine.Add(histFull))
+                                {
+                                    continue;
+                                }
+                                TryAppendLoose(histEntry, histFull);
+                            }
+                        }
+
+                        foreach (var displacedPath in displacedPaths)
+                        {
+                            if (restoredCount >= maxToRestore || _lineItems.Count >= EffectiveMaxItems) break;
+                            var displacedFull = Path.GetFullPath(displacedPath);
+                            if (string.Equals(displacedFull, full, StringComparison.OrdinalIgnoreCase) ||
+                                !onLine.Add(displacedFull) ||
+                                !byFullPath.TryGetValue(displacedFull, out var histEntry))
+                            {
+                                continue;
+                            }
+                            TryAppendLoose(histEntry, displacedFull);
+                        }
+
+                        // 若当时确实挤下过卡片，且被挤掉的卡在撤销前已被重新 Use() 拉回或取下，至多补回 maxToRestore 张篮子卡
+                        foreach (var histEntry in allEntries)
+                        {
+                            if (restoredCount >= maxToRestore || _lineItems.Count >= EffectiveMaxItems) break;
+                            var histFull = Path.GetFullPath(histEntry.FullPath);
+                            if (string.Equals(histFull, full, StringComparison.OrdinalIgnoreCase) || !onLine.Add(histFull))
+                            {
+                                continue;
+                            }
+                            TryAppendLoose(histEntry, histFull);
+                        }
                     }
                     restoredPaths.Add(full);
                 }
@@ -947,8 +1028,9 @@ public sealed class Line : INotifyPropertyChanged
         }
     }
 
-    private void TrimToCapacity(HashSet<string>? protectPaths = null)
+    private List<Note> TrimToCapacity(HashSet<string>? protectPaths = null)
     {
+        var displaced = new List<Note>();
         int limit = EffectiveMaxItems;
         while (_lineItems.Count > limit)
         {
@@ -963,8 +1045,11 @@ public sealed class Line : INotifyPropertyChanged
                 break;
             }
             if (victim < 0) break;
+            displaced.Add(_lineItems[victim]);
             _lineItems.RemoveAt(victim);
         }
+        displaced.Reverse();
+        return displaced;
     }
 
     private void SortPinnedBeforeLoosePreservingRelativeOrder()
@@ -1159,5 +1244,6 @@ public sealed class Line : INotifyPropertyChanged
         bool WasOnLine,
         bool WasPinned,
         int OldScreenIndex,
-        bool IsPinChange);
+        bool IsPinChange,
+        IReadOnlyList<string>? DisplacedLoosePaths = null);
 }

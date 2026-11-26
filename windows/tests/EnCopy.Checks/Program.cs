@@ -342,6 +342,16 @@ public static class Program
         Check(copied == 1, "Copy callback invoked once");
         Check(!LineKeyRouter.HandleKeyDown(Key.C, ModifierKeys.Control, false, "abc", hasQuerySelection: true, line, _ => { }, () => copied++, () => { }, () => { }), "Ctrl+C with query text selection stays with TextBox");
 
+        // Ctrl+Z 与 QueryBox.CanUndo 交互：输入框仍有可撤销打字时让位给 TextBox，无输入撤回时触发绳子 PutBack()
+        line.PickCard(line.ShownItems[0]);
+        Check(line.TakeDownPicked() && line.CanPutBack, "TakeDown prepares undo step for Ctrl+Z test");
+        Check(!LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "typed", false, line, _ => { }, () => { }, () => { }, () => { }, canUndoQuery: true),
+            "Ctrl+Z yields to QueryBox when canUndoQuery is true");
+        Check(line.CanPutBack, "PutBack remains pending while QueryBox handles Ctrl+Z");
+        Check(LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "typed", false, line, _ => { }, () => { }, () => { }, () => { }, canUndoQuery: false),
+            "Ctrl+Z triggers PutBack when canUndoQuery is false even with non-empty query");
+        Check(!line.CanPutBack, "PutBack executed when QueryBox has nothing to undo");
+
         Check(LineKeyRouter.HandleKeyDown(Key.Enter, ModifierKeys.Shift, false, "", false, line, p => pastedPlain = p ? 1 : 0, () => { }, () => { }, () => { }), "Shift+Enter handled");
         Check(pastedPlain == 1, "Shift+Enter requests plain paste");
 
@@ -720,6 +730,7 @@ public static class Program
         Check(line.BasketPicked is not null && line.BasketPicked.Kind == ItemKind.File && line.BasketPicked.FilePath != firstPicked?.FilePath,
             "Right arrow jumps to next basket group (report.filelist)");
 
+        var displacedBeforePin = line.LineItems[2].FilePath;
         var pinnedPath = line.BasketPicked!.FilePath;
         LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
         Check(line.PinnedCount == 1 && string.Equals(line.LineItems[0].FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase),
@@ -727,10 +738,21 @@ public static class Program
         Check(!line.BasketGroups.SelectMany(g => g.Rows).Any(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
             "Pinned item leaves the basket list");
 
-        // Ctrl+Z 撤销从篮子刚收藏的条目：应撤回篮子并恢复 LineState.json，之后仍可再次 Ctrl+P 收藏上绳
+        // Ctrl+Z 撤销从篮子刚收藏的条目：应撤回篮子、补回被挤下绳的卡片并恢复 LineState.json，之后仍可再次 Ctrl+P 收藏上绳
         LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
         Check(line.PinnedCount == 0 && line.BasketGroups.SelectMany(g => g.Rows).Any(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
             "Ctrl+Z after basket Ctrl+P unpins and returns item to basket");
+        Check(line.LineItems.Count == 3 && string.Equals(line.LineItems[2].FilePath, displacedBeforePin, StringComparison.OrdinalIgnoreCase) && line.BasketCount == 4,
+            $"Ctrl+Z after basket Ctrl+P on full line must restore displaced card onto line (count={line.LineItems.Count}, basket={line.BasketCount})");
+
+        // 若被挤掉的卡在撤销前已被重新 Use() 拉回绳上，Ctrl+Z 取消收藏时仍需从篮子补齐满绳且不把刚取消收藏的那件拉成普通卡
+        line.BasketPicked = line.BasketGroups.SelectMany(g => g.Rows).First(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)).Note;
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        line.Use(displacedBeforePin, DateTime.UtcNow.AddSeconds(1));
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 0 && line.LineItems.Count == 3 &&
+              !line.LineItems.Any(n => string.Equals(n.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
+            $"Ctrl+Z after intervening Use() must backfill full line from basket without leaving {line.LineItems.Count} cards");
         line.BasketPicked = line.BasketGroups.SelectMany(g => g.Rows).First(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)).Note;
         LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
         Check(line.PinnedCount == 1 && string.Equals(line.LineItems[0].FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase),
@@ -748,6 +770,61 @@ public static class Program
         }
         LineKeyRouter.HandleKeyDown(Key.Up, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
         Check(!line.BasketOpen && line.Picked is not null, "Up arrow on first basket row closes basket and returns pick to line");
+
+        // 调高 KeepOnLine 使绳不满且未挤掉任何卡时，从篮子 Ctrl+P 再 Ctrl+Z 绝不能把无关篮子条目拉上绳（P2 回归）
+        line.SetKeepOnLine(25);
+        int prePinCount = line.LineItems.Count;
+        int prePinBasket = line.BasketCount;
+        line.OpenBasket();
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.LineItems.Count == prePinCount + 1, "Zero-displacement basket pin adds pinned card to line");
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.LineItems.Count == prePinCount && line.BasketCount == prePinBasket,
+            $"Zero-displacement Ctrl+Z must return exact count {prePinCount} without pulling basket items (got {line.LineItems.Count})");
+
+        // 交叉调度不变量（[Pin -> AddNew -> Undo] 与 [Pin1 -> Pin2 -> Undo -> Undo]）：撤销篮子收藏不得用更老卡顶掉后挤下的更新卡
+        using var schedHistory = new History(Path.Combine(DataFolder.Root, "schedule.sqlite"));
+        string AddSchedNote(string fileName, string text, DateTime utcStamp)
+        {
+            var p = Path.Combine(DataFolder.NotesFolder, fileName);
+            File.WriteAllText(p, text, new UTF8Encoding(false));
+            schedHistory.Record(p, text, utcStamp);
+            return p;
+        }
+
+        var utcNow = DateTime.UtcNow;
+        AddSchedNote("sched-Y.txt", "sched-Y", utcNow.AddMinutes(-180));
+        var schedP2 = AddSchedNote("sched-P2.txt", "sched-P2", utcNow.AddMinutes(-120));
+        var schedP1 = AddSchedNote("sched-P1.txt", "sched-P1", utcNow.AddMinutes(-60));
+        var schedZ = AddSchedNote("sched-Z.txt", "sched-Z", utcNow.AddMinutes(-30));
+        AddSchedNote("sched-B.txt", "sched-B", utcNow.AddMinutes(-20));
+        AddSchedNote("sched-A.txt", "sched-A", utcNow.AddMinutes(-10));
+
+        var schedLine = new Line(schedHistory, lineStatePath: Path.Combine(DataFolder.Root, "sched-LineState.json"));
+        schedLine.SetVisibleCapacity(3);
+        Check(schedLine.LineItems.Count == 3 && schedLine.LineItems[2].FullText == "sched-Z", "Schedule setup holds [A, B, Z]");
+
+        // 1) [Pin -> AddNew -> Undo]: Pin(P1) 挤下 Z -> AddNew(N) 挤下更晚的 B -> PutBack() 应优先补回更新的 B 而非更老的 Z
+        schedLine.TogglePinByPath(schedP1);
+        var schedN = AddSchedNote("sched-N.txt", "sched-N", utcNow.AddMinutes(-5));
+        schedLine.AddNew(schedN);
+        Check(schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-N", "sched-A"]),
+            "After Pin(P1) + AddNew(N), line holds [P1*, N, A]");
+        Check(schedLine.PutBack(), "PutBack undoes Pin(P1)");
+        Check(schedLine.PinnedCount == 0 && schedLine.LineItems.Count == 3 &&
+              schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-N", "sched-A", "sched-B"]),
+            $"[Pin -> AddNew -> Undo] must preserve loose-card recency [N, A, B] (got [{string.Join(", ", schedLine.LineItems.Select(n => n.FullText))}])");
+
+        // 2) [Pin1 -> Pin2 -> Undo -> Undo]: 连续收藏两件后再两次 PutBack，应逐格恢复 A、B
+        schedLine.TogglePinByPath(schedP1);
+        schedLine.TogglePinByPath(schedP2);
+        Check(schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-P2", "sched-N"]),
+            "After two basket pins, line holds [P1*, P2*, N]");
+        Check(schedLine.PutBack() && schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-N", "sched-A"]),
+            "First PutBack after double pin restores A cleanly");
+        Check(schedLine.PutBack() && schedLine.PinnedCount == 0 &&
+              schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-N", "sched-A", "sched-B"]),
+            "Second PutBack after double pin restores B cleanly");
     }
 
     private static void TestShortcutRecorderAndPersistence()

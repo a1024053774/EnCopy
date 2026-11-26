@@ -26,7 +26,8 @@ public static class LineKeyRouter
         Action<bool> paste,
         Action copyPicked,
         Action dismiss,
-        Action clearQuery)
+        Action clearQuery,
+        bool? canUndoQuery = null)
     {
         if (isImeComposing || key == Key.ImeProcessed || key == Key.DeadCharProcessed)
         {
@@ -85,7 +86,8 @@ public static class LineKeyRouter
             return true;
         }
 
-        if (modifiers == ModifierKeys.Control && key == Key.Z && string.IsNullOrEmpty(currentQuery) && line.CanPutBack)
+        bool queryBlocksPutBack = canUndoQuery ?? !string.IsNullOrEmpty(currentQuery);
+        if (modifiers == ModifierKeys.Control && key == Key.Z && !queryBlocksPutBack && line.CanPutBack)
         {
             line.PutBack();
             return true;
@@ -662,7 +664,8 @@ public partial class LinePanel : Window
             {
                 QueryBox.Text = string.Empty;
                 _line.Query = string.Empty;
-            });
+            },
+            canUndoQuery: !string.IsNullOrEmpty(QueryBox.Text) && QueryBox.CanUndo);
 
         if (handled)
         {
