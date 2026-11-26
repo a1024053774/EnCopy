@@ -408,7 +408,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
             _retryTimer.Tick += (_, _) =>
             {
                 _retryTimer?.Stop();
-                CaptureIfNewer(allowSettleDelay: false);
+                CaptureIfNewer();
             };
         }
         finally
@@ -440,28 +440,13 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         if (msg == WmClipboardUpdate)
         {
             _retryAttempts = 0;
-            CaptureIfNewer(allowSettleDelay: true);
+            CaptureIfNewer();
         }
         return IntPtr.Zero;
     }
 
-    private void CaptureIfNewer(bool allowSettleDelay)
+    private void CaptureIfNewer()
     {
-        if (_disposed || !Volatile.Read(ref _listeningActive))
-        {
-            _retryAttempts = 0;
-            _retryTimer?.Stop();
-            Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
-            return;
-        }
-        if (GetClipboardSequenceNumber() == Volatile.Read(ref _lastCapturedSeq)) return;
-
-        if (allowSettleDelay)
-        {
-            // 等待写入方的 OleSetClipboard -> OleFlushClipboard (<1ms) 无竞争落地为内核 HGLOBAL，
-            // 同时远小于 50ms 连按间隔，防止 Writer 触发 100ms CLIPBRD_E_CANT_OPEN 重试。
-            Thread.Sleep(2);
-        }
         if (_disposed || !Volatile.Read(ref _listeningActive))
         {
             _retryAttempts = 0;
@@ -485,7 +470,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
             if (!_disposed && Volatile.Read(ref _listeningActive) &&
                 GetClipboardSequenceNumber() != Volatile.Read(ref _lastCapturedSeq))
             {
-                _listenerDispatcher?.BeginInvoke(() => CaptureIfNewer(allowSettleDelay: false));
+                _listenerDispatcher?.BeginInvoke(CaptureIfNewer);
             }
         }
         else if (openFailed)
