@@ -20,6 +20,7 @@ public interface IClipboardBackend : IDisposable
 {
     event EventHandler? Changed;
     uint SequenceNumber { get; }
+    void SetListening(bool enabled);
     bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot);
     ClipboardSnapshot? TryRead();
     bool TryWrite(string text, byte[]? rtfBytes);
@@ -73,15 +74,16 @@ public sealed class ClipboardWatcher : IDisposable
     {
         if (_started) return;
         _started = true;
-        while (_backend.TryDequeueSnapshot(out _)) { }
         _lastSequence = _backend.SequenceNumber;
         _backend.Changed += OnBackendChanged;
+        _backend.SetListening(true);
     }
 
     public void Stop()
     {
         if (!_started) return;
         _started = false;
+        _backend.SetListening(false);
         _backend.Changed -= OnBackendChanged;
     }
 
@@ -207,6 +209,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     private const uint CfHDrop = 15;
     private const int MaxUnicodeReadChars = 100_005;
     private const int MaxRtfBytes = 5_000_000;
+    private const int MaxRetryAttempts = 10;
     private static readonly IntPtr HwndMessage = new(-3);
 
     private static readonly uint CfSelfCopy = RegisterClipboardFormat(ClipboardWatcher.SelfCopyFormat);
@@ -217,13 +220,14 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
 
     private readonly Dispatcher _uiDispatcher = Dispatcher.CurrentDispatcher;
     private readonly ConcurrentQueue<ClipboardSnapshot> _captured = new();
-    private readonly ManualResetEventSlim _ready = new(false);
     private readonly Thread _listenerThread;
     private Dispatcher? _listenerDispatcher;
     private IntPtr _listenerHwnd;
     private DispatcherTimer? _retryTimer;
     private uint _lastCapturedSeq;
     private int _notifyPending;
+    private int _retryAttempts;
+    private bool _listeningActive;
     private volatile bool _disposed;
 
     public event EventHandler? Changed;
@@ -231,17 +235,42 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     public Win32ClipboardBackend()
     {
         _lastCapturedSeq = GetClipboardSequenceNumber();
-        _listenerThread = new Thread(ListenerThreadMain)
+        using var ready = new ManualResetEventSlim(false);
+        _listenerThread = new Thread(state => ListenerThreadMain((ManualResetEventSlim)state!))
         {
             IsBackground = true,
             Name = "EnCopyClipboardListener"
         };
         _listenerThread.SetApartmentState(ApartmentState.STA);
-        _listenerThread.Start();
-        _ready.Wait();
+        _listenerThread.Start(ready);
+        ready.Wait();
     }
 
     public uint SequenceNumber => GetClipboardSequenceNumber();
+
+    public void SetListening(bool enabled)
+    {
+        if (!enabled)
+        {
+            Volatile.Write(ref _listeningActive, false);
+            Interlocked.Exchange(ref _notifyPending, 0);
+            while (_captured.TryDequeue(out _)) { }
+            Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
+            if (!_disposed && _listenerDispatcher is { HasShutdownStarted: false } dispatcher)
+            {
+                dispatcher.BeginInvoke(() =>
+                {
+                    _retryAttempts = 0;
+                    _retryTimer?.Stop();
+                });
+            }
+            return;
+        }
+
+        while (_captured.TryDequeue(out _)) { }
+        Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
+        Volatile.Write(ref _listeningActive, true);
+    }
 
     public bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot) => _captured.TryDequeue(out snapshot);
 
@@ -353,7 +382,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         }
     }
 
-    private void ListenerThreadMain()
+    private void ListenerThreadMain(ManualResetEventSlim ready)
     {
         HwndSource? source = null;
         bool listening = false;
@@ -384,7 +413,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         }
         finally
         {
-            _ready.Set();
+            ready.Set();
         }
 
         if (source is null) return;
@@ -410,6 +439,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     {
         if (msg == WmClipboardUpdate)
         {
+            _retryAttempts = 0;
             CaptureIfNewer(allowSettleDelay: true);
         }
         return IntPtr.Zero;
@@ -417,8 +447,14 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
 
     private void CaptureIfNewer(bool allowSettleDelay)
     {
-        if (_disposed) return;
-        if (GetClipboardSequenceNumber() == _lastCapturedSeq) return;
+        if (_disposed || !Volatile.Read(ref _listeningActive))
+        {
+            _retryAttempts = 0;
+            _retryTimer?.Stop();
+            Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
+            return;
+        }
+        if (GetClipboardSequenceNumber() == Volatile.Read(ref _lastCapturedSeq)) return;
 
         if (allowSettleDelay)
         {
@@ -426,33 +462,53 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
             // 同时远小于 50ms 连按间隔，防止 Writer 触发 100ms CLIPBRD_E_CANT_OPEN 重试。
             Thread.Sleep(2);
         }
-        if (_disposed) return;
-        if (GetClipboardSequenceNumber() == _lastCapturedSeq) return;
+        if (_disposed || !Volatile.Read(ref _listeningActive))
+        {
+            _retryAttempts = 0;
+            _retryTimer?.Stop();
+            Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
+            return;
+        }
+        if (GetClipboardSequenceNumber() == Volatile.Read(ref _lastCapturedSeq)) return;
 
         if (TryReadNative(_listenerHwnd, out var snap, out bool openFailed))
         {
+            _retryAttempts = 0;
             _retryTimer?.Stop();
-            if (snap is not null && snap.SequenceNumber != _lastCapturedSeq)
+            if (!_disposed && Volatile.Read(ref _listeningActive) &&
+                snap is not null && snap.SequenceNumber != Volatile.Read(ref _lastCapturedSeq))
             {
-                _lastCapturedSeq = snap.SequenceNumber;
+                Volatile.Write(ref _lastCapturedSeq, snap.SequenceNumber);
                 _captured.Enqueue(snap);
                 ScheduleUiNotify();
             }
-            if (!_disposed && GetClipboardSequenceNumber() != _lastCapturedSeq)
+            if (!_disposed && Volatile.Read(ref _listeningActive) &&
+                GetClipboardSequenceNumber() != Volatile.Read(ref _lastCapturedSeq))
             {
                 _listenerDispatcher?.BeginInvoke(() => CaptureIfNewer(allowSettleDelay: false));
             }
         }
         else if (openFailed)
         {
-            _retryTimer?.Stop();
-            _retryTimer?.Start();
+            if (_retryAttempts < MaxRetryAttempts)
+            {
+                _retryAttempts++;
+                _retryTimer?.Stop();
+                _retryTimer?.Start();
+            }
+            else
+            {
+                // 外部进程长期独占 OpenClipboard 或延迟渲染永久失败时停止 10ms 重试，防止后台空转
+                _retryAttempts = 0;
+                _retryTimer?.Stop();
+                Volatile.Write(ref _lastCapturedSeq, GetClipboardSequenceNumber());
+            }
         }
     }
 
     private void ScheduleUiNotify()
     {
-        if (_disposed) return;
+        if (_disposed || !Volatile.Read(ref _listeningActive) || Changed is null) return;
         if (Interlocked.Exchange(ref _notifyPending, 1) == 0)
         {
             _uiDispatcher.BeginInvoke(DrainToUi);
@@ -462,9 +518,17 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     private void DrainToUi()
     {
         Interlocked.Exchange(ref _notifyPending, 0);
-        if (_disposed) return;
-        Changed?.Invoke(this, EventArgs.Empty);
-        if (!_disposed && !_captured.IsEmpty)
+        var handler = Changed;
+        if (_disposed || !Volatile.Read(ref _listeningActive) || handler is null)
+        {
+            while (_captured.TryDequeue(out _)) { }
+            return;
+        }
+        if (!_captured.IsEmpty)
+        {
+            handler(this, EventArgs.Empty);
+        }
+        if (!_disposed && Volatile.Read(ref _listeningActive) && !_captured.IsEmpty && Changed is not null)
         {
             ScheduleUiNotify();
         }
@@ -518,9 +582,15 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
                 return true;
             }
 
-            string? text = IsClipboardFormatAvailable(CfUnicodeText)
-                ? ReadUnicodeFromGlobal(GetClipboardData(CfUnicodeText))
-                : null;
+            bool hasUnicode = IsClipboardFormatAvailable(CfUnicodeText);
+            string? text = hasUnicode ? ReadUnicodeFromGlobal(GetClipboardData(CfUnicodeText)) : null;
+            if (hasUnicode && text is null)
+            {
+                // 延迟渲染格式声明存在但暂时拿不到 HGLOBAL：视为未就绪，交由重试计时器而不提前推进序号
+                openFailed = true;
+                return false;
+            }
+
             byte[]? rtfBytes = CfRtf != 0 && IsClipboardFormatAvailable(CfRtf)
                 ? ReadRtfFromGlobal(GetClipboardData(CfRtf))
                 : null;
@@ -538,6 +608,8 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     {
         if (_disposed) return;
         _disposed = true;
+        Volatile.Write(ref _listeningActive, false);
+        while (_captured.TryDequeue(out _)) { }
         var dispatcher = _listenerDispatcher;
         if (dispatcher is not null && !dispatcher.HasShutdownStarted)
         {
@@ -547,7 +619,6 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         {
             _listenerThread.Join(1000);
         }
-        _ready.Dispose();
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

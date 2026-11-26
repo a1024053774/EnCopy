@@ -35,8 +35,8 @@ supersedes:
 
 阶段完成（已修复首轮走查缺陷，待增量复验后合并）：
 
-- 代码提交：`a53a3d7`、快速连按修复 `3952e94`（分支 `feat/T-058-windows-tracer-bullet`，尚未 push / 合并）。
-- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 6 项静态门禁 + 双版本 0 警告编译 + 10 项隔离测试全部通过（`[check] PASS`，含异步突发合并队列、瞬时空读不吞序号与纯 Win32 `HGLOBAL` 读取校验）。
+- 代码提交：`a53a3d7`、快速连按修复 `3952e94`、暂停监听生命周期修复 `a40d975`（分支 `feat/T-058-windows-tracer-bullet`，尚未 push / 合并）。
+- 自动化检查：`powershell -ExecutionPolicy Bypass -File windows/scripts/check.ps1` 6 项静态门禁 + 双版本 0 警告编译 + 10 项隔离测试全部通过（`[check] PASS`，含异步突发合并队列、瞬时空读不吞序号、暂停态清空停止后端监听与纯 Win32 `HGLOBAL` 读取校验）。
 - 失败-修复证据（`evidence-first-testing`）：首轮真机走查（`evidence/walk-report.md`）在 32–69ms 连续写入下 4/4 丢失首条（`History.sqlite` rows 43–46 仅存 `SECOND`）；`ClipboardAndBurstPersistence` 先在队列合并复现上获红灯，再将 `Win32ClipboardBackend` 改为独立后台 STA 监听线程 + 纯 Win32 `OpenClipboard`/`GlobalLock` 即时快照入队后转绿。
 - 离屏视觉预览：`evidence/T-058/00-offscreen-panel-preview.png`（由 `EnCopy.Checks --render-preview` 生成）。
 - 本地验收辅助工具：`evidence/tools/walk.exe`（位于 git 忽略目录，源码在 `evidence/tools/walk-src/`），重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。
