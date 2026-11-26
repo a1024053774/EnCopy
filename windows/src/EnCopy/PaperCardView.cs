@@ -76,8 +76,16 @@ public sealed class CardClickCoordinator
     }
 }
 
+public sealed record CardInteractionCallbacks(
+    Action<Note, int, bool> OnMouseClick,
+    Action<Note?>? OnHoverChanged = null,
+    Action<Note, UIElement>? OnStartDrag = null,
+    Action<Note, UIElement>? OnDiscardCross = null,
+    Action<Note>? OnHangBackHeld = null,
+    Func<Note, UIElement, ContextMenu>? BuildContextMenu = null);
+
 /// <summary>
-/// 渲染五种纸张卡片、六色种类标签、木夹、号码贴纸、绳结与篮子长条行（PaperStrip）。
+/// 渲染六套主题下的五种纸张卡片、六色种类标签、主题夹子、绳索、号码贴纸与篮子长条行（PaperStrip）。
 /// </summary>
 public static class PaperCardView
 {
@@ -90,14 +98,18 @@ public static class PaperCardView
         double canvasWidth,
         Line line,
         bool isDark,
-        Action<Note, int, bool> onCardMouseClick,
-        Action onBasketHandleClick)
+        CardInteractionCallbacks callbacks,
+        Action onBasketHandleClick,
+        MotionEngine? motion = null,
+        bool showBasketHandle = true)
     {
         canvas.Children.Clear();
         canvas.Width = canvasWidth;
         canvas.Height = ScreenPlacement.LineBandHeight;
 
-        DrawRope(canvas, canvasWidth, isDark);
+        var theme = line.Theme;
+        double sagScale = motion?.RopeSagScale ?? 1.0;
+        DrawRope(canvas, canvasWidth, isDark, theme, sagScale);
 
         var shown = line.ShownItems;
         int count = shown.Count;
@@ -110,7 +122,7 @@ public static class PaperCardView
             var hint = BuildEmptyHint(line.IsSearching || line.KindFilter != KindFilter.All, isDark);
             hint.Measure(new Size(400, 60));
             Canvas.SetLeft(hint, (canvasWidth - hint.DesiredSize.Width) / 2.0);
-            Canvas.SetTop(hint, ScreenPlacement.RopeY(canvasWidth / 2.0, canvasWidth) + 28);
+            Canvas.SetTop(hint, ScreenPlacement.RopeY(canvasWidth / 2.0, canvasWidth, sagScale) + 28);
             canvas.Children.Add(hint);
         }
         else
@@ -152,9 +164,9 @@ public static class PaperCardView
 
             if (knotX is { } kx && kx > 10 && kx < canvasWidth - 10)
             {
-                var knot = BuildKnot(isDark);
+                var knot = BuildKnot(isDark, theme);
                 Canvas.SetLeft(knot, kx - 6);
-                Canvas.SetTop(knot, ScreenPlacement.RopeY(kx, canvasWidth) - 4);
+                Canvas.SetTop(knot, ScreenPlacement.RopeY(kx, canvasWidth, sagScale) - 4);
                 Panel.SetZIndex(knot, 28);
                 canvas.Children.Add(knot);
             }
@@ -172,21 +184,37 @@ public static class PaperCardView
                     continue;
                 }
 
-                double ropeY = ScreenPlacement.RopeY(cx, canvasWidth);
+                var fullPath = System.IO.Path.GetFullPath(note.FilePath);
+                double ropeY = ScreenPlacement.RopeY(cx, canvasWidth, sagScale);
                 bool isPicked = line.Picked is not null &&
                     string.Equals(line.Picked.FilePath, note.FilePath, StringComparison.OrdinalIgnoreCase);
-                bool isSelected = isPicked || line.SelectedPaths.Contains(System.IO.Path.GetFullPath(note.FilePath));
+                bool isSelected = isPicked || line.SelectedPaths.Contains(fullPath);
                 bool isCopied = string.Equals(line.CopiedFeedbackPath, note.FilePath, StringComparison.OrdinalIgnoreCase);
+                bool isHeld = line.HeldPaths.Contains(fullPath);
                 int? stickerNumber = i < 9 ? i + 1 : null;
+
+                double extraSway = motion?.GetCardSway(note.FilePath) ?? 0.0;
+                double hopOffset = motion?.GetCardHop(note.FilePath) ?? 0.0;
+                double pegScale = motion?.GetPegScale(note.FilePath) ?? 1.0;
 
                 var cardVisual = BuildPeggedCard(
                     note,
+                    theme,
                     isSelected,
                     isPicked,
                     isCopied,
+                    isHeld,
                     isDark,
                     stickerNumber,
-                    onCardMouseClick);
+                    extraSway,
+                    hopOffset,
+                    pegScale,
+                    callbacks);
+
+                if (cardVisual is FrameworkElement fe)
+                {
+                    fe.Tag = fullPath;
+                }
 
                 const double hostWidth = ScreenPlacement.CardWidth + 16;
                 Canvas.SetLeft(cardVisual, cx - hostWidth / 2.0);
@@ -196,10 +224,10 @@ public static class PaperCardView
             }
         }
 
-        if (line.BasketCount > 0 || line.BasketOpen)
+        if (showBasketHandle && (line.BasketCount > 0 || line.BasketOpen))
         {
             double hx = canvasWidth - 96.0;
-            double topY = ScreenPlacement.RopeY(hx, canvasWidth);
+            double topY = ScreenPlacement.RopeY(hx, canvasWidth, sagScale);
             double hy = ScreenPlacement.LineBandHeight - 36.0;
 
             var cord = new System.Windows.Shapes.Line
@@ -208,7 +236,7 @@ public static class PaperCardView
                 Y1 = topY,
                 X2 = hx,
                 Y2 = hy,
-                Stroke = ThemePalette.Brush(ThemePalette.RopeMain(isDark)),
+                Stroke = ThemePalette.Brush(RopeMainForTheme(theme, isDark)),
                 StrokeThickness = 1.3,
                 StrokeDashArray = [3, 2],
                 Opacity = 0.78,
@@ -217,7 +245,7 @@ public static class PaperCardView
             Canvas.SetZIndex(cord, 4);
             canvas.Children.Add(cord);
 
-            var handle = BuildBasketHandle(line.BasketCount, line.BasketOpen, isDark, onBasketHandleClick);
+            var handle = BuildBasketHandle(line.BasketCount, line.BasketOpen, isDark, theme, onBasketHandleClick);
             handle.Measure(new Size(200, 40));
             Canvas.SetLeft(handle, hx - handle.DesiredSize.Width / 2.0);
             Canvas.SetTop(handle, hy);
@@ -226,6 +254,22 @@ public static class PaperCardView
         }
 
         return canvas;
+    }
+
+    public static bool TryFindCardVisual(Canvas canvas, string filePath, out FrameworkElement? cardElement)
+    {
+        var full = System.IO.Path.GetFullPath(filePath);
+        foreach (UIElement child in canvas.Children)
+        {
+            if (child is FrameworkElement fe && fe.Tag is string tag &&
+                string.Equals(tag, full, StringComparison.OrdinalIgnoreCase))
+            {
+                cardElement = fe;
+                return true;
+            }
+        }
+        cardElement = null;
+        return false;
     }
 
     public static UIElement BuildKindTag(ItemKind kind, double scale = 1.0)
@@ -285,14 +329,19 @@ public static class PaperCardView
         };
     }
 
-    public static UIElement BuildBasketRow(BasketRow row, bool isPicked, bool isDark, Action<BasketRow> onSelect, Action<BasketRow> onActivate)
+    public static UIElement BuildBasketRow(
+        BasketRow row,
+        LineTheme theme,
+        bool isPicked,
+        bool isDark,
+        Action<BasketRow> onSelect,
+        Action<BasketRow> onActivate)
     {
+        _ = isDark;
         var note = row.Note;
-        var cardBg = BuildPaperStrip(note.Paper);
-        var inkColor = note.Paper == PaperKind.Tag ? ThemePalette.KraftInk : ThemePalette.PaperInk;
-        var softColor = note.Paper == PaperKind.Tag ? ThemePalette.KraftSoft : ThemePalette.PaperSoft;
-        var ink = ThemePalette.Brush(inkColor);
-        var soft = ThemePalette.Brush(softColor);
+        var cardBg = BuildPaperStrip(note.Paper, theme);
+        var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, note.Paper));
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, note.Paper));
 
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60) });
@@ -326,7 +375,7 @@ public static class PaperCardView
             Text = string.IsNullOrEmpty(note.SummaryLine) ? note.FilePath : note.SummaryLine,
             FontSize = 12.5,
             FontWeight = note.IsCode ? FontWeights.Normal : FontWeights.SemiBold,
-            FontFamily = note.IsCode || note.Kind == ItemKind.Link ? MonoFont : SansFont,
+            FontFamily = ThemePalette.CardFont(theme, code: note.IsCode || note.Kind == ItemKind.Link),
             Foreground = ink,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
@@ -337,7 +386,7 @@ public static class PaperCardView
             {
                 Text = detail,
                 FontSize = 11,
-                FontFamily = note.Kind == ItemKind.Text ? SansFont : MonoFont,
+                FontFamily = ThemePalette.CardFont(theme, code: note.Kind != ItemKind.Text),
                 Foreground = soft,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Margin = new Thickness(0, 1, 0, 0)
@@ -376,6 +425,7 @@ public static class PaperCardView
         var inner = new Grid { Margin = new Thickness(12, 7, 12, 7) };
         inner.Children.Add(grid);
 
+        double corner = Math.Max(3.0, ThemePalette.CardCorner(theme));
         var container = new Grid
         {
             Margin = new Thickness(10, 3, 10, 3),
@@ -393,9 +443,9 @@ public static class PaperCardView
         {
             container.Children.Add(new Border
             {
-                CornerRadius = new CornerRadius(4),
-                BorderBrush = ThemePalette.Brush(ThemePalette.PickedAmber),
-                BorderThickness = new Thickness(2.4),
+                CornerRadius = new CornerRadius(corner),
+                BorderBrush = ThemePalette.Brush(ThemePalette.PickedColor(theme)),
+                BorderThickness = new Thickness(ThemePalette.PickedWidth(theme)),
                 IsHitTestVisible = false
             });
         }
@@ -418,14 +468,19 @@ public static class PaperCardView
 
     private static UIElement BuildPeggedCard(
         Note note,
+        LineTheme theme,
         bool isSelected,
         bool isPicked,
         bool isCopied,
+        bool isHeld,
         bool isDark,
         int? stickerNumber,
-        Action<Note, int, bool> onCardMouseClick)
+        double extraSway,
+        double hopOffset,
+        double pegScale,
+        CardInteractionCallbacks callbacks)
     {
-        double tilt = Line.TiltFor(note.FilePath);
+        double tilt = Line.TiltFor(note.FilePath) + extraSway;
         double scale = isPicked ? 1.04 : 1.0;
 
         var host = new Grid
@@ -438,26 +493,79 @@ public static class PaperCardView
                 Children =
                 {
                     new RotateTransform(tilt),
-                    new ScaleTransform(scale, scale)
+                    new ScaleTransform(scale, scale),
+                    new TranslateTransform(0.0, hopOffset)
                 }
             }
         };
 
-        // 卡片本体与贴纸层（木夹压在卡片上沿上方）
-        var cardSurface = BuildPaperCardBody(note, isSelected, isDark);
+        var cardSurface = BuildPaperCardBody(note, theme, isSelected, isDark);
         cardSurface.Margin = new Thickness(8, 16, 8, 4);
         cardSurface.Cursor = Cursors.Hand;
+        cardSurface.Opacity = isHeld ? 0.28 : 1.0;
         if (isPicked)
         {
             cardSurface.Margin = new Thickness(8, 20, 8, 0);
         }
 
+        Point? dragOrigin = null;
+        bool dragInitiated = false;
+
         cardSurface.MouseLeftButtonDown += (_, e) =>
         {
             e.Handled = true;
+            if (isHeld)
+            {
+                callbacks.OnHangBackHeld?.Invoke(note);
+                return;
+            }
             bool shift = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-            onCardMouseClick(note, e.ClickCount, shift);
+            if (shift || e.ClickCount >= 2)
+            {
+                dragOrigin = null;
+                callbacks.OnMouseClick(note, e.ClickCount, shift);
+                return;
+            }
+            dragOrigin = e.GetPosition(host);
+            dragInitiated = false;
+            callbacks.OnMouseClick(note, 1, false);
         };
+
+        cardSurface.MouseMove += (_, e) =>
+        {
+            if (isHeld || dragOrigin is not { } start || dragInitiated) return;
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                dragOrigin = null;
+                return;
+            }
+            var cur = e.GetPosition(host);
+            double dx = cur.X - start.X;
+            double dy = cur.Y - start.Y;
+            if (Math.Sqrt(dx * dx + dy * dy) > 4.5)
+            {
+                dragInitiated = true;
+                dragOrigin = null;
+                callbacks.OnStartDrag?.Invoke(note, host);
+            }
+        };
+
+        cardSurface.MouseLeftButtonUp += (_, _) =>
+        {
+            dragOrigin = null;
+            dragInitiated = false;
+        };
+
+        if (!isHeld && callbacks.BuildContextMenu is not null)
+        {
+            cardSurface.MouseRightButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                var menu = callbacks.BuildContextMenu(note, host);
+                menu.PlacementTarget = cardSurface;
+                menu.IsOpen = true;
+            };
+        }
 
         host.Children.Add(cardSurface);
 
@@ -468,27 +576,35 @@ public static class PaperCardView
             tagEl.HorizontalAlignment = HorizontalAlignment.Left;
             tagEl.VerticalAlignment = VerticalAlignment.Top;
             tagEl.Margin = new Thickness(12, isPicked ? 11 : 7, 0, 0);
+            tagEl.Opacity = isHeld ? 0.35 : 1.0;
             Panel.SetZIndex(tagEl, 6);
             host.Children.Add(tagEl);
         }
 
-        // 木夹（居中压在绳线上）
-        var peg = BuildClothespin(note.Pinned);
+        // 主题夹子（居中压在绳线上，支持新挂卡片张开夹紧缩放）
+        var peg = BuildThemePeg(theme, note.Pinned);
         peg.HorizontalAlignment = HorizontalAlignment.Center;
         peg.VerticalAlignment = VerticalAlignment.Top;
+        if (Math.Abs(pegScale - 1.0) > 0.005)
+        {
+            peg.RenderTransformOrigin = new Point(0.5, 0.25);
+            peg.RenderTransform = new ScaleTransform(pegScale, pegScale);
+        }
         Panel.SetZIndex(peg, 8);
         host.Children.Add(peg);
 
         // 右上角号码贴纸（1-9）
-        if (stickerNumber is { } num)
+        Border? sticker = null;
+        if (stickerNumber is { } num && !isHeld)
         {
-            var sticker = new Border
+            var pickedCol = ThemePalette.PickedColor(theme);
+            sticker = new Border
             {
                 Width = 17,
                 Height = 17,
                 CornerRadius = new CornerRadius(8.5),
-                Background = ThemePalette.Brush(isSelected ? ThemePalette.PickedAmber : Color.FromArgb(0xE8, 0xFF, 0xFD, 0xF7)),
-                BorderBrush = ThemePalette.Brush(isSelected ? ThemePalette.PickedAmber : Color.FromArgb(0x55, 0x62, 0x52, 0x3D)),
+                Background = ThemePalette.Brush(isSelected ? pickedCol : Color.FromArgb(0xE8, 0xFF, 0xFD, 0xF7)),
+                BorderBrush = ThemePalette.Brush(isSelected ? pickedCol : Color.FromArgb(0x55, 0x62, 0x52, 0x3D)),
                 BorderThickness = new Thickness(1),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
@@ -509,13 +625,70 @@ public static class PaperCardView
             host.Children.Add(sticker);
         }
 
+        // 右上角悬停取下 × 按钮（非收藏且未拿在手上时悬停露出）
+        Border? discardCross = null;
+        if (!note.Pinned && !isHeld && callbacks.OnDiscardCross is not null)
+        {
+            discardCross = new Border
+            {
+                Width = 19,
+                Height = 19,
+                CornerRadius = new CornerRadius(9.5),
+                Background = ThemePalette.Brush(Color.FromArgb(0xE4, 0x2B, 0x24, 0x20)),
+                BorderBrush = ThemePalette.Brush(Color.FromArgb(0x70, 0xFF, 0xFF, 0xFF)),
+                BorderThickness = new Thickness(0.8),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, isPicked ? 10 : 6, 11, 0),
+                Cursor = Cursors.Hand,
+                Visibility = Visibility.Collapsed,
+                ToolTip = Localization.L("Take down"),
+                Child = new TextBlock
+                {
+                    Text = "×",
+                    FontSize = 12,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, -1, 0, 0)
+                }
+            };
+            discardCross.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                callbacks.OnDiscardCross(note, host);
+            };
+            Panel.SetZIndex(discardCross, 12);
+            host.Children.Add(discardCross);
+        }
+
+        host.MouseEnter += (_, _) =>
+        {
+            if (discardCross is not null)
+            {
+                discardCross.Visibility = Visibility.Visible;
+                if (sticker is not null) sticker.Visibility = Visibility.Collapsed;
+            }
+            if (!isHeld) callbacks.OnHoverChanged?.Invoke(note);
+        };
+        host.MouseLeave += (_, _) =>
+        {
+            if (discardCross is not null)
+            {
+                discardCross.Visibility = Visibility.Collapsed;
+                if (sticker is not null) sticker.Visibility = Visibility.Visible;
+            }
+            callbacks.OnHoverChanged?.Invoke(null);
+        };
+
         // 单击复制反馈胶囊
         if (isCopied)
         {
             var copiedPill = new Border
             {
                 Background = ThemePalette.Brush(ThemePalette.ChromeFill(isDark)),
-                BorderBrush = ThemePalette.Brush(ThemePalette.PickedAmber),
+                BorderBrush = ThemePalette.Brush(ThemePalette.PickedColor(theme)),
                 BorderThickness = new Thickness(1.2),
                 CornerRadius = new CornerRadius(11),
                 Padding = new Thickness(9, 3, 9, 3),
@@ -538,15 +711,36 @@ public static class PaperCardView
         return host;
     }
 
-    private static Grid BuildPaperCardBody(Note note, bool isSelected, bool isDark)
+    private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark)
     {
         double w = ScreenPlacement.CardWidth;
         double h = ScreenPlacement.CardHeight;
-        var root = new Grid
+
+        Effect shadow = theme switch
         {
-            Width = w,
-            Height = h,
-            Effect = new DropShadowEffect
+            LineTheme.Pixel => new DropShadowEffect
+            {
+                BlurRadius = 0,
+                ShadowDepth = isSelected ? 5 : 4,
+                Direction = 315,
+                Opacity = 0.85,
+                Color = Colors.Black
+            },
+            LineTheme.Neon => new DropShadowEffect
+            {
+                BlurRadius = isSelected ? 12 : 7,
+                ShadowDepth = 0,
+                Opacity = isSelected ? 0.55 : 0.34,
+                Color = note.Paper == PaperKind.Tag ? Color.FromRgb(0xFF, 0x4D, 0xCC) : Color.FromRgb(0x33, 0xF2, 0xFF)
+            },
+            LineTheme.Minimal => new DropShadowEffect
+            {
+                BlurRadius = isSelected ? 12 : 8,
+                ShadowDepth = isSelected ? 4 : 2.5,
+                Opacity = isSelected ? 0.16 : 0.09,
+                Color = Colors.Black
+            },
+            _ => new DropShadowEffect
             {
                 BlurRadius = isSelected ? 14 : 10,
                 ShadowDepth = isSelected ? 6 : 4,
@@ -555,45 +749,151 @@ public static class PaperCardView
             }
         };
 
-        switch (note.Paper)
+        var root = new Grid
         {
-            case PaperKind.Tractor:
-                root.Children.Add(BuildTractorCardSurface(w, h));
-                root.Children.Add(BuildTractorContent(note));
-                break;
+            Width = w,
+            Height = h,
+            Effect = shadow
+        };
 
-            case PaperKind.Tag:
-                root.Children.Add(BuildTagCardSurface(w, h));
-                root.Children.Add(BuildTagContent(note));
-                break;
+        if (theme == LineTheme.Paper)
+        {
+            switch (note.Paper)
+            {
+                case PaperKind.Tractor:
+                    root.Children.Add(BuildTractorCardSurface(w, h));
+                    root.Children.Add(BuildTractorContent(note, theme));
+                    break;
 
-            case PaperKind.Polaroid:
-                root.Children.Add(BuildPolaroidContent(note, w, h));
-                break;
+                case PaperKind.Tag:
+                    root.Children.Add(BuildTagCardSurface(w, h));
+                    root.Children.Add(BuildTagContent(note, theme));
+                    break;
 
-            case PaperKind.Folder:
-                root.Children.Add(BuildManilaCardSurface(w, h));
-                root.Children.Add(BuildManilaContent(note));
-                break;
+                case PaperKind.Polaroid:
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h));
+                    break;
 
-            default:
-                root.Children.Add(BuildReceiptCardSurface(w, h));
-                root.Children.Add(BuildReceiptContent(note, isDark));
-                break;
+                case PaperKind.Folder:
+                    root.Children.Add(BuildManilaCardSurface(w, h));
+                    root.Children.Add(BuildManilaContent(note, theme));
+                    break;
+
+                default:
+                    root.Children.Add(BuildReceiptCardSurface(w, h));
+                    root.Children.Add(BuildReceiptContent(note, theme, isDark));
+                    break;
+            }
+        }
+        else
+        {
+            root.Children.Add(BuildThemedCardSurface(theme, note.Paper, w, h));
+            switch (note.Paper)
+            {
+                case PaperKind.Tractor:
+                    root.Children.Add(BuildTractorContent(note, theme));
+                    break;
+                case PaperKind.Tag:
+                    root.Children.Add(BuildTagContent(note, theme));
+                    break;
+                case PaperKind.Polaroid:
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h));
+                    break;
+                case PaperKind.Folder:
+                    root.Children.Add(BuildManilaContent(note, theme));
+                    break;
+                default:
+                    root.Children.Add(BuildReceiptContent(note, theme, isDark));
+                    break;
+            }
         }
 
         if (isSelected)
         {
             root.Children.Add(new Border
             {
-                CornerRadius = new CornerRadius(3),
-                BorderBrush = ThemePalette.Brush(ThemePalette.PickedAmber),
-                BorderThickness = new Thickness(2.5),
+                CornerRadius = new CornerRadius(ThemePalette.CardCorner(theme)),
+                BorderBrush = ThemePalette.Brush(ThemePalette.PickedColor(theme)),
+                BorderThickness = new Thickness(ThemePalette.PickedWidth(theme)),
                 IsHitTestVisible = false
             });
         }
 
         return root;
+    }
+
+    public static UIElement BuildThemedCardSurface(LineTheme theme, PaperKind paper, double w, double h)
+    {
+        double corner = ThemePalette.CardCorner(theme);
+        var fill = ThemePalette.CardFill(theme, paper);
+        var edge = ThemePalette.CardEdge(theme, paper);
+
+        var grid = new Grid { Width = w, Height = h, ClipToBounds = true };
+        grid.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(corner),
+            Background = ThemePalette.Brush(fill)
+        });
+
+        if (theme == LineTheme.Skeuo)
+        {
+            var sheen = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new(Color.FromArgb(0x88, 0xFF, 0xFF, 0xFF), 0.0),
+                    new(Colors.Transparent, 0.55),
+                    new(Color.FromArgb(0x14, 0x00, 0x00, 0x00), 1.0)
+                },
+                new Point(0, 0),
+                new Point(0, 1));
+            grid.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(corner),
+                Background = sheen,
+                IsHitTestVisible = false
+            });
+        }
+        else if (theme == LineTheme.Pixel)
+        {
+            grid.Children.Add(new Border
+            {
+                Height = 3,
+                VerticalAlignment = VerticalAlignment.Top,
+                Background = ThemePalette.Brush(paper == PaperKind.Tractor
+                    ? Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)
+                    : Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
+                IsHitTestVisible = false
+            });
+        }
+        else if (theme == LineTheme.Washi)
+        {
+            var dots = new Canvas { Width = w, Height = h, IsHitTestVisible = false };
+            var dotBrush = ThemePalette.Brush(Color.FromArgb(0x55, 0x8C, 0x80, 0x73));
+            for (double y = 9; y < h - 4; y += 10)
+            {
+                for (double x = 9; x < w - 4; x += 10)
+                {
+                    var d = new Ellipse { Width = 1.5, Height = 1.5, Fill = dotBrush };
+                    Canvas.SetLeft(d, x);
+                    Canvas.SetTop(d, y);
+                    dots.Children.Add(d);
+                }
+            }
+            grid.Children.Add(dots);
+        }
+
+        if (edge is { } e)
+        {
+            grid.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(corner),
+                BorderBrush = ThemePalette.Brush(e.Color),
+                BorderThickness = new Thickness(e.Width),
+                IsHitTestVisible = false
+            });
+        }
+
+        return grid;
     }
 
     private static UIElement BuildReceiptCardSurface(double w, double h)
@@ -622,12 +922,13 @@ public static class PaperCardView
         };
     }
 
-    private static UIElement BuildReceiptContent(Note note, bool isDark)
+    private static UIElement BuildReceiptContent(Note note, LineTheme theme, bool isDark)
     {
         _ = isDark;
-        var ink = ThemePalette.Brush(ThemePalette.PaperInk);
-        var soft = ThemePalette.Brush(ThemePalette.PaperSoft);
-        var link = ThemePalette.Brush(ThemePalette.MarkdownLinkInk);
+        var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Receipt));
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Receipt));
+        var link = ThemePalette.Brush(theme == LineTheme.Neon ? Color.FromRgb(0x33, 0xF2, 0xFF) : ThemePalette.MarkdownLinkInk);
+        var font = ThemePalette.CardFont(theme, code: false);
 
         var grid = new Grid { Margin = new Thickness(10, 12, 10, 11) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -640,7 +941,7 @@ public static class PaperCardView
             {
                 FontSize = string.IsNullOrEmpty(note.Body) ? 11.5 : 10.5,
                 FontWeight = FontWeights.Bold,
-                FontFamily = MonoFont,
+                FontFamily = font,
                 Foreground = ink,
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = string.IsNullOrEmpty(note.Body) ? 64 : 34,
@@ -670,7 +971,8 @@ public static class PaperCardView
                     Y1 = 0,
                     X2 = 128,
                     Y2 = 0,
-                    Stroke = ThemePalette.Brush(Color.FromArgb(0x88, 0x8A, 0x7D, 0x6D)),
+                    Stroke = soft,
+                    Opacity = 0.45,
                     StrokeThickness = 0.8,
                     StrokeDashArray = [3, 2],
                     Margin = new Thickness(0, 4, 0, 4)
@@ -680,7 +982,7 @@ public static class PaperCardView
             var bodyBlock = new TextBlock
             {
                 FontSize = 8.8,
-                FontFamily = MonoFont,
+                FontFamily = font,
                 Foreground = soft,
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = string.IsNullOrEmpty(note.Title) ? 70 : 40,
@@ -749,7 +1051,7 @@ public static class PaperCardView
             }
         }
 
-        var border = new Border
+        return new Border
         {
             Width = w,
             Height = h,
@@ -757,12 +1059,15 @@ public static class PaperCardView
             BorderThickness = new Thickness(0.8),
             Child = canvas
         };
-        return border;
     }
 
-    private static UIElement BuildTractorContent(Note note)
+    private static UIElement BuildTractorContent(Note note, LineTheme theme)
     {
-        var grid = new Grid { Margin = new Thickness(15, 11, 15, 8), ClipToBounds = true };
+        var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Tractor));
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Tractor));
+        double sidePad = theme == LineTheme.Paper ? 15 : 10;
+
+        var grid = new Grid { Margin = new Thickness(sidePad, 11, sidePad, 8), ClipToBounds = true };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -771,7 +1076,7 @@ public static class PaperCardView
             Text = note.Body,
             FontSize = 8.0,
             FontFamily = MonoFont,
-            Foreground = ThemePalette.Brush(ThemePalette.PaperInk),
+            Foreground = ink,
             LineHeight = 12.8,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.CharacterEllipsis
@@ -784,7 +1089,7 @@ public static class PaperCardView
             Text = note.Caption,
             FontSize = 7.5,
             FontFamily = MonoFont,
-            Foreground = ThemePalette.Brush(ThemePalette.PaperSoft),
+            Foreground = soft,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
         Grid.SetRow(caption, 1);
@@ -828,8 +1133,10 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildTagContent(Note note)
+    private static UIElement BuildTagContent(Note note, LineTheme theme)
     {
+        var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Tag));
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Tag));
         var grid = new Grid { Margin = new Thickness(11, 16, 11, 8) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -840,8 +1147,8 @@ public static class PaperCardView
             Text = note.Title,
             FontSize = 11.5,
             FontWeight = FontWeights.Bold,
-            FontFamily = SansFont,
-            Foreground = ThemePalette.Brush(ThemePalette.KraftInk),
+            FontFamily = ThemePalette.CardFont(theme, code: false),
+            Foreground = ink,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 0, 14, 2)
         });
@@ -852,7 +1159,7 @@ public static class PaperCardView
                 Text = note.LinkPath,
                 FontSize = 8.8,
                 FontFamily = MonoFont,
-                Foreground = ThemePalette.Brush(ThemePalette.KraftSoft),
+                Foreground = soft,
                 TextWrapping = TextWrapping.Wrap,
                 MaxHeight = 32,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -866,7 +1173,7 @@ public static class PaperCardView
             Text = note.Caption,
             FontSize = 7.5,
             FontFamily = MonoFont,
-            Foreground = ThemePalette.Brush(ThemePalette.KraftSoft),
+            Foreground = soft,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
         Grid.SetRow(caption, 1);
@@ -875,16 +1182,17 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildPolaroidContent(Note note, double w, double h)
+    private static UIElement BuildPolaroidContent(Note note, LineTheme theme, double w, double h)
     {
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Polaroid));
         var outer = new Border
         {
             Width = w,
             Height = h,
-            CornerRadius = new CornerRadius(2),
-            Background = ThemePalette.Brush(ThemePalette.PolaroidFill),
-            BorderBrush = ThemePalette.Brush(Color.FromArgb(0x28, 0x3D, 0x32, 0x24)),
-            BorderThickness = new Thickness(0.8),
+            CornerRadius = new CornerRadius(ThemePalette.CardCorner(theme)),
+            Background = theme == LineTheme.Paper ? ThemePalette.Brush(ThemePalette.PolaroidFill) : Brushes.Transparent,
+            BorderBrush = theme == LineTheme.Paper ? ThemePalette.Brush(Color.FromArgb(0x28, 0x3D, 0x32, 0x24)) : null,
+            BorderThickness = new Thickness(theme == LineTheme.Paper ? 0.8 : 0.0),
             Padding = new Thickness(6, 6, 6, 5)
         };
 
@@ -894,10 +1202,10 @@ public static class PaperCardView
 
         var well = new Border
         {
-            Background = ThemePalette.Brush(note.Kind == ItemKind.Video
+            Background = ThemePalette.Brush(note.Kind == ItemKind.Video || theme == LineTheme.Neon
                 ? Color.FromRgb(0x22, 0x25, 0x2D)
                 : Color.FromRgb(0xE8, 0xE3, 0xDA)),
-            CornerRadius = new CornerRadius(1),
+            CornerRadius = new CornerRadius(Math.Max(1.0, ThemePalette.CardCorner(theme) - 2.0)),
             ClipToBounds = true
         };
 
@@ -940,7 +1248,7 @@ public static class PaperCardView
                 Text = note.SummaryLine,
                 FontSize = 8.0,
                 FontFamily = MonoFont,
-                Foreground = ThemePalette.Brush(note.Kind == ItemKind.Video ? Colors.WhiteSmoke : ThemePalette.PaperSoft),
+                Foreground = ThemePalette.Brush(note.Kind == ItemKind.Video || theme == LineTheme.Neon ? Colors.WhiteSmoke : ThemePalette.PaperSoft),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 MaxWidth = w - 22,
                 Margin = new Thickness(0, 4, 0, 0),
@@ -957,7 +1265,7 @@ public static class PaperCardView
             Text = note.Caption,
             FontSize = 7.5,
             FontFamily = MonoFont,
-            Foreground = ThemePalette.Brush(ThemePalette.PaperSoft),
+            Foreground = soft,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 4, 0, 0)
@@ -1000,8 +1308,11 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildManilaContent(Note note)
+    private static UIElement BuildManilaContent(Note note, LineTheme theme)
     {
+        var ink = ThemePalette.Brush(ThemePalette.CardInk(theme, PaperKind.Folder));
+        var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Folder));
+
         var grid = new Grid { Margin = new Thickness(10, 20, 10, 8) };
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1034,8 +1345,8 @@ public static class PaperCardView
             Text = note.Title,
             FontSize = 10.5,
             FontWeight = FontWeights.SemiBold,
-            FontFamily = SansFont,
-            Foreground = ThemePalette.Brush(ThemePalette.KraftInk),
+            FontFamily = ThemePalette.CardFont(theme, code: false),
+            Foreground = ink,
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
             MaxHeight = 30,
@@ -1048,7 +1359,7 @@ public static class PaperCardView
                 Text = note.Body,
                 FontSize = 8.2,
                 FontFamily = MonoFont,
-                Foreground = ThemePalette.Brush(ThemePalette.KraftSoft),
+                Foreground = soft,
                 TextAlignment = TextAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             });
@@ -1061,7 +1372,7 @@ public static class PaperCardView
             Text = note.Caption,
             FontSize = 7.5,
             FontFamily = MonoFont,
-            Foreground = ThemePalette.Brush(ThemePalette.KraftSoft),
+            Foreground = soft,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
@@ -1069,6 +1380,136 @@ public static class PaperCardView
         grid.Children.Add(caption);
 
         return grid;
+    }
+
+    private static FrameworkElement BuildThemePeg(LineTheme theme, bool pinned)
+    {
+        switch (theme)
+        {
+            case LineTheme.Pixel:
+            {
+                var jawBrush = ThemePalette.Brush(pinned ? Color.FromRgb(0x4D, 0x4D, 0x4D) : Color.FromRgb(0xDB, 0x5C, 0x3D));
+                var stack = new StackPanel { Width = 12, Height = 26, IsHitTestVisible = false };
+                var topRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+                topRow.Children.Add(new Rectangle { Width = 4, Height = 12, Fill = jawBrush, Margin = new Thickness(0, 0, 2, 0) });
+                topRow.Children.Add(new Rectangle { Width = 4, Height = 12, Fill = jawBrush });
+                stack.Children.Add(topRow);
+                stack.Children.Add(new Rectangle { Width = 12, Height = 3, Fill = Brushes.Black });
+                var botRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+                botRow.Children.Add(new Rectangle { Width = 4, Height = 8, Fill = jawBrush, Margin = new Thickness(0, 0, 2, 0) });
+                botRow.Children.Add(new Rectangle { Width = 4, Height = 8, Fill = jawBrush });
+                stack.Children.Add(botRow);
+                return stack;
+            }
+
+            case LineTheme.Skeuo:
+            {
+                var grid = new Grid { Width = 24, Height = 27, IsHitTestVisible = false };
+                var wireBrush = ThemePalette.Brush(Color.FromRgb(0xC8, 0xCC, 0xD2));
+                grid.Children.Add(new Border
+                {
+                    Width = 5,
+                    Height = 12,
+                    CornerRadius = new CornerRadius(2.5),
+                    BorderBrush = wireBrush,
+                    BorderThickness = new Thickness(1.5),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(5, 1, 0, 0)
+                });
+                grid.Children.Add(new Border
+                {
+                    Width = 5,
+                    Height = 12,
+                    CornerRadius = new CornerRadius(2.5),
+                    BorderBrush = wireBrush,
+                    BorderThickness = new Thickness(1.5),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 1, 5, 0)
+                });
+                grid.Children.Add(new Border
+                {
+                    Width = 22,
+                    Height = 12,
+                    CornerRadius = new CornerRadius(2),
+                    Background = new LinearGradientBrush(
+                        pinned ? Color.FromRgb(0x58, 0x58, 0x60) : Color.FromRgb(0x42, 0x42, 0x48),
+                        pinned ? Color.FromRgb(0x28, 0x28, 0x2E) : Color.FromRgb(0x14, 0x14, 0x18),
+                        90.0),
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Margin = new Thickness(0, 0, 0, 2)
+                });
+                return grid;
+            }
+
+            case LineTheme.Minimal:
+            {
+                var host = new Grid { Width = 14, Height = 24, IsHitTestVisible = false };
+                host.Children.Add(new Ellipse
+                {
+                    Width = 8.5,
+                    Height = 8.5,
+                    Fill = ThemePalette.Brush(pinned ? Color.FromRgb(0x3D, 0x3D, 0x3D) : Color.FromRgb(0xB8, 0xB8, 0xBE)),
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 0, 0, 2)
+                });
+                return host;
+            }
+
+            case LineTheme.Neon:
+            {
+                var dotColor = pinned ? Color.FromRgb(0xFF, 0x4D, 0xCC) : Color.FromRgb(0x33, 0xF2, 0xFF);
+                var host = new Grid { Width = 16, Height = 24, IsHitTestVisible = false };
+                host.Children.Add(new Ellipse
+                {
+                    Width = 8,
+                    Height = 8,
+                    Fill = ThemePalette.Brush(dotColor),
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 0, 0, 2),
+                    Effect = new DropShadowEffect { BlurRadius = 8, ShadowDepth = 0, Opacity = 0.85, Color = dotColor }
+                });
+                return host;
+            }
+
+            case LineTheme.Washi:
+            {
+                var baseColor = pinned ? Color.FromArgb(0xCC, 0x73, 0x73, 0x73) : Color.FromArgb(0xCF, 0xF0, 0x99, 0x8C);
+                var tape = new Canvas
+                {
+                    Width = 38,
+                    Height = 12,
+                    Background = ThemePalette.Brush(baseColor),
+                    ClipToBounds = true,
+                    RenderTransformOrigin = new Point(0.5, 0.5),
+                    RenderTransform = new RotateTransform(-6.0)
+                };
+                var stripeBrush = ThemePalette.Brush(Color.FromArgb(0x78, 0xFF, 0xFF, 0xFF));
+                for (double x = -10; x < 42; x += 7)
+                {
+                    tape.Children.Add(new System.Windows.Shapes.Line
+                    {
+                        X1 = x,
+                        Y1 = 12,
+                        X2 = x + 12,
+                        Y2 = 0,
+                        Stroke = stripeBrush,
+                        StrokeThickness = 2.0
+                    });
+                }
+                var host = new Grid { Width = 44, Height = 24, IsHitTestVisible = false };
+                tape.VerticalAlignment = VerticalAlignment.Bottom;
+                tape.Margin = new Thickness(0, 0, 0, 1);
+                host.Children.Add(tape);
+                return host;
+            }
+
+            default:
+                return BuildClothespin(pinned);
+        }
     }
 
     private static Grid BuildClothespin(bool pinned)
@@ -1127,10 +1568,10 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildKnot(bool isDark)
+    private static UIElement BuildKnot(bool isDark, LineTheme theme)
     {
         var grid = new Grid { Width = 12, Height = 16, IsHitTestVisible = false };
-        var knotColor = ThemePalette.Brush(ThemePalette.RopeMain(isDark));
+        var knotColor = ThemePalette.Brush(RopeMainForTheme(theme, isDark));
         grid.Children.Add(new Ellipse
         {
             Width = 8,
@@ -1150,10 +1591,20 @@ public static class PaperCardView
         return grid;
     }
 
-    private static void DrawRope(Canvas canvas, double width, bool isDark)
+    private static Color RopeMainForTheme(LineTheme theme, bool isDark) => theme switch
+    {
+        LineTheme.Pixel => Colors.Black,
+        LineTheme.Skeuo => Color.FromRgb(0x8C, 0x66, 0x38),
+        LineTheme.Minimal => isDark ? Color.FromRgb(0x99, 0x99, 0x99) : Color.FromRgb(0x8C, 0x8C, 0x8C),
+        LineTheme.Neon => Color.FromRgb(0x33, 0xF2, 0xFF),
+        LineTheme.Washi => Color.FromRgb(0xD9, 0x40, 0x40),
+        _ => ThemePalette.RopeMain(isDark)
+    };
+
+    private static void DrawRope(Canvas canvas, double width, bool isDark, LineTheme theme, double sagScale)
     {
         double top = ScreenPlacement.RopeTop;
-        double controlY = top + 2.0 * ScreenPlacement.RopeSag(width);
+        double controlY = top + 2.0 * ScreenPlacement.RopeSag(width) * sagScale;
         var figure = new PathFigure { StartPoint = new Point(-20, top), IsClosed = false };
         figure.Segments.Add(new QuadraticBezierSegment(new Point(width / 2.0, controlY), new Point(width + 20, top), true));
         var geom = new PathGeometry([figure]);
@@ -1169,36 +1620,129 @@ public static class PaperCardView
             new Point(0, 0),
             new Point(1, 0));
 
-        var shadow = new WpfPath
+        switch (theme)
         {
-            Data = geom,
-            Stroke = ThemePalette.Brush(Color.FromArgb(0x3D, 0x00, 0x00, 0x00)),
-            StrokeThickness = 2.6,
-            OpacityMask = maskBrush,
-            IsHitTestVisible = false,
-            Margin = new Thickness(0, 1.5, 0, 0)
-        };
-        var baseStrand = new WpfPath
-        {
-            Data = geom,
-            Stroke = ThemePalette.Brush(ThemePalette.RopeMain(isDark)),
-            StrokeThickness = 2.2,
-            OpacityMask = maskBrush,
-            IsHitTestVisible = false
-        };
-        var twistedStrand = new WpfPath
-        {
-            Data = geom,
-            Stroke = ThemePalette.Brush(ThemePalette.RopeHighlight(isDark)),
-            StrokeThickness = 2.2,
-            StrokeDashArray = [1.8, 3.2],
-            OpacityMask = maskBrush,
-            IsHitTestVisible = false
-        };
+            case LineTheme.Pixel:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = Brushes.Black,
+                    StrokeThickness = 3.0,
+                    StrokeDashArray = [2.0, 1.0],
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
 
-        canvas.Children.Add(shadow);
-        canvas.Children.Add(baseStrand);
-        canvas.Children.Add(twistedStrand);
+            case LineTheme.Skeuo:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromArgb(0x55, 0x00, 0x00, 0x00)),
+                    StrokeThickness = 4.5,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false,
+                    Margin = new Thickness(0, 2, 0, 0)
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromRgb(0x8C, 0x66, 0x38)),
+                    StrokeThickness = 4.0,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromRgb(0xD9, 0xB3, 0x73)),
+                    StrokeThickness = 4.0,
+                    StrokeDashArray = [1.0, 1.2],
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
+
+            case LineTheme.Minimal:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(RopeMainForTheme(theme, isDark)),
+                    StrokeThickness = 1.1,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
+
+            case LineTheme.Neon:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromArgb(0x99, 0x33, 0xF2, 0xFF)),
+                    StrokeThickness = 4.5,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false,
+                    Effect = new BlurEffect { Radius = 5 }
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromRgb(0xCC, 0xFF, 0xFF)),
+                    StrokeThickness = 1.5,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
+
+            case LineTheme.Washi:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromRgb(0xD9, 0x40, 0x40)),
+                    StrokeThickness = 1.8,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = Brushes.White,
+                    StrokeThickness = 1.8,
+                    StrokeDashArray = [2.2, 2.2],
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
+
+            default:
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(Color.FromArgb(0x3D, 0x00, 0x00, 0x00)),
+                    StrokeThickness = 2.6,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false,
+                    Margin = new Thickness(0, 1.5, 0, 0)
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(ThemePalette.RopeMain(isDark)),
+                    StrokeThickness = 2.2,
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                canvas.Children.Add(new WpfPath
+                {
+                    Data = geom,
+                    Stroke = ThemePalette.Brush(ThemePalette.RopeHighlight(isDark)),
+                    StrokeThickness = 2.2,
+                    StrokeDashArray = [1.8, 3.2],
+                    OpacityMask = maskBrush,
+                    IsHitTestVisible = false
+                });
+                return;
+        }
     }
 
     private static UIElement BuildEmptyHint(bool filtering, bool isDark)
@@ -1220,7 +1764,7 @@ public static class PaperCardView
         };
     }
 
-    private static UIElement BuildBasketHandle(int count, bool open, bool isDark, Action onClick)
+    private static UIElement BuildBasketHandle(int count, bool open, bool isDark, LineTheme theme, Action onClick)
     {
         var stroke = ThemePalette.Brush(ThemePalette.ChromeText(isDark));
         var basketGlyph = new WpfPath
@@ -1272,7 +1816,7 @@ public static class PaperCardView
         var pill = new Border
         {
             Background = ThemePalette.Brush(ThemePalette.ChromeFill(isDark)),
-            BorderBrush = ThemePalette.Brush(open ? ThemePalette.PickedAmber : ThemePalette.ChromeBorder(isDark)),
+            BorderBrush = ThemePalette.Brush(open ? ThemePalette.PickedColor(theme) : ThemePalette.ChromeBorder(isDark)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(15),
             Padding = new Thickness(11, 5, 11, 5),
@@ -1289,8 +1833,20 @@ public static class PaperCardView
         return pill;
     }
 
-    private static UIElement BuildPaperStrip(PaperKind paper)
+    private static UIElement BuildPaperStrip(PaperKind paper, LineTheme theme)
     {
+        if (theme != LineTheme.Paper)
+        {
+            var edge = ThemePalette.CardEdge(theme, paper);
+            return new Border
+            {
+                CornerRadius = new CornerRadius(Math.Max(3.0, ThemePalette.CardCorner(theme))),
+                Background = ThemePalette.Brush(ThemePalette.CardFill(theme, paper)),
+                BorderBrush = edge is { } e ? ThemePalette.Brush(e.Color) : null,
+                BorderThickness = new Thickness(edge?.Width ?? 0.0)
+            };
+        }
+
         if (paper == PaperKind.Tag)
         {
             const double c = 9;

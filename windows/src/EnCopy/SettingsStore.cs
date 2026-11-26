@@ -23,15 +23,43 @@ public sealed class SavedShortcut
 public sealed class AppSettings
 {
     public static readonly int[] KeepChoices = [25, 50, 100];
+    public static readonly double[] PeekChoices = [0.8, 1.5, 2.5, 4.0];
 
     public bool RecordingPaused { get; set; }
     public bool TextEnabled { get; set; } = true;
     public bool LinksEnabled { get; set; } = true;
     public int? KeepOnLine { get; set; }
+    public string Theme { get; set; } = "paper";
+    public bool OpensFromTopEdge { get; set; } = true;
+    public bool PeeksAtNew { get; set; } = true;
+    public double PeekSeconds { get; set; } = 1.5;
+    public bool ShowOverFullScreen { get; set; }
+    public bool ZoomOnHover { get; set; }
     public bool ShortcutCustomized { get; set; }
     public SavedShortcut? CustomShortcut { get; set; }
 
     public int? NormalizedKeepOnLine => KeepOnLine is { } n && KeepChoices.Contains(n) ? n : null;
+    public double NormalizedPeekSeconds => PeekChoices.Contains(PeekSeconds) ? PeekSeconds : 1.5;
+
+    public LineTheme GetActiveTheme() => Theme?.Trim().ToLowerInvariant() switch
+    {
+        "pixel" => LineTheme.Pixel,
+        "skeuo" => LineTheme.Skeuo,
+        "minimal" => LineTheme.Minimal,
+        "neon" => LineTheme.Neon,
+        "washi" => LineTheme.Washi,
+        _ => LineTheme.Paper
+    };
+
+    public void SetActiveTheme(LineTheme theme) => Theme = theme switch
+    {
+        LineTheme.Pixel => "pixel",
+        LineTheme.Skeuo => "skeuo",
+        LineTheme.Minimal => "minimal",
+        LineTheme.Neon => "neon",
+        LineTheme.Washi => "washi",
+        _ => "paper"
+    };
 
     public Shortcut? GetActiveShortcut()
     {

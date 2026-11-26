@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
@@ -49,6 +50,103 @@ public sealed class Line : INotifyPropertyChanged
     private int _basketMatchCount;
     private bool _basketOpen;
     private Note? _basketPicked;
+    private LineTheme _theme = LineTheme.Paper;
+    private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    public LineTheme Theme
+    {
+        get => _theme;
+        set { if (_theme != value) { _theme = value; OnPropertyChanged(); } }
+    }
+
+    public IReadOnlySet<string> HeldPaths => _heldPaths;
+
+    public void SetHeld(string filePath, bool held)
+    {
+        var full = Path.GetFullPath(filePath);
+        bool changed = held ? _heldPaths.Add(full) : _heldPaths.Remove(full);
+        if (!changed) return;
+        if (held && _selectedPaths.Remove(full))
+        {
+            OnPropertyChanged(nameof(SelectedPaths));
+        }
+        OnPropertyChanged(nameof(HeldPaths));
+    }
+
+    public IReadOnlyList<Note> Neighbours(string filePath, bool toTheLeft)
+    {
+        int idx = IndexInShown(filePath);
+        if (idx < 0) return [];
+        var list = new List<Note>();
+        if (toTheLeft)
+        {
+            for (int i = 0; i < idx; i++)
+            {
+                if (!ShownItems[i].Pinned) list.Add(ShownItems[i]);
+            }
+        }
+        else
+        {
+            for (int i = idx + 1; i < ShownItems.Count; i++)
+            {
+                if (!ShownItems[i].Pinned) list.Add(ShownItems[i]);
+            }
+        }
+        return list;
+    }
+
+    public bool TakeDownNeighbours(string filePath, bool toTheLeft)
+    {
+        var targets = Neighbours(filePath, toTheLeft);
+        return TakeDownNotes(targets);
+    }
+
+    public void PruneMissingFromLine()
+    {
+        int removed = _lineItems.RemoveAll(n => !File.Exists(n.FilePath) && !Directory.Exists(n.FilePath));
+        if (removed > 0)
+        {
+            SaveLineState();
+            RefreshCurrentView();
+        }
+    }
+
+    public IReadOnlyList<string> SaveToDesktop(IReadOnlyList<Note> notes, string? desktopFolderOverride = null)
+    {
+        var desktop = desktopFolderOverride ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (string.IsNullOrWhiteSpace(desktop)) return [];
+        Directory.CreateDirectory(desktop);
+
+        var written = new List<string>();
+        foreach (var note in notes)
+        {
+            var sources = note.FileTargets.Count > 0 ? note.FileTargets : [note.FilePath];
+            foreach (var src in sources)
+            {
+                if (!File.Exists(src)) continue;
+                var dest = NextFreePath(Path.Combine(desktop, Path.GetFileName(src)));
+                File.Copy(src, dest, overwrite: false);
+                written.Add(dest);
+            }
+        }
+        return written;
+    }
+
+    private static string NextFreePath(string candidate)
+    {
+        if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+        var dir = Path.GetDirectoryName(candidate) ?? string.Empty;
+        var baseName = Path.GetFileNameWithoutExtension(candidate);
+        var ext = Path.GetExtension(candidate);
+        int n = 2;
+        string next;
+        do
+        {
+            next = Path.Combine(dir, $"{baseName} {n}{ext}");
+            n++;
+        } while (File.Exists(next) || Directory.Exists(next));
+        return next;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -322,7 +420,8 @@ public sealed class Line : INotifyPropertyChanged
         if (idx >= 0)
         {
             var updated = _lineItems[idx].WithUsedAt(stampLocal);
-            if (updated.Pinned)
+            // 收藏的与拿在手上的留在原位（T-019 / CONTEXT.md）
+            if (updated.Pinned || _heldPaths.Contains(full))
             {
                 _lineItems[idx] = updated;
             }
@@ -528,9 +627,10 @@ public sealed class Line : INotifyPropertyChanged
 
     // MARK: Take Down (Ctrl+Backspace / Delete) & Put Back (Ctrl+Z)
 
-    public bool TakeDownPicked()
+    public bool TakeDownPicked() => TakeDownNotes(GetSelectedNotesInLineOrder());
+
+    public bool TakeDownNotes(IReadOnlyList<Note> targets, bool sendToRecycleBin = false)
     {
-        var targets = GetSelectedNotesInLineOrder();
         if (targets.Count == 0) return false;
 
         // 预先记录移除前每个条目在绳上的原始槽位，确保多选 Ctrl+Z 放回时严格维持原从左到右顺序
@@ -542,7 +642,7 @@ public sealed class Line : INotifyPropertyChanged
 
         var prepared = new List<UndoEntry>(targets.Count);
         var stepId = Guid.NewGuid().ToString("N");
-        var movedToStash = new List<(string Original, string Stashed)>();
+        var movedToStash = new List<(string Original, string Stashed, bool CopiedOnly)>();
 
         // 两阶段提交：先将全部私有文件移入暂存区，若中途发生 IOException 则原样退回，绝不损毁 History 或绳子状态
         try
@@ -557,13 +657,37 @@ public sealed class Line : INotifyPropertyChanged
                 bool wasPinned = liveIdx >= 0 && _lineItems[liveIdx].Pinned;
 
                 string? stashed = null;
-                if (DataFolder.Contains(note.FilePath) && File.Exists(note.FilePath))
+                bool isPrivate = DataFolder.Contains(note.FilePath);
+                if (File.Exists(note.FilePath) && (isPrivate || sendToRecycleBin))
                 {
                     Directory.CreateDirectory(DataFolder.DiscardedFolder);
                     var dest = Path.Combine(DataFolder.DiscardedFolder, $"{stepId}_{Path.GetFileName(note.FilePath)}");
-                    File.Move(note.FilePath, dest, overwrite: true);
-                    movedToStash.Add((note.FilePath, dest));
-                    stashed = dest;
+                    if (sendToRecycleBin)
+                    {
+                        File.Copy(note.FilePath, dest, overwrite: true);
+                        if (RecycleBinInterop.MoveFileToRecycleBin(note.FilePath))
+                        {
+                            movedToStash.Add((note.FilePath, dest, CopiedOnly: true));
+                            stashed = dest;
+                        }
+                        else if (isPrivate)
+                        {
+                            File.Delete(dest);
+                            File.Move(note.FilePath, dest, overwrite: true);
+                            movedToStash.Add((note.FilePath, dest, CopiedOnly: false));
+                            stashed = dest;
+                        }
+                        else
+                        {
+                            File.Delete(dest);
+                        }
+                    }
+                    else
+                    {
+                        File.Move(note.FilePath, dest, overwrite: true);
+                        movedToStash.Add((note.FilePath, dest, CopiedOnly: false));
+                        stashed = dest;
+                    }
                 }
 
                 prepared.Add(new UndoEntry(
@@ -580,11 +704,15 @@ public sealed class Line : INotifyPropertyChanged
         }
         catch (IOException)
         {
-            foreach (var (orig, stash) in movedToStash)
+            foreach (var (orig, stash, copiedOnly) in movedToStash)
             {
                 if (File.Exists(stash) && !File.Exists(orig))
                 {
                     try { File.Move(stash, orig, overwrite: false); } catch { }
+                }
+                else if (copiedOnly && File.Exists(stash))
+                {
+                    try { File.Delete(stash); } catch { }
                 }
             }
             return false;
@@ -593,10 +721,11 @@ public sealed class Line : INotifyPropertyChanged
         if (prepared.Count == 0) return false;
         foreach (var entry in prepared)
         {
+            var full = Path.GetFullPath(entry.OriginalPath);
+            _heldPaths.Remove(full);
             History.Remove(entry.OriginalPath);
             if (entry.WasOnLine)
             {
-                var full = Path.GetFullPath(entry.OriginalPath);
                 _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
             }
         }
@@ -1246,4 +1375,42 @@ public sealed class Line : INotifyPropertyChanged
         int OldScreenIndex,
         bool IsPinChange,
         IReadOnlyList<string>? DisplacedLoosePaths = null);
+}
+
+internal static class RecycleBinInterop
+{
+    private const uint FoDelete = 0x0003;
+    private const ushort FofAllowUndo = 0x0040;
+    private const ushort FofNoConfirmation = 0x0010;
+    private const ushort FofSilent = 0x0004;
+    private const ushort FofNoErrorUi = 0x0400;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SHFILEOPSTRUCT
+    {
+        public IntPtr hwnd;
+        public uint wFunc;
+        public string pFrom;
+        public string? pTo;
+        public ushort fFlags;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool fAnyOperationsAborted;
+        public IntPtr hNameMappings;
+        public string? lpszProgressTitle;
+    }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SHFileOperation(ref SHFILEOPSTRUCT lpFileOp);
+
+    public static bool MoveFileToRecycleBin(string path)
+    {
+        if (!File.Exists(path)) return false;
+        var op = new SHFILEOPSTRUCT
+        {
+            wFunc = FoDelete,
+            pFrom = Path.GetFullPath(path) + "\0\0",
+            fFlags = FofAllowUndo | FofNoConfirmation | FofSilent | FofNoErrorUi
+        };
+        return SHFileOperation(ref op) == 0 && !op.fAnyOperationsAborted;
+    }
 }
