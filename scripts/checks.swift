@@ -1861,11 +1861,11 @@ struct CheckFailed: Error { let message: String }
         Line.showsSourceApp = true
     }
 
-    /// T-041: six themes, paper by default; the choice is kept, and a theme
+    /// T-041: seven themes (T-072 added Christmas), paper by default; the choice is kept, and a theme
     /// name this version does not know falls back to paper.
     func checkThemes() throws {
         UserDefaults.standard.removeObject(forKey: "theme")
-        try check(Theme.current == .paper && Theme.allCases.count == 6, "Paper out of the box, five more to choose from")
+        try check(Theme.current == .paper && Theme.allCases.count == 7, "Paper out of the box, six more to choose from")
         let themed = line()
         try check(themed.theme == .paper, "A new line starts in the chosen theme")
         themed.theme = .pixel
@@ -1873,7 +1873,11 @@ struct CheckFailed: Error { let message: String }
         try check(Theme.current == .pixel && next.theme == .pixel, "A theme picked on the line is kept for next time")
         UserDefaults.standard.set("vaporwave", forKey: "theme")
         try check(Theme.current == .paper, "An unknown theme falls back to paper")
-        try check(Set(Theme.allCases.map(\.title)).count == 6, "Each theme has its own name")
+        try check(Set(Theme.allCases.map(\.title)).count == 7, "Each theme has its own name")
+        // T-072: the Christmas theme is always there to pick, and it alone is marked seasonal.
+        try check(Theme.allCases.filter(\.isSeasonal) == [.christmas], "Only the Christmas theme is seasonal")
+        themed.theme = .christmas
+        try check(Theme.current == .christmas, "The Christmas theme can be picked any day")
         UserDefaults.standard.removeObject(forKey: "theme")
     }
 

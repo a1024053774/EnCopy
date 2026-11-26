@@ -54,9 +54,9 @@ When the line is full, the oldest item falls into the basket instead of the Tras
 - Pictures are found by the text read from them; pictures and videos from Finder by their file names.
 - After ⌥C, a basket handle hangs at the lower right of the line: "Basket N ↓". Press ↓ or click it and the basket opens as a list, newest first all the way back, grouped by today, yesterday, this week, then by month; each row is a strip of its own paper, in the theme; chips above the list, "All / Text / Links / Images" with counts, narrow it by kind. ↑↓ go row by row, ← → jump a group, typing and Tab narrow the list, ⏎ pastes, ⌘P pins it back on the line.
 
-### Six themes
+### Seven themes
 
-Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one from the cards in Settings → Appearance.
+Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal, plus a seasonal one, Christmas. Papers, pegs and the rope change together; pick one from the cards in Settings → Appearance.
 
 | Paper | Pixel |
 | --- | --- |
@@ -65,6 +65,8 @@ Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope
 | <img src="docs/themes/en/skeuo.png" alt="Skeuomorphic theme"> | <img src="docs/themes/en/minimal.png" alt="Minimal theme"> |
 | **Neon** | **Journal** |
 | <img src="docs/themes/en/neon.png" alt="Neon theme"> | <img src="docs/themes/en/washi.png" alt="Journal theme"> |
+| **Christmas (seasonal)** | |
+| <img src="docs/themes/en/christmas.png" alt="Christmas theme: fairy lights on a holly garland, candy canes holding greeting cards"> | |
 
 ### What it keeps, and for how long
 

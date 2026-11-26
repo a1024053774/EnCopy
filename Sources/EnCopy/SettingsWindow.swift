@@ -428,6 +428,8 @@ private struct SettingsBackdrop: View {
         case .minimal: Color(white: 0.95)
         case .neon: Color(red: 0.04, green: 0.04, blue: 0.09)
         case .washi: Color(red: 0.96, green: 0.93, blue: 0.86)
+        case .christmas: LinearGradient(colors: [Color(red: 0.07, green: 0.30, blue: 0.18), Color(red: 0.04, green: 0.20, blue: 0.12)],
+                                        startPoint: .top, endPoint: .bottom)
         }
     }
 }
@@ -452,7 +454,7 @@ private struct SettingsTag: View {
                 if selected {
                     RoundedRectangle(cornerRadius: max(4, theme.corner), style: .continuous).fill(theme.picked)
                 } else {
-                    ThemeCardBackground(theme: theme, card: .text)
+                    ThemeCardBackground(theme: theme, card: .text, decorated: false)
                 }
             }
             // On the paper, not the label: a shadow on the whole tab falls
@@ -486,6 +488,7 @@ private struct ThemeSwatch: View {
                         paper(.link, tilt: 3)
                     }
                     .padding(.top, 12)
+                    if theme.isSeasonal { SeasonRibbon() }
                 }
                 .frame(width: 150, height: 70)
                 .environment(\.colorScheme, theme == .neon ? .dark : .light)
@@ -522,6 +525,25 @@ private struct ThemeSwatch: View {
     }
 }
 
+/// A gift ribbon across the corner of a seasonal theme's card (T-072):
+/// red with gold edges, reading 季节限定.
+private struct SeasonRibbon: View {
+    var body: some View {
+        Text(L("Seasonal"))
+            .font(.system(size: 9, weight: .heavy))
+            .foregroundStyle(.white)
+            .frame(width: 100, height: 15)
+            .background(Theme.christmasRed)
+            .overlay(alignment: .top) { Rectangle().fill(Color(red: 0.98, green: 0.80, blue: 0.30)).frame(height: 1.5) }
+            .overlay(alignment: .bottom) { Rectangle().fill(Color(red: 0.98, green: 0.80, blue: 0.30)).frame(height: 1.5) }
+            .rotationEffect(.degrees(35))
+            .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+            .offset(x: 28, y: 9)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .allowsHitTesting(false)
+    }
+}
+
 /// One part of a page: a sheet of the theme's paper with an optional title.
 private struct SettingsSheet<Content: View>: View {
     let title: String?
@@ -540,7 +562,7 @@ private struct SettingsSheet<Content: View>: View {
         // The shadow goes on the paper alone: put on the sheet, it falls
         // behind every line of text as well, and the pixel theme's hard,
         // offset one doubles each letter.
-        .background(ThemeCardBackground(theme: theme, card: .text)
+        .background(ThemeCardBackground(theme: theme, card: .text, decorated: false)
             .shadow(color: theme.shadow(hovering: false).0.opacity(0.7), radius: theme.shadow(hovering: false).1 / 2,
                     x: theme.shadow(hovering: false).2, y: theme.shadow(hovering: false).3 / 2))
     }
