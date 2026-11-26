@@ -455,10 +455,37 @@ struct CheckFailed: Error { let message: String }
         try checkTakeDownOnlyShown()
         try checkRecopyAnyPicture()
         try checkUpdater()
+        try checkWhatsNew()
     }
 
     /// T-053: what the updater accepts and refuses, without the network.
     /// Each refusal leaves the app in place as it was.
+    /// T-074: what a version brings is told once, on the first launch after
+    /// an update to it; not on a first install, not twice, not after going
+    /// back to an older version, and not for a version with nothing written.
+    func checkWhatsNew() throws {
+        let name = "local.encopy.checks.whatsnew"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        defer { d.removePersistentDomain(forName: name) }
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil && d.string(forKey: WhatsNew.seenKey) == "0.4.4",
+                  "A first install tells nothing, and remembers its version")
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "The same version again tells nothing")
+        d.removePersistentDomain(forName: name)
+        d.set(true, forKey: "welcomed")
+        let news = WhatsNew.onLaunch(current: "0.4.4", defaults: d)
+        try check(news?.theme == .christmas && news.map { !$0.points.isEmpty && $0.points.allSatisfy { !$0.isEmpty } } == true,
+                  "Updating from a version that kept no record tells what 0.4.4 brings, with the Christmas theme")
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "It is told once")
+        d.set("0.4.2", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) != nil, "Skipping a version still tells the new one's news")
+        d.set("0.4.5", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "Going back to an older version tells nothing")
+        d.set("0.4.4", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.9", defaults: d) == nil && d.string(forKey: WhatsNew.seenKey) == "0.4.9",
+                  "A version with nothing written tells nothing, and is remembered")
+    }
+
     func checkUpdater() throws {
         try check(Updater.isNewer("0.10.0", than: "0.9.0") && Updater.isNewer("v0.4.2", than: "0.4.1")
                   && !Updater.isNewer("0.4", than: "0.4.0") && !Updater.isNewer("0.4.0", than: "v0.4")
