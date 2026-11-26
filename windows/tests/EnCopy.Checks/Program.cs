@@ -189,6 +189,19 @@ public static class Program
 
         // 9. 纯 Win32 HGLOBAL 读取辅助校验（零碰系统剪贴板）
         TestWin32GlobalReaders();
+
+        // 10. 暂停/停止监听生命周期回归（P1）：Stop() 后通知后端停止入队并清空残留队列
+        Check(backend.IsListening, "Backend listening is active after Start()");
+        backend.QueueSnapshotWithoutNotify(new ClipboardSnapshot(103, false, false, false, "Before pause item", null));
+        watcher.Stop();
+        Check(!backend.IsListening && !backend.TryDequeueSnapshot(out _),
+            "Stop() must disable backend capture and discard any unconsumed queued snapshots");
+        backend.QueueSnapshotWithoutNotify(new ClipboardSnapshot(104, false, false, false, "Copied while paused", null));
+        Check(!backend.TryDequeueSnapshot(out _), "Backend must not enqueue snapshots while paused");
+        watcher.Start();
+        backend.Push(new ClipboardSnapshot(105, false, false, false, "Resumed item", null));
+        Check(history.NoteHolding("Copied while paused") is null && history.NoteHolding("Resumed item") is not null,
+            "Paused copy stays ignored while resumed copy records cleanly");
     }
 
     private static void TestWin32GlobalReaders()
@@ -496,6 +509,16 @@ public static class Program
         private int _nullReadsRemaining;
         public event EventHandler? Changed;
         public uint SequenceNumber { get; private set; }
+        public bool IsListening { get; private set; }
+
+        public void SetListening(bool enabled)
+        {
+            IsListening = enabled;
+            if (!enabled)
+            {
+                _queue.Clear();
+            }
+        }
 
         public void Push(ClipboardSnapshot snap)
         {
@@ -508,6 +531,7 @@ public static class Program
         {
             SequenceNumber = snap.SequenceNumber;
             _current = snap;
+            if (!IsListening) return;
             _queue.Enqueue(snap);
         }
 
