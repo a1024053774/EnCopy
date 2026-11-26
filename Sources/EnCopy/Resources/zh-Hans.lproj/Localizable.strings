@@ -168,6 +168,11 @@
 "%@ seconds" = "%@ 秒";
 "Show the app it came from" = "显示来源 App";
 "Theme" = "主题";
+"Christmas" = "圣诞季";
+"Seasonal" = "季节限定";
+"Appearance" = "外观";
+"Show Details" = "展开说明";
+"Hide Details" = "收起说明";
 "Paper" = "纸";
 "Pixel" = "像素";
 "Skeuomorphic" = "拟物";
@@ -251,3 +256,8 @@
 "Up to date" = "已是最新";
 "Version %@ is out" = "有新版本 %@";
 "Updating…" = "正在更新…";
+"New in EnCopy %@" = "EnCopy %@ 的新东西";
+"Got It" = "知道了";
+"Use %@" = "换上%@";
+"New seasonal theme, Christmas: a holly garland with fairy lights, candy-cane pegs and greeting cards. It is in Settings → Appearance." = "季节限定主题「圣诞季」上线：冬青绳挂彩灯，拐杖糖夹着贺卡。在设置 → 外观里换。";
+"With any theme but Paper, a file copied in Finder now shows its name, not “Copied ….files”." = "纸以外的主题里，访达复制的文件卡片现在写文件名，不再写「Copied ….files」。";

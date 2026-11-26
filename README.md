@@ -10,7 +10,9 @@ EnCopy 是 macOS 上的剪贴板 App：复制的东西和截图挂在屏幕顶�
 
 ## 下载
 
-最新版是 [0.4.2](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
+最新版是 [0.4.4](https://github.com/a1024053774/EnCopy/releases/latest)。下载 [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg)，把 EnCopy 拖进「应用程序」。需要 macOS 14 及以上，Apple 芯片和 Intel 都能用。
+
+0.4.2 起 EnCopy 在 App 里就能更新。还在用 0.4.1 或更早版本的（菜单栏图标 →「关于 EnCopy」里看版本号），这些版本不会提醒你更新，请重新下载一次 DMG 覆盖安装，之后就不用再手动下了。
 
 这一版没有经过 Apple 公证，第一次打开会被 macOS 拦下：到「系统设置 → 隐私与安全性」，点「仍要打开」。也可以在终端里跑下面这一行，去掉浏览器下载时给它加上的隔离标记，之后双击就能打开：
 
@@ -52,9 +54,9 @@ xattr -dr com.apple.quarantine /Applications/EnCopy.app
 - 图片按图里识别出的字搜，访达里的图片和视频按文件名搜。
 - ⌥C 后绳子右下角挂着「篮子 N 件 ↓」。按 ↓ 或点它，篮子展开成列表：从新到旧一路翻到最早，按今天、昨天、本周、再往前按月分组；每行是一小条对应的纸，跟主题走；列表上方一排「全部 / 文字 / 链接 / 图片」标签带件数，点了按种类筛。↑↓ 一条条看，← → 跳到上一天 / 下一天，打字和 Tab 筛列表，⏎ 贴、⌘P 收藏回绳上。
 
-### 六套主题
+### 七套主题
 
-纸、像素、拟物、极简、霓虹、手账，纸、夹子和绳子一起换，在设置 → 晾衣绳里挑。
+纸、像素、拟物、极简、霓虹、手账，还有季节限定的圣诞季，纸、夹子和绳子一起换，在设置 → 外观里点一张小图卡挑。
 
 | 纸 | 像素 |
 | --- | --- |
@@ -63,6 +65,8 @@ xattr -dr com.apple.quarantine /Applications/EnCopy.app
 | <img src="docs/themes/skeuo.png" alt="拟物主题"> | <img src="docs/themes/minimal.png" alt="极简主题"> |
 | **霓虹** | **手账** |
 | <img src="docs/themes/neon.png" alt="霓虹主题"> | <img src="docs/themes/washi.png" alt="手账主题"> |
+| **圣诞季（季节限定）** | |
+| <img src="docs/themes/christmas.png" alt="圣诞季主题：冬青绳上挂着彩灯，拐杖糖夹住贺卡"> | |
 
 ### 记什么、留多久
 

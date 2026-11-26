@@ -455,10 +455,37 @@ struct CheckFailed: Error { let message: String }
         try checkTakeDownOnlyShown()
         try checkRecopyAnyPicture()
         try checkUpdater()
+        try checkWhatsNew()
     }
 
     /// T-053: what the updater accepts and refuses, without the network.
     /// Each refusal leaves the app in place as it was.
+    /// T-074: what a version brings is told once, on the first launch after
+    /// an update to it; not on a first install, not twice, not after going
+    /// back to an older version, and not for a version with nothing written.
+    func checkWhatsNew() throws {
+        let name = "local.encopy.checks.whatsnew"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        defer { d.removePersistentDomain(forName: name) }
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil && d.string(forKey: WhatsNew.seenKey) == "0.4.4",
+                  "A first install tells nothing, and remembers its version")
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "The same version again tells nothing")
+        d.removePersistentDomain(forName: name)
+        d.set(true, forKey: "welcomed")
+        let news = WhatsNew.onLaunch(current: "0.4.4", defaults: d)
+        try check(news?.theme == .christmas && news.map { !$0.points.isEmpty && $0.points.allSatisfy { !$0.isEmpty } } == true,
+                  "Updating from a version that kept no record tells what 0.4.4 brings, with the Christmas theme")
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "It is told once")
+        d.set("0.4.2", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) != nil, "Skipping a version still tells the new one's news")
+        d.set("0.4.5", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.4", defaults: d) == nil, "Going back to an older version tells nothing")
+        d.set("0.4.4", forKey: WhatsNew.seenKey)
+        try check(WhatsNew.onLaunch(current: "0.4.9", defaults: d) == nil && d.string(forKey: WhatsNew.seenKey) == "0.4.9",
+                  "A version with nothing written tells nothing, and is remembered")
+    }
+
     func checkUpdater() throws {
         try check(Updater.isNewer("0.10.0", than: "0.9.0") && Updater.isNewer("v0.4.2", than: "0.4.1")
                   && !Updater.isNewer("0.4", than: "0.4.0") && !Updater.isNewer("0.4.0", than: "v0.4")
@@ -720,6 +747,15 @@ struct CheckFailed: Error { let message: String }
                   "An arrow while composing stays with the input method")
         try check(!bar.takes(keyDown(0), composing: false) && moves.isEmpty,
                   "A letter key stays with the field")
+        // T-070: with the caret inside what was typed, ← → edit the query.
+        try check(!bar.takes(keyDown(UInt16(kVK_LeftArrow)), composing: false, caretAtEnd: false) && moves.isEmpty,
+                  "Left with the caret inside the query moves the caret")
+        try check(!bar.takes(keyDown(UInt16(kVK_RightArrow)), composing: false, caretAtEnd: false) && moves.isEmpty,
+                  "Right with the caret inside the query moves the caret")
+        try check(bar.takes(keyDown(UInt16(kVK_RightArrow)), composing: false, caretAtEnd: true) && moves == [1],
+                  "Right with the caret back at the end picks again")
+        try check(bar.takes(keyDown(UInt16(kVK_DownArrow)), composing: false, caretAtEnd: false),
+                  "Down still opens the basket list with the caret inside the query")
     }
 
     /// T-021: what is used goes to the head of the line — pasted after ⌥C,
@@ -1032,6 +1068,18 @@ struct CheckFailed: Error { let message: String }
         try check(files.items.count == 1 && isFileList(list) && samePaths(FileList.paths(list), [pdf]) && files.kind(of: list) == .file,
                   "A file copied in Finder hangs as the list EnCopy keeps of it, a file")
         try check(files.items.first.map { $0.thumb.size.width > 0 } == true, "It has a card to show")
+        // T-073: every theme's card names the file, never EnCopy's own list.
+        let one = FileList.card(list)
+        try check(one.title == "Budget plan 2027.pdf" && one.footer == "Quarterly Docs" && samePaths([one.icon], [pdf]),
+                  "The card shows the file's name, its folder and its icon, not the list's")
+        let more = [pdf, docs.appendingPathComponent("Minutes.txt"), docs.appendingPathComponent("Seating.numbers")]
+        for extra in more.dropFirst() { try Data("x".utf8).write(to: extra) }
+        if let three = FileList.make(more) {
+            let card = FileList.card(three)
+            try check(card.title == "3 files" && card.footer == "Budget plan 2027.pdf, Minutes.txt, Seating.numbers",
+                      "Three files copied at once: how many, and their names")
+        } else { throw CheckFailed(message: "Could not make a list of three files") }
+        try check(FileList.card(pdf).title == "Budget plan 2027.pdf", "A file that is not a list shows its own name")
         files.search.update([list])
         for _ in 0..<40 where !files.search.matches(list, SearchIndex.words("budget")) { pump(0.05) }
         try check(files.search.matches(list, SearchIndex.words("budget 2027")) && files.search.matches(list, SearchIndex.words("quarterly")),
@@ -1852,11 +1900,11 @@ struct CheckFailed: Error { let message: String }
         Line.showsSourceApp = true
     }
 
-    /// T-041: six themes, paper by default; the choice is kept, and a theme
+    /// T-041: seven themes (T-072 added Christmas), paper by default; the choice is kept, and a theme
     /// name this version does not know falls back to paper.
     func checkThemes() throws {
         UserDefaults.standard.removeObject(forKey: "theme")
-        try check(Theme.current == .paper && Theme.allCases.count == 6, "Paper out of the box, five more to choose from")
+        try check(Theme.current == .paper && Theme.allCases.count == 7, "Paper out of the box, six more to choose from")
         let themed = line()
         try check(themed.theme == .paper, "A new line starts in the chosen theme")
         themed.theme = .pixel
@@ -1864,7 +1912,11 @@ struct CheckFailed: Error { let message: String }
         try check(Theme.current == .pixel && next.theme == .pixel, "A theme picked on the line is kept for next time")
         UserDefaults.standard.set("vaporwave", forKey: "theme")
         try check(Theme.current == .paper, "An unknown theme falls back to paper")
-        try check(Set(Theme.allCases.map(\.title)).count == 6, "Each theme has its own name")
+        try check(Set(Theme.allCases.map(\.title)).count == 7, "Each theme has its own name")
+        // T-072: the Christmas theme is always there to pick, and it alone is marked seasonal.
+        try check(Theme.allCases.filter(\.isSeasonal) == [.christmas], "Only the Christmas theme is seasonal")
+        themed.theme = .christmas
+        try check(Theme.current == .christmas, "The Christmas theme can be picked any day")
         UserDefaults.standard.removeObject(forKey: "theme")
     }
 

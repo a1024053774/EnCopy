@@ -31,6 +31,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
     var onToggleStack: () -> Void = {}
 
     var isShown: Bool { panel.isVisible }
+    /// Whether `window` is the search field's own panel.
+    func owns(_ window: NSWindow?) -> Bool { window === panel }
     /// The line's frame it was last shown under, to grow from when the
     /// basket list opens.
     private var lineFrame = NSRect.zero
@@ -89,8 +91,11 @@ final class SearchBar: NSObject, NSWindowDelegate {
     /// ← and → pick along the line instead of moving the caret; ⇧⏎, ⌘P and
     /// ⌘Y act on the pick. Returns
     /// whether the key was taken. Not while an input method is composing:
-    /// the arrows then belong to it.
-    func takes(_ event: NSEvent, composing: Bool) -> Bool {
+    /// the arrows then belong to it. Nor while the caret is inside what was
+    /// typed (`caretAtEnd` false: put there with a click, ⌥← or ⌘←): the
+    /// arrows then move it, and once → brings it back to the end they pick
+    /// again (T-070).
+    func takes(_ event: NSEvent, composing: Bool, caretAtEnd: Bool = true) -> Bool {
         guard event.type == .keyDown, !composing else { return false }
         let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
         let key = event.charactersIgnoringModifiers?.lowercased()
@@ -101,8 +106,8 @@ final class SearchBar: NSObject, NSWindowDelegate {
         if event.keyCode == UInt16(kVK_Tab), mods.isEmpty || mods == .shift { onTab(mods == .shift ? -1 : 1); return true }
         guard mods.isEmpty else { return false }
         switch event.keyCode {
-        case UInt16(kVK_LeftArrow): onMove(-1)
-        case UInt16(kVK_RightArrow): onMove(1)
+        case UInt16(kVK_LeftArrow) where caretAtEnd: onMove(-1)
+        case UInt16(kVK_RightArrow) where caretAtEnd: onMove(1)
         case UInt16(kVK_DownArrow): onVertical(1)
         case UInt16(kVK_UpArrow): onVertical(-1)
         default: return false
@@ -145,7 +150,10 @@ private final class SearchPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
             let taken = MainActor.assumeIsolated {
-                owner?.takes(event, composing: (firstResponder as? NSTextView)?.hasMarkedText() ?? false) ?? false
+                let editor = firstResponder as? NSTextView
+                let caret = editor?.selectedRange()
+                let atEnd = caret.map { $0.length == 0 && $0.location == (editor!.string as NSString).length } ?? true
+                return owner?.takes(event, composing: editor?.hasMarkedText() ?? false, caretAtEnd: atEnd) ?? false
             }
             if taken { return }
         }

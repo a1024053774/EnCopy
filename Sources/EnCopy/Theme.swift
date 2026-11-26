@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// How the line looks (T-041): the paper of T-034, and five more. A theme
+/// How the line looks (T-041): the paper of T-034, and six more. A theme
 /// changes the cards' paper, edge and shadow, the pegs, the rope and the
 /// picked card's edge; what is on a card, where it hangs and what clicking
 /// does stay the same.
 enum Theme: String, CaseIterable, Identifiable {
-    case paper, pixel, skeuo, minimal, neon, washi
+    case paper, pixel, skeuo, minimal, neon, washi, christmas
 
     var id: String { rawValue }
 
@@ -24,8 +24,13 @@ enum Theme: String, CaseIterable, Identifiable {
         case .minimal: L("Minimal")
         case .neon: L("Neon")
         case .washi: L("Journal")
+        case .christmas: L("Christmas")
         }
     }
+
+    /// Made for a season (T-072): always there to pick, and its card on
+    /// 外观 wears a gift ribbon so it is noticed.
+    var isSeasonal: Bool { self == .christmas }
 
     // MARK: Cards
 
@@ -56,6 +61,14 @@ enum Theme: String, CaseIterable, Identifiable {
             case .code: Color(red: 0.92, green: 0.94, blue: 0.96)
             default: Color(red: 0.98, green: 0.96, blue: 0.90)
             }
+        case .christmas:
+            // Greeting cards: cream, with a touch of each colour per kind.
+            switch card {
+            case .link: Color(red: 0.99, green: 0.92, blue: 0.90)
+            case .code: Color(red: 0.92, green: 0.96, blue: 0.92)
+            case .file: Color(red: 0.99, green: 0.94, blue: 0.80)
+            default: Color(red: 0.995, green: 0.975, blue: 0.93)
+            }
         }
     }
 
@@ -84,13 +97,14 @@ enum Theme: String, CaseIterable, Identifiable {
         case .minimal: 10
         case .neon: 8
         case .washi: 3
+        case .christmas: 6
         }
     }
 
     /// The edge drawn around a card: colour and width, or none.
     func edge(_ card: Card) -> (Color, CGFloat)? {
         switch self {
-        case .paper, .skeuo, .washi: nil
+        case .paper, .skeuo, .washi, .christmas: nil
         case .pixel: (Color.black, 2)
         case .minimal: (Color(white: 0.86), 0.7)
         case .neon: (card == .link ? Color(red: 1.0, green: 0.3, blue: 0.8) : Color(red: 0.2, green: 0.95, blue: 1.0), 1.3)
@@ -106,6 +120,7 @@ enum Theme: String, CaseIterable, Identifiable {
         case .minimal: (.black.opacity(hovering ? 0.14 : 0.08), hovering ? 12 : 8, 0, hovering ? 5 : 3)
         case .neon: (Color(red: 0.2, green: 0.95, blue: 1.0).opacity(hovering ? 0.45 : 0.28), hovering ? 8 : 5, 0, 0)
         case .washi: (.black.opacity(hovering ? 0.2 : 0.13), hovering ? 10 : 6, 0, hovering ? 5 : 3)
+        case .christmas: (.black.opacity(hovering ? 0.26 : 0.18), hovering ? 12 : 8, 0, hovering ? 7 : 4)
         }
     }
 
@@ -117,8 +132,12 @@ enum Theme: String, CaseIterable, Identifiable {
         case .minimal: Color.accentColor
         case .neon: Color(red: 1.0, green: 0.3, blue: 0.8)
         case .washi: Color(red: 0.93, green: 0.45, blue: 0.4)
+        case .christmas: Theme.christmasRed
         }
     }
+
+    static let christmasRed = Color(red: 0.78, green: 0.09, blue: 0.14)
+    static let christmasGreen = Color(red: 0.08, green: 0.42, blue: 0.22)
 
     var pickedWidth: CGFloat { self == .pixel ? 4 : 2.5 }
 
@@ -131,6 +150,7 @@ enum Theme: String, CaseIterable, Identifiable {
         case .minimal: code ? .system(size: size, design: .monospaced) : .system(size: size + 0.5, weight: bold ? .semibold : .regular)
         case .neon: code ? .system(size: size, design: .monospaced) : .system(size: size + 0.5, weight: bold ? .semibold : .medium, design: .rounded)
         case .washi: code ? .system(size: size, design: .monospaced) : .system(size: size + 0.5, weight: bold ? .semibold : .regular, design: .serif)
+        case .christmas: code ? .system(size: size, design: .monospaced) : .system(size: size + 0.5, weight: bold ? .bold : .medium, design: .rounded)
         }
     }
 }
@@ -139,6 +159,9 @@ enum Theme: String, CaseIterable, Identifiable {
 struct ThemeCardBackground: View {
     let theme: Theme
     let card: Theme.Card
+    /// A card's own trimmings (the Christmas rules). Off for the
+    /// Settings window's tabs and sheets, where they crowd the controls.
+    var decorated = true
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.corner, style: .continuous)
@@ -163,6 +186,16 @@ struct ThemeCardBackground: View {
                         y += 9
                     }
                 }
+            case .christmas where decorated:
+                // A greeting card: a red rule and a green one inside the edge.
+                // No sprig of holly: every corner already holds the kind tag,
+                // the text or the source app's icon.
+                RoundedRectangle(cornerRadius: max(1, theme.corner - 3), style: .continuous)
+                    .strokeBorder(Theme.christmasRed.opacity(0.85), lineWidth: 1.6)
+                    .padding(3)
+                RoundedRectangle(cornerRadius: max(1, theme.corner - 5), style: .continuous)
+                    .strokeBorder(Theme.christmasGreen.opacity(0.7), lineWidth: 0.8)
+                    .padding(6)
             case .pixel:
                 // A light band along the top edge, as on an old game's window.
                 VStack(spacing: 0) {
@@ -233,12 +266,35 @@ struct ThemePeg: View {
                 .frame(width: 7, height: 7)
                 .shadow(color: pinned ? Color(red: 1.0, green: 0.3, blue: 0.8) : Color(red: 0.2, green: 0.95, blue: 1.0), radius: 5)
                 .frame(width: 12, height: 22, alignment: .bottom)
+        case .christmas:
+            CandyCane(pinned: pinned)
+                .frame(width: 14, height: 28)
         case .washi:
             // A strip of striped paper tape, laid on a little crooked.
             WashiTape(pinned: pinned)
                 .frame(width: 40, height: 13)
                 .rotationEffect(.degrees(-6))
                 .frame(width: 44, height: 22, alignment: .bottom)
+        }
+    }
+}
+
+/// The Christmas peg: a candy cane, red and white; green and white when pinned.
+private struct CandyCane: View {
+    let pinned: Bool
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            var cane = Path()
+            cane.move(to: CGPoint(x: w * 0.68, y: h - 2))
+            cane.addLine(to: CGPoint(x: w * 0.68, y: w * 0.45))
+            cane.addArc(center: CGPoint(x: w * 0.45, y: w * 0.45), radius: w * 0.23,
+                        startAngle: .degrees(0), endAngle: .degrees(180), clockwise: true)
+            cane.addLine(to: CGPoint(x: w * 0.22, y: w * 0.62))
+            let stripe = pinned ? Theme.christmasGreen : Theme.christmasRed
+            context.stroke(cane, with: .color(.black.opacity(0.25)), style: StrokeStyle(lineWidth: 5.2, lineCap: .round))
+            context.stroke(cane, with: .color(.white), style: StrokeStyle(lineWidth: 4.4, lineCap: .round))
+            context.stroke(cane, with: .color(stripe), style: StrokeStyle(lineWidth: 4.4, lineCap: .butt, dash: [2.6, 2.6]))
         }
     }
 }
@@ -313,7 +369,63 @@ struct ThemeRopeStroke: View {
                 curve.stroke(Color(red: 0.85, green: 0.25, blue: 0.25), lineWidth: 1.6)
                 curve.stroke(.white, style: StrokeStyle(lineWidth: 1.6, dash: [4, 4]))
             }
+        case .christmas:
+            ZStack {
+                // A holly garland: a dark green rope with lighter leaves along it.
+                curve.stroke(Color.black.opacity(0.25), lineWidth: 5).offset(y: 1.5).blur(radius: 1.5)
+                curve.stroke(Color(red: 0.05, green: 0.30, blue: 0.15), lineWidth: 4.5)
+                curve.stroke(Color(red: 0.20, green: 0.58, blue: 0.30), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, dash: [5, 7]))
+                FairyLights(curve: curve)
+            }
         }
+    }
+}
+
+/// Small coloured bulbs strung along the Christmas rope. They glow in turn,
+/// slowly; with Reduce Motion they stay lit and still.
+private struct FairyLights: View {
+    let curve: RopeCurve
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let colors: [Color] = [
+        Color(red: 1.0, green: 0.25, blue: 0.25), Color(red: 1.0, green: 0.82, blue: 0.2),
+        Color(red: 0.3, green: 0.85, blue: 0.4), Color(red: 0.35, green: 0.6, blue: 1.0),
+    ]
+
+    var body: some View {
+        if reduceMotion {
+            bulbs(phase: nil)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.8)) { context in
+                bulbs(phase: Int(context.date.timeIntervalSinceReferenceDate / 0.8))
+            }
+        }
+    }
+
+    /// `phase` nil: all lit. Otherwise one bulb in three dims, turn by turn.
+    private func bulbs(phase: Int?) -> some View {
+        Canvas { context, size in
+            let w = curve.width
+            let p0 = CGPoint(x: -20, y: Layout.ropeTop)
+            let p2 = CGPoint(x: w + 20, y: Layout.ropeTop)
+            let p1 = CGPoint(x: w / 2, y: Layout.ropeTop + 2 * Layout.sag(width: w) * curve.sagScale)
+            let count = max(2, Int(w / 46))
+            for i in 0...count {
+                let t = CGFloat(i) / CGFloat(count)
+                let u = 1 - t
+                let x = u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x
+                let y = u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y + 4
+                let color = Self.colors[i % Self.colors.count]
+                let dim = phase.map { ($0 + i) % 3 == 0 } ?? false
+                let bulb = CGRect(x: x - 2.6, y: y - 1, width: 5.2, height: 7)
+                if !dim {
+                    context.fill(Path(ellipseIn: bulb.insetBy(dx: -3, dy: -3)), with: .color(color.opacity(0.28)))
+                }
+                context.fill(Path(ellipseIn: bulb), with: .color(dim ? color.opacity(0.45) : color))
+                context.fill(Path(CGRect(x: x - 1.5, y: y - 2.5, width: 3, height: 2)), with: .color(Color(white: 0.3)))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -324,12 +436,14 @@ struct ThemeFileCard: View {
     let size: CGSize
 
     var body: some View {
+        // A list copied in Finder names its files, not itself (T-073).
+        let card = FileList.card(url)
         VStack(spacing: 6) {
-            Image(nsImage: FileIcons.icon(for: url))
+            Image(nsImage: FileIcons.icon(for: card.icon))
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 34, height: 34)
-            Text(FileManager.default.displayName(atPath: url.path))
+            Text(card.title)
                 .font(theme.font(theme == .pixel ? 8 : 9, bold: true))
                 .foregroundStyle(theme.ink(.file))
                 .lineSpacing(2)
@@ -337,7 +451,7 @@ struct ThemeFileCard: View {
                 .lineLimit(theme == .pixel ? 1 : 2)
                 .minimumScaleFactor(0.7)
                 .multilineTextAlignment(.center)
-            Text(url.deletingLastPathComponent().lastPathComponent)
+            Text(card.footer)
                 .font(theme.font(7))
                 .foregroundStyle(theme.soft(.file))
                 .lineLimit(1)

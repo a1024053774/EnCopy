@@ -170,6 +170,11 @@
 "%@ seconds" = "%@ seconds";
 "Show the app it came from" = "Show the app it came from";
 "Theme" = "Theme";
+"Christmas" = "Christmas";
+"Seasonal" = "Seasonal";
+"Appearance" = "Appearance";
+"Show Details" = "Show Details";
+"Hide Details" = "Hide Details";
 "Paper" = "Paper";
 "Pixel" = "Pixel";
 "Skeuomorphic" = "Skeuomorphic";
@@ -253,3 +258,8 @@
 "Up to date" = "Up to date";
 "Version %@ is out" = "Version %@ is out";
 "Updating…" = "Updating…";
+"New in EnCopy %@" = "New in EnCopy %@";
+"Got It" = "Got It";
+"Use %@" = "Use %@";
+"New seasonal theme, Christmas: a holly garland with fairy lights, candy-cane pegs and greeting cards. It is in Settings → Appearance." = "New seasonal theme, Christmas: a holly garland with fairy lights, candy-cane pegs and greeting cards. It is in Settings → Appearance.";
+"With any theme but Paper, a file copied in Finder now shows its name, not “Copied ….files”." = "With any theme but Paper, a file copied in Finder now shows its name, not “Copied ….files”.";
