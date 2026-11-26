@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>EnCopy</RootNamespace>
+    <EnCopyEdition Condition="'$(EnCopyEdition)' == ''">dev</EnCopyEdition>
+    <AssemblyName Condition="'$(EnCopyEdition)' == 'daily'">EnCopy</AssemblyName>
+    <AssemblyName Condition="'$(EnCopyEdition)' != 'daily'">EnCopy Dev</AssemblyName>
+    <DefineConstants Condition="'$(EnCopyEdition)' == 'daily'">$(DefineConstants);ENCOPY_DAILY</DefineConstants>
+    <Version>0.4.2</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Strings.en.json">
+      <LogicalName>EnCopy.Resources.Strings.en.json</LogicalName>
+      <WithCulture>false</WithCulture>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Strings.zh-Hans.json">
+      <LogicalName>EnCopy.Resources.Strings.zh-Hans.json</LogicalName>
+      <WithCulture>false</WithCulture>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

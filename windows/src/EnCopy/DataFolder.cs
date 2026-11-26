@@ -1,0 +1,57 @@
+using System.IO;
+
+namespace EnCopy;
+
+/// <summary>
+/// 唯一决定 Windows 版 EnCopy 数据目录的位置；所有历史数据库、笔记与设置都放在此处，
+/// 测试模式（ENCOPY_CHECKS_RUNNER=1）必须显式提供隔离目录，严禁触碰真实数据文件夹。
+/// </summary>
+public static class DataFolder
+{
+    public const string ChecksRunnerEnv = "ENCOPY_CHECKS_RUNNER";
+    public const string ChecksDataDirEnv = "ENCOPY_CHECKS_DATA_DIR";
+
+    private static string? _overrideRoot;
+
+    public static string Root
+    {
+        get
+        {
+            if (_overrideRoot is not null)
+            {
+                return _overrideRoot;
+            }
+
+            if (string.Equals(Environment.GetEnvironmentVariable(ChecksRunnerEnv), "1", StringComparison.Ordinal))
+            {
+                var checkDir = Environment.GetEnvironmentVariable(ChecksDataDirEnv);
+                if (string.IsNullOrWhiteSpace(checkDir))
+                {
+                    throw new InvalidOperationException("Check mode requires ENCOPY_CHECKS_DATA_DIR to be set.");
+                }
+                return Path.GetFullPath(checkDir);
+            }
+
+            return DefaultRootForEdition(AppIdentity.AppName);
+        }
+    }
+
+    public static string DefaultRootForEdition(string appName) =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName);
+
+    public static string NotesFolder => Path.Combine(Root, "Notes");
+    public static string HistoryDatabasePath => Path.Combine(Root, "History.sqlite");
+    public static string SettingsPath => Path.Combine(Root, "Settings.json");
+
+    /// <summary>
+    /// 仅供隔离测试为每个独立用例切换临时根目录；不允许指向用户真实数据目录。
+    /// </summary>
+    public static void UseTestRoot(string? path)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable(ChecksRunnerEnv), "1", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("UseTestRoot is only allowed inside the isolated check runner.");
+        }
+        _overrideRoot = path is null ? null : Path.GetFullPath(path);
+    }
+}
