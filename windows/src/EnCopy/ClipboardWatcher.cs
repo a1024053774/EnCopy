@@ -1,8 +1,10 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace EnCopy;
 
@@ -18,6 +20,7 @@ public interface IClipboardBackend : IDisposable
 {
     event EventHandler? Changed;
     uint SequenceNumber { get; }
+    bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot);
     ClipboardSnapshot? TryRead();
     bool TryWrite(string text, byte[]? rtfBytes);
 }
@@ -70,6 +73,7 @@ public sealed class ClipboardWatcher : IDisposable
     {
         if (_started) return;
         _started = true;
+        while (_backend.TryDequeueSnapshot(out _)) { }
         _lastSequence = _backend.SequenceNumber;
         _backend.Changed += OnBackendChanged;
     }
@@ -85,6 +89,23 @@ public sealed class ClipboardWatcher : IDisposable
 
     public void CheckNow()
     {
+        bool processedAnyQueued = false;
+        while (_backend.TryDequeueSnapshot(out var queued))
+        {
+            processedAnyQueued = true;
+            if (queued is null) continue;
+            if (queued.SequenceNumber == _lastSequence) continue;
+            _lastSequence = queued.SequenceNumber;
+            if (!_settings.RecordingPaused && IsEnabled)
+            {
+                ProcessSnapshot(queued);
+            }
+        }
+        if (processedAnyQueued)
+        {
+            return;
+        }
+
         if (_settings.RecordingPaused || !IsEnabled)
         {
             _lastSequence = _backend.SequenceNumber;
@@ -93,10 +114,16 @@ public sealed class ClipboardWatcher : IDisposable
 
         var seq = _backend.SequenceNumber;
         if (seq == _lastSequence) return;
-        _lastSequence = seq;
 
         var snap = _backend.TryRead();
         if (snap is null) return;
+        // 仅在真正读到快照后才推进序号，避免短暂读失败把该次复制永久吞掉
+        _lastSequence = snap.SequenceNumber != 0 ? snap.SequenceNumber : seq;
+        ProcessSnapshot(snap);
+    }
+
+    private void ProcessSnapshot(ClipboardSnapshot snap)
+    {
         if (snap.ContainsSelfCopy || snap.IsPrivacyBlocked || snap.ContainsFiles) return;
         if (string.IsNullOrWhiteSpace(snap.Text) || snap.Text.Length > MaxChars) return;
 
@@ -170,73 +197,56 @@ public sealed class ClipboardWatcher : IDisposable
 }
 
 /// <summary>
-/// 生产剪贴板后端：通过隐藏 Message-Only 窗口挂载 AddClipboardFormatListener 接收 WM_CLIPBOARDUPDATE。
+/// 生产剪贴板后端：在独立后台 STA 线程挂载 Message-Only 窗口接收 WM_CLIPBOARDUPDATE，
+/// 第一时间通过纯 Win32 OpenClipboard/GlobalLock 把快照入队再异步通知 UI，避免 200ms 内连续复制被覆盖丢失。
 /// </summary>
 public sealed class Win32ClipboardBackend : IClipboardBackend
 {
     private const int WmClipboardUpdate = 0x031D;
+    private const uint CfUnicodeText = 13;
+    private const uint CfHDrop = 15;
+    private const int MaxUnicodeReadChars = 100_005;
+    private const int MaxRtfBytes = 5_000_000;
     private static readonly IntPtr HwndMessage = new(-3);
 
-    private readonly System.Windows.Threading.Dispatcher _dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
-    private HwndSource? _source;
-    private bool _listening;
+    private static readonly uint CfSelfCopy = RegisterClipboardFormat(ClipboardWatcher.SelfCopyFormat);
+    private static readonly uint CfRtf = RegisterClipboardFormat("Rich Text Format");
+    private static readonly uint CfExcludeMonitor = RegisterClipboardFormat(ClipboardWatcher.PrivacyFormats[0]);
+    private static readonly uint CfViewerIgnore = RegisterClipboardFormat(ClipboardWatcher.PrivacyFormats[1]);
+    private static readonly uint CfCanInclude = RegisterClipboardFormat(ClipboardWatcher.CanIncludeFormat);
+
+    private readonly Dispatcher _uiDispatcher = Dispatcher.CurrentDispatcher;
+    private readonly ConcurrentQueue<ClipboardSnapshot> _captured = new();
+    private readonly ManualResetEventSlim _ready = new(false);
+    private readonly Thread _listenerThread;
+    private Dispatcher? _listenerDispatcher;
+    private IntPtr _listenerHwnd;
+    private DispatcherTimer? _retryTimer;
+    private uint _lastCapturedSeq;
+    private int _notifyPending;
+    private volatile bool _disposed;
 
     public event EventHandler? Changed;
 
     public Win32ClipboardBackend()
     {
-        var parameters = new HwndSourceParameters("EnCopyClipboardListener")
+        _lastCapturedSeq = GetClipboardSequenceNumber();
+        _listenerThread = new Thread(ListenerThreadMain)
         {
-            ParentWindow = HwndMessage,
-            Width = 0,
-            Height = 0,
-            WindowStyle = 0
+            IsBackground = true,
+            Name = "EnCopyClipboardListener"
         };
-        _source = new HwndSource(parameters);
-        _source.AddHook(WndProc);
-        _listening = AddClipboardFormatListener(_source.Handle);
+        _listenerThread.SetApartmentState(ApartmentState.STA);
+        _listenerThread.Start();
+        _ready.Wait();
     }
 
     public uint SequenceNumber => GetClipboardSequenceNumber();
 
-    public ClipboardSnapshot? TryRead()
-    {
-        return RetryClipboard<ClipboardSnapshot?>(() =>
-        {
-            var data = Clipboard.GetDataObject();
-            if (data is null) return null;
+    public bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot) => _captured.TryDequeue(out snapshot);
 
-            var formats = data.GetFormats(autoConvert: false);
-            bool selfCopy = formats.Contains(ClipboardWatcher.SelfCopyFormat, StringComparer.OrdinalIgnoreCase);
-            bool containsFiles = data.GetDataPresent(DataFormats.FileDrop, autoConvert: false);
-
-            bool privacyBlocked = formats.Any(f =>
-                ClipboardWatcher.PrivacyFormats.Contains(f, StringComparer.OrdinalIgnoreCase));
-
-            if (!privacyBlocked && data.GetDataPresent(ClipboardWatcher.CanIncludeFormat, autoConvert: false))
-            {
-                if (IsZeroDword(data.GetData(ClipboardWatcher.CanIncludeFormat, autoConvert: false)))
-                {
-                    privacyBlocked = true;
-                }
-            }
-
-            string? text = data.GetDataPresent(DataFormats.UnicodeText, autoConvert: true)
-                ? data.GetData(DataFormats.UnicodeText, autoConvert: true) as string
-                : null;
-
-            byte[]? rtfBytes = null;
-            if (data.GetDataPresent(DataFormats.Rtf, autoConvert: false))
-            {
-                if (data.GetData(DataFormats.Rtf, autoConvert: false) is string rtfStr && rtfStr.Length <= 5_000_000)
-                {
-                    rtfBytes = Encoding.UTF8.GetBytes(rtfStr);
-                }
-            }
-
-            return new ClipboardSnapshot(SequenceNumber, selfCopy, containsFiles, privacyBlocked, text, rtfBytes);
-        }, fallback: null);
-    }
+    public ClipboardSnapshot? TryRead() =>
+        TryReadNative(IntPtr.Zero, out var snap, out _) ? snap : null;
 
     public bool TryWrite(string text, byte[]? rtfBytes)
     {
@@ -279,41 +289,269 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         return fallback;
     }
 
+    public static string? ReadUnicodeFromGlobal(IntPtr hMem)
+    {
+        if (hMem == IntPtr.Zero) return null;
+        nuint rawSize = GlobalSize(hMem);
+        if (rawSize < 2) return string.Empty;
+        int maxChars = (int)Math.Min(rawSize / 2, (nuint)MaxUnicodeReadChars);
+        IntPtr ptr = GlobalLock(hMem);
+        if (ptr == IntPtr.Zero) return null;
+        try
+        {
+            var raw = Marshal.PtrToStringUni(ptr, maxChars);
+            if (raw is null) return null;
+            int nul = raw.IndexOf('\0');
+            return nul >= 0 ? raw[..nul] : raw;
+        }
+        finally
+        {
+            GlobalUnlock(hMem);
+        }
+    }
+
+    public static byte[]? ReadRtfFromGlobal(IntPtr hMem)
+    {
+        if (hMem == IntPtr.Zero) return null;
+        nuint rawSize = GlobalSize(hMem);
+        if (rawSize == 0 || rawSize > (nuint)(MaxRtfBytes + 64)) return null;
+        IntPtr ptr = GlobalLock(hMem);
+        if (ptr == IntPtr.Zero) return null;
+        try
+        {
+            int len = (int)rawSize;
+            var bytes = new byte[len];
+            Marshal.Copy(ptr, bytes, 0, len);
+            int nul = Array.IndexOf(bytes, (byte)0);
+            if (nul >= 0)
+            {
+                len = nul;
+            }
+            if (len == 0 || len > MaxRtfBytes) return null;
+            return len == bytes.Length ? bytes : bytes[..len];
+        }
+        finally
+        {
+            GlobalUnlock(hMem);
+        }
+    }
+
+    public static bool IsZeroDwordGlobal(IntPtr hMem)
+    {
+        if (hMem == IntPtr.Zero) return false;
+        nuint rawSize = GlobalSize(hMem);
+        if (rawSize < 4) return false;
+        IntPtr ptr = GlobalLock(hMem);
+        if (ptr == IntPtr.Zero) return false;
+        try
+        {
+            return Marshal.ReadInt32(ptr) == 0;
+        }
+        finally
+        {
+            GlobalUnlock(hMem);
+        }
+    }
+
+    private void ListenerThreadMain()
+    {
+        HwndSource? source = null;
+        bool listening = false;
+        try
+        {
+            _listenerDispatcher = Dispatcher.CurrentDispatcher;
+            var parameters = new HwndSourceParameters("EnCopyClipboardListener")
+            {
+                ParentWindow = HwndMessage,
+                Width = 0,
+                Height = 0,
+                WindowStyle = 0
+            };
+            source = new HwndSource(parameters);
+            _listenerHwnd = source.Handle;
+            source.AddHook(WndProc);
+            listening = AddClipboardFormatListener(_listenerHwnd);
+
+            _retryTimer = new DispatcherTimer(DispatcherPriority.Normal, _listenerDispatcher)
+            {
+                Interval = TimeSpan.FromMilliseconds(10)
+            };
+            _retryTimer.Tick += (_, _) =>
+            {
+                _retryTimer?.Stop();
+                CaptureIfNewer(allowSettleDelay: false);
+            };
+        }
+        finally
+        {
+            _ready.Set();
+        }
+
+        if (source is null) return;
+        try
+        {
+            Dispatcher.Run();
+        }
+        finally
+        {
+            _retryTimer?.Stop();
+            _retryTimer = null;
+            if (listening && _listenerHwnd != IntPtr.Zero)
+            {
+                RemoveClipboardFormatListener(_listenerHwnd);
+            }
+            source.RemoveHook(WndProc);
+            source.Dispose();
+            _listenerHwnd = IntPtr.Zero;
+        }
+    }
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WmClipboardUpdate)
         {
-            // 异步派发到当前 Dispatcher，避免在 WndProc 同步输入调用内触发 COM RPC_E_CANTCALLOUT_ININPUTSYNCCALL
-            _dispatcher.BeginInvoke(() => Changed?.Invoke(this, EventArgs.Empty));
+            CaptureIfNewer(allowSettleDelay: true);
         }
         return IntPtr.Zero;
     }
 
-    public void Dispose()
+    private void CaptureIfNewer(bool allowSettleDelay)
     {
-        if (_source is not null)
+        if (_disposed) return;
+        if (GetClipboardSequenceNumber() == _lastCapturedSeq) return;
+
+        if (allowSettleDelay)
         {
-            if (_listening)
+            // 等待写入方的 OleSetClipboard -> OleFlushClipboard (<1ms) 无竞争落地为内核 HGLOBAL，
+            // 同时远小于 50ms 连按间隔，防止 Writer 触发 100ms CLIPBRD_E_CANT_OPEN 重试。
+            Thread.Sleep(2);
+        }
+        if (_disposed) return;
+        if (GetClipboardSequenceNumber() == _lastCapturedSeq) return;
+
+        if (TryReadNative(_listenerHwnd, out var snap, out bool openFailed))
+        {
+            _retryTimer?.Stop();
+            if (snap is not null && snap.SequenceNumber != _lastCapturedSeq)
             {
-                RemoveClipboardFormatListener(_source.Handle);
-                _listening = false;
+                _lastCapturedSeq = snap.SequenceNumber;
+                _captured.Enqueue(snap);
+                ScheduleUiNotify();
             }
-            _source.RemoveHook(WndProc);
-            _source.Dispose();
-            _source = null;
+            if (!_disposed && GetClipboardSequenceNumber() != _lastCapturedSeq)
+            {
+                _listenerDispatcher?.BeginInvoke(() => CaptureIfNewer(allowSettleDelay: false));
+            }
+        }
+        else if (openFailed)
+        {
+            _retryTimer?.Stop();
+            _retryTimer?.Start();
         }
     }
 
-    private static bool IsZeroDword(object? raw)
+    private void ScheduleUiNotify()
     {
-        return raw switch
+        if (_disposed) return;
+        if (Interlocked.Exchange(ref _notifyPending, 1) == 0)
         {
-            MemoryStream ms when ms.Length >= 4 => BitConverter.ToInt32(ms.ToArray(), 0) == 0,
-            byte[] bytes when bytes.Length >= 4 => BitConverter.ToInt32(bytes, 0) == 0,
-            int i => i == 0,
-            _ => false
-        };
+            _uiDispatcher.BeginInvoke(DrainToUi);
+        }
     }
+
+    private void DrainToUi()
+    {
+        Interlocked.Exchange(ref _notifyPending, 0);
+        if (_disposed) return;
+        Changed?.Invoke(this, EventArgs.Empty);
+        if (!_disposed && !_captured.IsEmpty)
+        {
+            ScheduleUiNotify();
+        }
+    }
+
+    private static bool TryReadNative(IntPtr ownerHwnd, out ClipboardSnapshot? snapshot, out bool openFailed)
+    {
+        snapshot = null;
+        openFailed = false;
+
+        bool opened = false;
+        for (int attempt = 0; attempt < 6; attempt++)
+        {
+            if (OpenClipboard(ownerHwnd))
+            {
+                opened = true;
+                break;
+            }
+            if (attempt < 5)
+            {
+                Thread.Sleep(1);
+            }
+        }
+
+        if (!opened)
+        {
+            openFailed = true;
+            return false;
+        }
+
+        try
+        {
+            uint seq = GetClipboardSequenceNumber();
+            bool selfCopy = CfSelfCopy != 0 && IsClipboardFormatAvailable(CfSelfCopy);
+            bool containsFiles = IsClipboardFormatAvailable(CfHDrop);
+            bool privacyBlocked =
+                (CfExcludeMonitor != 0 && IsClipboardFormatAvailable(CfExcludeMonitor)) ||
+                (CfViewerIgnore != 0 && IsClipboardFormatAvailable(CfViewerIgnore));
+
+            if (!privacyBlocked && CfCanInclude != 0 && IsClipboardFormatAvailable(CfCanInclude))
+            {
+                if (IsZeroDwordGlobal(GetClipboardData(CfCanInclude)))
+                {
+                    privacyBlocked = true;
+                }
+            }
+
+            if (selfCopy || containsFiles || privacyBlocked)
+            {
+                snapshot = new ClipboardSnapshot(seq, selfCopy, containsFiles, privacyBlocked, null, null);
+                return true;
+            }
+
+            string? text = IsClipboardFormatAvailable(CfUnicodeText)
+                ? ReadUnicodeFromGlobal(GetClipboardData(CfUnicodeText))
+                : null;
+            byte[]? rtfBytes = CfRtf != 0 && IsClipboardFormatAvailable(CfRtf)
+                ? ReadRtfFromGlobal(GetClipboardData(CfRtf))
+                : null;
+
+            snapshot = new ClipboardSnapshot(seq, false, false, false, text, rtfBytes);
+            return true;
+        }
+        finally
+        {
+            CloseClipboard();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        var dispatcher = _listenerDispatcher;
+        if (dispatcher is not null && !dispatcher.HasShutdownStarted)
+        {
+            dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
+        }
+        if (Thread.CurrentThread != _listenerThread)
+        {
+            _listenerThread.Join(1000);
+        }
+        _ready.Dispose();
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterClipboardFormat(string lpszFormat);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool AddClipboardFormatListener(IntPtr hwnd);
@@ -321,6 +559,27 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool CloseClipboard();
+
+    [DllImport("user32.dll")]
+    private static extern bool IsClipboardFormatAvailable(uint format);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetClipboardData(uint uFormat);
+
     [DllImport("user32.dll")]
     private static extern uint GetClipboardSequenceNumber();
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GlobalUnlock(IntPtr hMem);
+
+    [DllImport("kernel32.dll")]
+    private static extern nuint GlobalSize(IntPtr hMem);
 }
