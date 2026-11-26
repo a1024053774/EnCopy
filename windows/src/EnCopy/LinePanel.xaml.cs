@@ -189,6 +189,7 @@ public partial class LinePanel : Window
     private DisplayMonitor _activeMonitor;
     private Note? _hoveredCard;
     private bool _isDismissing;
+    private bool _isTucking;
     private bool _isPinnedBySummon;
     private bool _showBasketHandle = true;
     private bool _isDraggingOut;
@@ -200,10 +201,25 @@ public partial class LinePanel : Window
     private bool _scrollBasketToPicked = true;
     private Border? _pickedBasketRowBorder;
 
-    public bool IsSummoned => IsVisible;
-    public bool IsPinnedBySummon => IsVisible && _isPinnedBySummon;
+    public bool IsSummoned => IsVisible && !_isTucking;
+    public MotionEngine MotionForTest => _motion;
+    public bool IsPinnedBySummon => IsSummoned && _isPinnedBySummon;
+    public bool IsPeeking => IsSummoned && _peekTimer.IsEnabled;
     public bool IsInteractionHoldActive => _isDraggingOut || _openContextMenus > 0 || (_shareService?.IsOpen ?? false);
     public DisplayMonitor ActiveMonitor => _activeMonitor;
+
+    public double PanelContentBottomDip
+    {
+        get
+        {
+            if (SearchShell.Visibility != Visibility.Visible)
+            {
+                return Top + ScreenPlacement.LineBandHeight;
+            }
+            var pt = SearchShell.TranslatePoint(new Point(0, SearchShell.ActualHeight), this);
+            return Top + Math.Max(ScreenPlacement.LineBandHeight, pt.Y);
+        }
+    }
 
     public int PanelBottomPhysicalY
     {
@@ -309,12 +325,12 @@ public partial class LinePanel : Window
         _hoverZoomPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
         _hoverZoomPollTimer.Tick += (_, _) =>
         {
-            if (!IsVisible || (_getZoomOnHover is not null && !_getZoomOnHover()) || IsInteractionHoldActive || _line.BasketOpen)
+            if (!IsSummoned || (_getZoomOnHover is not null && !_getZoomOnHover()) || IsInteractionHoldActive || _line.BasketOpen)
             {
                 _zoomController.Hide();
                 return;
             }
-            _zoomController.Update(_hoveredCard, _activeMonitor, ThemePalette.IsDarkMode(), _line.Theme);
+            _zoomController.Update(_hoveredCard, _activeMonitor, ThemePalette.IsDarkMode(), _line.Theme, PanelContentBottomDip);
         };
 
         _line.PropertyChanged += (_, e) =>
@@ -387,7 +403,7 @@ public partial class LinePanel : Window
 
     public void SummonOrToggle()
     {
-        if (IsVisible && _isPinnedBySummon)
+        if (IsSummoned && _isPinnedBySummon)
         {
             Dismiss(restoreForeground: true);
             return;
@@ -397,7 +413,7 @@ public partial class LinePanel : Window
 
     public void SummonOrToggleFromTray()
     {
-        if (IsVisible && _isPinnedBySummon)
+        if (IsSummoned && _isPinnedBySummon)
         {
             Dismiss(restoreForeground: true);
             return;
@@ -411,6 +427,8 @@ public partial class LinePanel : Window
 
     public void Summon()
     {
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
         _peekTimer.Stop();
         RecordPreviousForeground();
 
@@ -431,7 +449,9 @@ public partial class LinePanel : Window
 
     public void RevealByHover()
     {
-        if (IsVisible) return;
+        if (IsSummoned) return;
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
         _peekTimer.Stop();
         RecordPreviousForeground();
 
@@ -448,10 +468,20 @@ public partial class LinePanel : Window
         _onVisibilityChanged();
     }
 
+    public void PromotePeekToHover()
+    {
+        if (!IsPeeking) return;
+        _peekTimer.Stop();
+        _showBasketHandle = true;
+        RenderAll();
+    }
+
     public void PeekNewItem(double durationSeconds, string? newFilePath = null)
     {
-        if (!IsVisible)
+        if (!IsSummoned)
         {
+            _isTucking = false;
+            _motion.CancelLinearWithoutCallback();
             RecordPreviousForeground();
             _isPinnedBySummon = false;
             _showBasketHandle = false;
@@ -481,7 +511,7 @@ public partial class LinePanel : Window
 
     public void Dismiss(bool restoreForeground, IntPtr? targetOverride = null, bool animateTuck = false)
     {
-        if (!IsVisible || _isDismissing) return;
+        if (!IsSummoned || _isDismissing) return;
         _isDismissing = true;
         try
         {
@@ -511,8 +541,12 @@ public partial class LinePanel : Window
             _isPinnedBySummon = false;
             if (animateTuck && !IsInChecksRunner())
             {
+                _isTucking = true;
+                _onVisibilityChanged();
                 _motion.BeginTuck(CollapsedPanelHeight, () =>
                 {
+                    if (!_isTucking) return;
+                    _isTucking = false;
                     Hide();
                     _motion.SnapAllToRest();
                     ApplyMotionFrame();
@@ -521,6 +555,7 @@ public partial class LinePanel : Window
             }
             else
             {
+                _isTucking = false;
                 _motion.SnapAllToRest();
                 ApplyMotionFrame();
                 Hide();
@@ -561,6 +596,10 @@ public partial class LinePanel : Window
 
     private void PromoteToInteractiveSummon()
     {
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
+        PanelSlideTransform.Y = 0.0;
+        RootGrid.Opacity = 1.0;
         _peekTimer.Stop();
         RecordPreviousForeground();
         _isPinnedBySummon = true;
@@ -568,6 +607,7 @@ public partial class LinePanel : Window
         SetNoActivateStyle(noActivate: false);
         Activate();
         QueryBox.Focus();
+        StartActiveTimers();
         RenderAll();
         _onVisibilityChanged();
     }
@@ -630,10 +670,8 @@ public partial class LinePanel : Window
     {
         PanelSlideTransform.Y = _motion.PanelSlideY;
         RootGrid.Opacity = _motion.PanelOpacity;
-        if (IsVisible && _motion.IsActive)
-        {
-            BuildRopeCanvasOnly();
-        }
+        double stripWidth = Width > 100 ? Width : 1280;
+        PaperCardView.ApplyMotionTransforms(LineCanvas, stripWidth, _motion);
     }
 
     private void BuildRopeCanvasOnly(double? overrideCanvasWidth = null)
@@ -757,7 +795,7 @@ public partial class LinePanel : Window
         }
         data.SetData(ClipboardWatcher.SelfCopyFormat, new byte[] { 1 });
 
-        bool allMovablePrivate = group.All(n => !n.Pinned && DataFolder.Contains(n.FilePath) && n.FileTargets.Count == 0);
+        bool allMovablePrivate = group.All(n => !n.Pinned && DataFolder.IsMovablePrivateItem(n.FilePath));
         var allowed = allMovablePrivate
             ? (DragDropEffects.Copy | DragDropEffects.Move)
             : DragDropEffects.Copy;
@@ -766,16 +804,17 @@ public partial class LinePanel : Window
         try
         {
             var result = DragDrop.DoDragDrop(cardVisual, data, allowed);
-            if ((result & DragDropEffects.Move) != 0)
-            {
-                _line.PruneMissingFromLine();
-            }
-            else if (result != DragDropEffects.None)
+            // Windows Explorer 同卷优化移动可能自行移走文件并返回 DragDropEffects.None，统一检查文件是否仍在原处
+            _line.PruneMissingFromLine();
+            if (result != DragDropEffects.None && (result & DragDropEffects.Move) == 0)
             {
                 var stamp = DateTime.UtcNow;
                 for (int i = group.Count - 1; i >= 0; i--)
                 {
-                    _line.Use(group[i].FilePath, stamp.AddMilliseconds(group.Count - 1 - i));
+                    if (File.Exists(group[i].FilePath) || Directory.Exists(group[i].FilePath))
+                    {
+                        _line.Use(group[i].FilePath, stamp.AddMilliseconds(group.Count - 1 - i));
+                    }
                 }
             }
         }
@@ -905,12 +944,15 @@ public partial class LinePanel : Window
 
         if (!multi && !note.Pinned)
         {
-            AddMenuItem(menu, Localization.L("Move to Recycle Bin"), () =>
+            if (DataFolder.IsMovablePrivateItem(note.FilePath))
             {
-                var rect = GetVisualScreenDip(cardVisual);
-                FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
-                _line.TakeDownNotes([note], sendToRecycleBin: true);
-            });
+                AddMenuItem(menu, Localization.L("Move to Recycle Bin"), () =>
+                {
+                    var rect = GetVisualScreenDip(cardVisual);
+                    FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
+                    _line.TakeDownNotes([note], sendToRecycleBin: true);
+                });
+            }
 
             var leftNeighbours = _line.Neighbours(note.FilePath, toTheLeft: true);
             AddMenuItem(menu, Localization.L("Take down everything to the left"),

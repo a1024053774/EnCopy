@@ -196,6 +196,11 @@ public partial class App : Application
         var mon = _panel.IsSummoned ? _panel.ActiveMonitor : ScreenPlacement.PickMonitor(cx, cy, monitors);
         bool mouseDown = ((GetAsyncKeyState(VkLButton) & 0x8000) != 0) || ((GetAsyncKeyState(VkRButton) & 0x8000) != 0);
 
+        if (_panel.IsPeeking && mon.Bounds.Contains(cx, cy) && cy <= _panel.PanelBottomPhysicalY)
+        {
+            _panel.PromotePeekToHover();
+        }
+
         var action = _hoverTracker.Update(
             cx,
             cy,
@@ -203,7 +208,7 @@ public partial class App : Application
             mouseDown,
             isRevealed: _panel.IsSummoned,
             isPinnedBySummon: _panel.IsPinnedBySummon,
-            keepOpenForMenuOrDrag: _panel.IsInteractionHoldActive,
+            keepOpenForMenuOrDrag: _panel.IsInteractionHoldActive || _panel.IsPeeking,
             panelBottomPhysicalY: _panel.PanelBottomPhysicalY,
             nowUtc: DateTime.UtcNow);
 

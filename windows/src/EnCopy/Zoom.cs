@@ -88,7 +88,24 @@ public sealed class HoverZoomController : IDisposable
 
     public HoverZoomState State { get; } = new();
 
-    public void Update(Note? hoveredNote, DisplayMonitor monitor, bool isDark, LineTheme theme, DateTime? nowUtc = null)
+    public static double ComputeZoomWindowTopDip(
+        double workTopDip,
+        double panelContentBottomDip,
+        double workHeightDip,
+        double zoomWindowHeightDip)
+    {
+        double desired = Math.Max(workTopDip + 228.0, panelContentBottomDip + 8.0);
+        double maxTop = Math.Max(workTopDip + 40.0, workTopDip + workHeightDip - zoomWindowHeightDip - 8.0);
+        return Math.Min(desired, maxTop);
+    }
+
+    public void Update(
+        Note? hoveredNote,
+        DisplayMonitor monitor,
+        bool isDark,
+        LineTheme theme,
+        double panelContentBottomDip = 0.0,
+        DateTime? nowUtc = null)
     {
         var now = nowUtc ?? DateTime.UtcNow;
         var activePath = State.Update(hoveredNote?.FilePath, now);
@@ -126,17 +143,18 @@ public sealed class HoverZoomController : IDisposable
         double workTop = monitor.WorkArea.Top / scale;
         double workWidth = monitor.WorkArea.Width / scale;
         double workHeight = monitor.WorkArea.Height / scale;
+        double effectiveBottom = panelContentBottomDip > workTop ? panelContentBottomDip : workTop + 280.0;
 
         double maxW = Math.Min(520.0, workWidth - 48.0);
-        double maxH = Math.Min(360.0, Math.Max(180.0, workHeight - 280.0));
+        double maxH = Math.Min(360.0, Math.Max(160.0, workTop + workHeight - effectiveBottom - 40.0));
         _cardFrame.Measure(new Size(maxW, maxH));
         double w = Math.Clamp(_cardFrame.DesiredSize.Width + 32.0, 280.0, maxW + 32.0);
-        double h = Math.Clamp(_cardFrame.DesiredSize.Height + 32.0, 180.0, maxH + 32.0);
+        double h = Math.Clamp(_cardFrame.DesiredSize.Height + 32.0, 160.0, maxH + 32.0);
 
         _window.Width = w;
         _window.Height = h;
         _window.Left = workLeft + (workWidth - w) / 2.0;
-        _window.Top = workTop + 236.0;
+        _window.Top = ComputeZoomWindowTopDip(workTop, effectiveBottom, workHeight, h);
         if (!_window.IsVisible)
         {
             _window.Show();

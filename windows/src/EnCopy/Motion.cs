@@ -357,10 +357,16 @@ public sealed class MotionEngine : IDisposable
         Advance(dtSeconds);
     }
 
-    public void SnapAllToRest()
+    public void CancelLinearWithoutCallback()
     {
         _linearActive = false;
-        var cb = _onLinearCompleted;
+        _onLinearCompleted = null;
+    }
+
+    public void SnapAllToRest(bool invokePendingCompletion = false)
+    {
+        _linearActive = false;
+        var cb = invokePendingCompletion ? _onLinearCompleted : null;
         _onLinearCompleted = null;
         _panelSlide.Snap(0.0);
         _ropeSag.Snap(1.0);

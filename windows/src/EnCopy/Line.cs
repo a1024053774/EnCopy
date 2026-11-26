@@ -103,12 +103,27 @@ public sealed class Line : INotifyPropertyChanged
 
     public void PruneMissingFromLine()
     {
-        int removed = _lineItems.RemoveAll(n => !File.Exists(n.FilePath) && !Directory.Exists(n.FilePath));
-        if (removed > 0)
+        var missing = _lineItems.Where(n => !File.Exists(n.FilePath) && !Directory.Exists(n.FilePath)).ToList();
+        if (missing.Count == 0) return;
+
+        bool heldChanged = false;
+        foreach (var item in missing)
         {
-            SaveLineState();
-            RefreshCurrentView();
+            var full = Path.GetFullPath(item.FilePath);
+            if (_heldPaths.Remove(full)) heldChanged = true;
+            if (DataFolder.Contains(item.FilePath))
+            {
+                History.Remove(item.FilePath);
+            }
+            _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
         }
+
+        if (heldChanged)
+        {
+            OnPropertyChanged(nameof(HeldPaths));
+        }
+        SaveLineState();
+        RefreshCurrentView();
     }
 
     public IReadOnlyList<string> SaveToDesktop(IReadOnlyList<Note> notes, string? desktopFolderOverride = null)
@@ -642,9 +657,9 @@ public sealed class Line : INotifyPropertyChanged
 
         var prepared = new List<UndoEntry>(targets.Count);
         var stepId = Guid.NewGuid().ToString("N");
-        var movedToStash = new List<(string Original, string Stashed, bool CopiedOnly)>();
+        var movedToStash = new List<(string Original, string Stashed)>();
 
-        // 两阶段提交：先将全部私有文件移入暂存区，若中途发生 IOException 则原样退回，绝不损毁 History 或绳子状态
+        // 两阶段提交：私有项常规取下移入 DiscardedFolder；移入系统回收站走 IFileOperation(FOF_ALLOWUNDO) 直接记 $Recycle.Bin 路径不留副本
         try
         {
             foreach (var note in targets)
@@ -657,37 +672,37 @@ public sealed class Line : INotifyPropertyChanged
                 bool wasPinned = liveIdx >= 0 && _lineItems[liveIdx].Pinned;
 
                 string? stashed = null;
+                bool inSystemRecycleBin = false;
                 bool isPrivate = DataFolder.Contains(note.FilePath);
-                if (File.Exists(note.FilePath) && (isPrivate || sendToRecycleBin))
+                bool canRecycle = sendToRecycleBin && !wasPinned && DataFolder.IsMovablePrivateItem(note.FilePath);
+
+                if (File.Exists(note.FilePath) && canRecycle)
+                {
+                    if (RecycleBinInterop.MoveFileToRecycleBin(note.FilePath, out var recycledPath))
+                    {
+                        stashed = recycledPath;
+                        inSystemRecycleBin = true;
+                        if (recycledPath is not null)
+                        {
+                            movedToStash.Add((note.FilePath, recycledPath));
+                        }
+                    }
+                    else if (isPrivate)
+                    {
+                        Directory.CreateDirectory(DataFolder.DiscardedFolder);
+                        var dest = Path.Combine(DataFolder.DiscardedFolder, $"{stepId}_{Path.GetFileName(note.FilePath)}");
+                        File.Move(note.FilePath, dest, overwrite: true);
+                        movedToStash.Add((note.FilePath, dest));
+                        stashed = dest;
+                    }
+                }
+                else if (File.Exists(note.FilePath) && isPrivate)
                 {
                     Directory.CreateDirectory(DataFolder.DiscardedFolder);
                     var dest = Path.Combine(DataFolder.DiscardedFolder, $"{stepId}_{Path.GetFileName(note.FilePath)}");
-                    if (sendToRecycleBin)
-                    {
-                        File.Copy(note.FilePath, dest, overwrite: true);
-                        if (RecycleBinInterop.MoveFileToRecycleBin(note.FilePath))
-                        {
-                            movedToStash.Add((note.FilePath, dest, CopiedOnly: true));
-                            stashed = dest;
-                        }
-                        else if (isPrivate)
-                        {
-                            File.Delete(dest);
-                            File.Move(note.FilePath, dest, overwrite: true);
-                            movedToStash.Add((note.FilePath, dest, CopiedOnly: false));
-                            stashed = dest;
-                        }
-                        else
-                        {
-                            File.Delete(dest);
-                        }
-                    }
-                    else
-                    {
-                        File.Move(note.FilePath, dest, overwrite: true);
-                        movedToStash.Add((note.FilePath, dest, CopiedOnly: false));
-                        stashed = dest;
-                    }
+                    File.Move(note.FilePath, dest, overwrite: true);
+                    movedToStash.Add((note.FilePath, dest));
+                    stashed = dest;
                 }
 
                 prepared.Add(new UndoEntry(
@@ -699,35 +714,37 @@ public sealed class Line : INotifyPropertyChanged
                     WasOnLine: wasOnLine,
                     WasPinned: wasPinned,
                     OldScreenIndex: wasOnLine ? preIndex : 0,
-                    IsPinChange: false));
+                    IsPinChange: false,
+                    InSystemRecycleBin: inSystemRecycleBin));
             }
         }
         catch (IOException)
         {
-            foreach (var (orig, stash, copiedOnly) in movedToStash)
+            foreach (var (orig, stash) in movedToStash)
             {
                 if (File.Exists(stash) && !File.Exists(orig))
                 {
                     try { File.Move(stash, orig, overwrite: false); } catch { }
-                }
-                else if (copiedOnly && File.Exists(stash))
-                {
-                    try { File.Delete(stash); } catch { }
                 }
             }
             return false;
         }
 
         if (prepared.Count == 0) return false;
+        bool heldChanged = false;
         foreach (var entry in prepared)
         {
             var full = Path.GetFullPath(entry.OriginalPath);
-            _heldPaths.Remove(full);
+            if (_heldPaths.Remove(full)) heldChanged = true;
             History.Remove(entry.OriginalPath);
             if (entry.WasOnLine)
             {
                 _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
             }
+        }
+        if (heldChanged)
+        {
+            OnPropertyChanged(nameof(HeldPaths));
         }
 
         PushUndoStep(prepared);
@@ -1199,7 +1216,7 @@ public sealed class Line : INotifyPropertyChanged
             _undoSteps.RemoveAt(0);
             foreach (var e in dropped.Entries)
             {
-                if (e.StashedPath is not null && File.Exists(e.StashedPath))
+                if (!e.InSystemRecycleBin && e.StashedPath is not null && File.Exists(e.StashedPath))
                 {
                     try { File.Delete(e.StashedPath); } catch { }
                 }
@@ -1374,43 +1391,181 @@ public sealed class Line : INotifyPropertyChanged
         bool WasPinned,
         int OldScreenIndex,
         bool IsPinChange,
-        IReadOnlyList<string>? DisplacedLoosePaths = null);
+        IReadOnlyList<string>? DisplacedLoosePaths = null,
+        bool InSystemRecycleBin = false);
 }
 
-internal static class RecycleBinInterop
+/// <summary>
+/// 通过 COM IFileOperation + FOF_ALLOWUNDO 将私有文件移入系统回收站，
+/// 并由 IFileOperationProgressSink.PostDeleteItem 精确捕获 $Recycle.Bin 落地路径供 Ctrl+Z 还原（不留重复副本）。
+/// </summary>
+public static class RecycleBinInterop
 {
-    private const uint FoDelete = 0x0003;
-    private const ushort FofAllowUndo = 0x0040;
-    private const ushort FofNoConfirmation = 0x0010;
-    private const ushort FofSilent = 0x0004;
-    private const ushort FofNoErrorUi = 0x0400;
+    private const uint FofSilent = 0x0004;
+    private const uint FofNoConfirmation = 0x0010;
+    private const uint FofAllowUndo = 0x0040;
+    private const uint FofNoErrorUi = 0x0400;
+    private const uint FofxAddUndoRecord = 0x20000000;
+    private const uint TsfDeleteRecycleIfPossible = 0x0080;
+    private const uint SigdnFileSysPath = 0x80058000;
+    private const int EAbort = unchecked((int)0x80004004);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct SHFILEOPSTRUCT
+    private static readonly Guid ClsidFileOperation = new("3ad05575-8857-4850-9277-11b85bdb8e09");
+    private static readonly Guid IidShellItem = new("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+
+    [ComImport]
+    [Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItem
     {
-        public IntPtr hwnd;
-        public uint wFunc;
-        public string pFrom;
-        public string? pTo;
-        public ushort fFlags;
-        [MarshalAs(UnmanagedType.Bool)]
-        public bool fAnyOperationsAborted;
-        public IntPtr hNameMappings;
-        public string? lpszProgressTitle;
+        void BindToHandler(IntPtr pbc, [In] ref Guid bhid, [In] ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
     }
 
-    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern int SHFileOperation(ref SHFILEOPSTRUCT lpFileOp);
-
-    public static bool MoveFileToRecycleBin(string path)
+    [ComImport]
+    [Guid("04b0f1a7-9490-44bc-96e1-4296a31252e2")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFileOperationProgressSink
     {
-        if (!File.Exists(path)) return false;
-        var op = new SHFILEOPSTRUCT
+        [PreserveSig] int StartOperations();
+        [PreserveSig] int FinishOperations(int hrResult);
+        [PreserveSig] int PreRenameItem(uint dwFlags, IShellItem? psiItem, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostRenameItem(uint dwFlags, IShellItem? psiItem, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrRename, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrMove, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrCopy, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreDeleteItem(uint dwFlags, IShellItem? psiItem);
+        [PreserveSig] int PostDeleteItem(uint dwFlags, IShellItem? psiItem, int hrDelete, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreNewItem(uint dwFlags, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostNewItem(uint dwFlags, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, [MarshalAs(UnmanagedType.LPWStr)] string? pszTemplateName, uint dwFileAttributes, int hrNew, IShellItem? psiNewlyCreated);
+        [PreserveSig] int UpdateProgress(uint iWorkTotal, uint iWorkSoFar);
+        [PreserveSig] int ResetTimer();
+        [PreserveSig] int PauseTimer();
+        [PreserveSig] int ResumeTimer();
+    }
+
+    [ComImport]
+    [Guid("947aab5f-0a5c-4c13-b4d6-4bf7836fc9f8")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFileOperation
+    {
+        void Advise([MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink pfops, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOperationFlags(uint dwOperationFlags);
+        void SetProgressMessage([MarshalAs(UnmanagedType.LPWStr)] string pszMessage);
+        void SetProgressDialog([MarshalAs(UnmanagedType.Interface)] object popd);
+        void SetProperties([MarshalAs(UnmanagedType.Interface)] object pproparray);
+        void SetOwnerWindow(IntPtr hwndOwner);
+        void ApplyPropertiesToItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem);
+        void ApplyPropertiesToItems([MarshalAs(UnmanagedType.Interface)] object punkItems);
+        void RenameItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.LPWStr)] string pszNewName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void RenameItems([MarshalAs(UnmanagedType.Interface)] object pUnkItems, [MarshalAs(UnmanagedType.LPWStr)] string pszNewName);
+        void MoveItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void MoveItems([MarshalAs(UnmanagedType.Interface)] object punkItems, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder);
+        void CopyItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszCopyName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void CopyItems([MarshalAs(UnmanagedType.Interface)] object punkItems, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder);
+        void DeleteItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void DeleteItems([MarshalAs(UnmanagedType.Interface)] object punkItems);
+        void NewItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, uint dwFileAttributes, [MarshalAs(UnmanagedType.LPWStr)] string pszName, [MarshalAs(UnmanagedType.LPWStr)] string? pszTemplateName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void PerformOperations();
+        [return: MarshalAs(UnmanagedType.Bool)] bool GetAnyOperationsAborted();
+    }
+
+    private sealed class RecycleProgressSink : IFileOperationProgressSink
+    {
+        public string? RecycledPath { get; private set; }
+
+        public int StartOperations() => 0;
+        public int FinishOperations(int hrResult) => 0;
+        public int PreRenameItem(uint dwFlags, IShellItem? psiItem, string? pszNewName) => 0;
+        public int PostRenameItem(uint dwFlags, IShellItem? psiItem, string? pszNewName, int hrRename, IShellItem? psiNewlyCreated) => 0;
+        public int PreMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName, int hrMove, IShellItem? psiNewlyCreated) => 0;
+        public int PreCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName, int hrCopy, IShellItem? psiNewlyCreated) => 0;
+
+        public int PreDeleteItem(uint dwFlags, IShellItem? psiItem)
         {
-            wFunc = FoDelete,
-            pFrom = Path.GetFullPath(path) + "\0\0",
-            fFlags = FofAllowUndo | FofNoConfirmation | FofSilent | FofNoErrorUi
-        };
-        return SHFileOperation(ref op) == 0 && !op.fAnyOperationsAborted;
+            // 若目标卷禁用了回收站（即将永久删除而非进回收站），中止操作以退回 DiscardedFolder 保护文件
+            return (dwFlags & TsfDeleteRecycleIfPossible) != 0 ? 0 : EAbort;
+        }
+
+        public int PostDeleteItem(uint dwFlags, IShellItem? psiItem, int hrDelete, IShellItem? psiNewlyCreated)
+        {
+            if (hrDelete >= 0 && psiNewlyCreated is not null)
+            {
+                psiNewlyCreated.GetDisplayName(SigdnFileSysPath, out var path);
+                RecycledPath = path;
+            }
+            return 0;
+        }
+
+        public int PreNewItem(uint dwFlags, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostNewItem(uint dwFlags, IShellItem? psiDestinationFolder, string? pszNewName, string? pszTemplateName, uint dwFileAttributes, int hrNew, IShellItem? psiNewlyCreated) => 0;
+        public int UpdateProgress(uint iWorkTotal, uint iWorkSoFar) => 0;
+        public int ResetTimer() => 0;
+        public int PauseTimer() => 0;
+        public int ResumeTimer() => 0;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHCreateItemFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+        IntPtr pbc,
+        [In] ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
+
+    public static bool MoveFileToRecycleBin(string path, out string? recycledPath)
+    {
+        recycledPath = null;
+        if (!File.Exists(path)) return false;
+
+        var full = Path.GetFullPath(path);
+        Guid iid = IidShellItem;
+        if (SHCreateItemFromParsingName(full, IntPtr.Zero, ref iid, out var shellItem) < 0 || shellItem is null)
+        {
+            return false;
+        }
+
+        var opType = Type.GetTypeFromCLSID(ClsidFileOperation);
+        if (opType is null) return false;
+
+        object? rawOp = null;
+        try
+        {
+            rawOp = Activator.CreateInstance(opType);
+            if (rawOp is not IFileOperation fileOp) return false;
+
+            var sink = new RecycleProgressSink();
+            fileOp.SetOperationFlags(FofAllowUndo | FofNoConfirmation | FofSilent | FofNoErrorUi | FofxAddUndoRecord);
+            fileOp.DeleteItem(shellItem, sink);
+            fileOp.PerformOperations();
+            if (fileOp.GetAnyOperationsAborted() || File.Exists(full))
+            {
+                return false;
+            }
+
+            recycledPath = sink.RecycledPath;
+            return true;
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (rawOp is not null && Marshal.IsComObject(rawOp))
+            {
+                Marshal.ReleaseComObject(rawOp);
+            }
+            if (Marshal.IsComObject(shellItem))
+            {
+                Marshal.ReleaseComObject(shellItem);
+            }
+        }
     }
 }

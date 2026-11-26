@@ -93,6 +93,58 @@ public static class PaperCardView
     private static readonly FontFamily SansFont = new("Microsoft YaHei UI, Segoe UI");
     private static readonly Dictionary<string, BitmapImage?> ThumbCache = new(StringComparer.OrdinalIgnoreCase);
 
+    private sealed record CardMotionHandle(
+        string FilePath,
+        double BaseTilt,
+        double CenterX,
+        FrameworkElement Host,
+        RotateTransform Rotate,
+        TranslateTransform HopTranslate,
+        ScaleTransform PegScale);
+
+    private sealed record RopeMotionHandles(
+        QuadraticBezierSegment RopeCurve,
+        UIElement? EmptyHint,
+        UIElement? Knot,
+        double? KnotX,
+        System.Windows.Shapes.Line? BasketCord,
+        double BasketHandleX,
+        IReadOnlyList<CardMotionHandle> Cards);
+
+    public static void ApplyMotionTransforms(Canvas canvas, double canvasWidth, MotionEngine motion)
+    {
+        if (canvas.Tag is not RopeMotionHandles handles) return;
+        double sagScale = motion.RopeSagScale;
+        double top = ScreenPlacement.RopeTop;
+        handles.RopeCurve.Point1 = new Point(canvasWidth / 2.0, top + 2.0 * ScreenPlacement.RopeSag(canvasWidth) * sagScale);
+
+        if (handles.EmptyHint is not null)
+        {
+            Canvas.SetTop(handles.EmptyHint, ScreenPlacement.RopeY(canvasWidth / 2.0, canvasWidth, sagScale) + 28);
+        }
+
+        if (handles.Knot is not null && handles.KnotX is { } kx)
+        {
+            Canvas.SetTop(handles.Knot, ScreenPlacement.RopeY(kx, canvasWidth, sagScale) - 4);
+        }
+
+        if (handles.BasketCord is not null)
+        {
+            handles.BasketCord.Y1 = ScreenPlacement.RopeY(handles.BasketHandleX, canvasWidth, sagScale);
+        }
+
+        foreach (var card in handles.Cards)
+        {
+            double ropeY = ScreenPlacement.RopeY(card.CenterX, canvasWidth, sagScale);
+            Canvas.SetTop(card.Host, Math.Max(0.0, ropeY - 11.0));
+            card.Rotate.Angle = card.BaseTilt + motion.GetCardSway(card.FilePath);
+            card.HopTranslate.Y = motion.GetCardHop(card.FilePath);
+            double ps = motion.GetPegScale(card.FilePath);
+            card.PegScale.ScaleX = ps;
+            card.PegScale.ScaleY = ps;
+        }
+    }
+
     public static UIElement BuildRopeAndCards(
         Canvas canvas,
         double canvasWidth,
@@ -109,7 +161,14 @@ public static class PaperCardView
 
         var theme = line.Theme;
         double sagScale = motion?.RopeSagScale ?? 1.0;
-        DrawRope(canvas, canvasWidth, isDark, theme, sagScale);
+        var ropeCurve = DrawRope(canvas, canvasWidth, isDark, theme, sagScale);
+
+        UIElement? emptyHint = null;
+        UIElement? knotElement = null;
+        double? recordedKnotX = null;
+        System.Windows.Shapes.Line? basketCord = null;
+        double basketHandleX = canvasWidth - 96.0;
+        var cardHandles = new List<CardMotionHandle>();
 
         var shown = line.ShownItems;
         int count = shown.Count;
@@ -124,6 +183,7 @@ public static class PaperCardView
             Canvas.SetLeft(hint, (canvasWidth - hint.DesiredSize.Width) / 2.0);
             Canvas.SetTop(hint, ScreenPlacement.RopeY(canvasWidth / 2.0, canvasWidth, sagScale) + 28);
             canvas.Children.Add(hint);
+            emptyHint = hint;
         }
         else
         {
@@ -169,6 +229,8 @@ public static class PaperCardView
                 Canvas.SetTop(knot, ScreenPlacement.RopeY(kx, canvasWidth, sagScale) - 4);
                 Panel.SetZIndex(knot, 28);
                 canvas.Children.Add(knot);
+                knotElement = knot;
+                recordedKnotX = kx;
             }
 
             for (int i = 0; i < count; i++)
@@ -197,7 +259,7 @@ public static class PaperCardView
                 double hopOffset = motion?.GetCardHop(note.FilePath) ?? 0.0;
                 double pegScale = motion?.GetPegScale(note.FilePath) ?? 1.0;
 
-                var cardVisual = BuildPeggedCard(
+                var (cardVisual, rotateTx, hopTx, pegScaleTx) = BuildPeggedCard(
                     note,
                     theme,
                     isSelected,
@@ -211,22 +273,20 @@ public static class PaperCardView
                     pegScale,
                     callbacks);
 
-                if (cardVisual is FrameworkElement fe)
-                {
-                    fe.Tag = fullPath;
-                }
+                cardVisual.Tag = fullPath;
 
                 const double hostWidth = ScreenPlacement.CardWidth + 16;
                 Canvas.SetLeft(cardVisual, cx - hostWidth / 2.0);
                 Canvas.SetTop(cardVisual, Math.Max(0.0, ropeY - 11.0));
                 Panel.SetZIndex(cardVisual, i < pinnedInShown ? 25 : (isPicked ? 20 : 2));
                 canvas.Children.Add(cardVisual);
+                cardHandles.Add(new CardMotionHandle(note.FilePath, Line.TiltFor(note.FilePath), cx, cardVisual, rotateTx, hopTx, pegScaleTx));
             }
         }
 
         if (showBasketHandle && (line.BasketCount > 0 || line.BasketOpen))
         {
-            double hx = canvasWidth - 96.0;
+            double hx = basketHandleX;
             double topY = ScreenPlacement.RopeY(hx, canvasWidth, sagScale);
             double hy = ScreenPlacement.LineBandHeight - 36.0;
 
@@ -244,6 +304,7 @@ public static class PaperCardView
             };
             Canvas.SetZIndex(cord, 4);
             canvas.Children.Add(cord);
+            basketCord = cord;
 
             var handle = BuildBasketHandle(line.BasketCount, line.BasketOpen, isDark, theme, onBasketHandleClick);
             handle.Measure(new Size(200, 40));
@@ -253,6 +314,7 @@ public static class PaperCardView
             canvas.Children.Add(handle);
         }
 
+        canvas.Tag = new RopeMotionHandles(ropeCurve, emptyHint, knotElement, recordedKnotX, basketCord, basketHandleX, cardHandles);
         return canvas;
     }
 
@@ -466,7 +528,7 @@ public static class PaperCardView
         return container;
     }
 
-    private static UIElement BuildPeggedCard(
+    private static (FrameworkElement Host, RotateTransform Rotate, TranslateTransform Hop, ScaleTransform PegScale) BuildPeggedCard(
         Note note,
         LineTheme theme,
         bool isSelected,
@@ -483,6 +545,10 @@ public static class PaperCardView
         double tilt = Line.TiltFor(note.FilePath) + extraSway;
         double scale = isPicked ? 1.04 : 1.0;
 
+        var rotateTx = new RotateTransform(tilt);
+        var scaleTx = new ScaleTransform(scale, scale);
+        var hopTx = new TranslateTransform(0.0, hopOffset);
+
         var host = new Grid
         {
             Width = ScreenPlacement.CardWidth + 16,
@@ -492,9 +558,9 @@ public static class PaperCardView
             {
                 Children =
                 {
-                    new RotateTransform(tilt),
-                    new ScaleTransform(scale, scale),
-                    new TranslateTransform(0.0, hopOffset)
+                    rotateTx,
+                    scaleTx,
+                    hopTx
                 }
             }
         };
@@ -585,11 +651,9 @@ public static class PaperCardView
         var peg = BuildThemePeg(theme, note.Pinned);
         peg.HorizontalAlignment = HorizontalAlignment.Center;
         peg.VerticalAlignment = VerticalAlignment.Top;
-        if (Math.Abs(pegScale - 1.0) > 0.005)
-        {
-            peg.RenderTransformOrigin = new Point(0.5, 0.25);
-            peg.RenderTransform = new ScaleTransform(pegScale, pegScale);
-        }
+        var pegScaleTx = new ScaleTransform(pegScale, pegScale);
+        peg.RenderTransformOrigin = new Point(0.5, 0.25);
+        peg.RenderTransform = pegScaleTx;
         Panel.SetZIndex(peg, 8);
         host.Children.Add(peg);
 
@@ -708,7 +772,7 @@ public static class PaperCardView
             host.Children.Add(copiedPill);
         }
 
-        return host;
+        return (host, rotateTx, hopTx, pegScaleTx);
     }
 
     private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark)
@@ -1601,12 +1665,13 @@ public static class PaperCardView
         _ => ThemePalette.RopeMain(isDark)
     };
 
-    private static void DrawRope(Canvas canvas, double width, bool isDark, LineTheme theme, double sagScale)
+    private static QuadraticBezierSegment DrawRope(Canvas canvas, double width, bool isDark, LineTheme theme, double sagScale)
     {
         double top = ScreenPlacement.RopeTop;
         double controlY = top + 2.0 * ScreenPlacement.RopeSag(width) * sagScale;
         var figure = new PathFigure { StartPoint = new Point(-20, top), IsClosed = false };
-        figure.Segments.Add(new QuadraticBezierSegment(new Point(width / 2.0, controlY), new Point(width + 20, top), true));
+        var bezier = new QuadraticBezierSegment(new Point(width / 2.0, controlY), new Point(width + 20, top), true);
+        figure.Segments.Add(bezier);
         var geom = new PathGeometry([figure]);
 
         var maskBrush = new LinearGradientBrush(
@@ -1632,7 +1697,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
 
             case LineTheme.Skeuo:
                 canvas.Children.Add(new WpfPath
@@ -1661,7 +1726,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
 
             case LineTheme.Minimal:
                 canvas.Children.Add(new WpfPath
@@ -1672,7 +1737,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
 
             case LineTheme.Neon:
                 canvas.Children.Add(new WpfPath
@@ -1692,7 +1757,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
 
             case LineTheme.Washi:
                 canvas.Children.Add(new WpfPath
@@ -1712,7 +1777,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
 
             default:
                 canvas.Children.Add(new WpfPath
@@ -1741,7 +1806,7 @@ public static class PaperCardView
                     OpacityMask = maskBrush,
                     IsHitTestVisible = false
                 });
-                return;
+                return bezier;
         }
     }
 

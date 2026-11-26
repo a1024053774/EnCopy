@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -56,7 +57,7 @@ public static class HeldGeometry
 
 /// <summary>
 /// 「拿在手上」置顶半透明无边框浮窗（对齐 Mac Held.swift）：
-/// 绳上原夹子留虚影，浮窗可随意拖拽、边缘拉伸（笔记重排文字、图片保比例）、滚轮围绕鼠标缩放、按 Esc 或点左上角按钮飞回绳上。
+/// 图片仅解码一次并传入浮窗；当卡片从绳上被取下时同步关闭对应浮窗。
 /// </summary>
 public sealed class HeldWindowManager : IDisposable
 {
@@ -70,6 +71,8 @@ public sealed class HeldWindowManager : IDisposable
 
     private readonly Dictionary<string, HeldEntry> _open = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Line> _observedLines = [];
+    private bool _suppressSync;
 
     public bool HasOpenWindows => _open.Count > 0;
     public IReadOnlySet<string> HeldPaths => _heldPaths;
@@ -88,6 +91,8 @@ public sealed class HeldWindowManager : IDisposable
             return true;
         }
 
+        ObserveLine(line);
+
         var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
         var mon = ScreenPlacement.PickMonitor(cx, cy, ScreenPlacement.EnumerateMonitors());
         double dpi = mon.DpiScale > 0 ? mon.DpiScale : 1.0;
@@ -97,8 +102,9 @@ public sealed class HeldWindowManager : IDisposable
             mon.WorkArea.Width / dpi,
             mon.WorkArea.Height / dpi);
 
+        var decodedImage = TryDecodeImageOnce(note);
+        var natural = ComputeNaturalSize(decodedImage, workDip);
         double step = (_open.Count % 8) * 24.0;
-        var natural = ComputeNaturalSize(note, workDip);
         var startFrame = new Rect(
             workDip.Left + (workDip.Width - natural.Width) / 2.0 + step,
             workDip.Top + (workDip.Height - natural.Height) / 2.0 + step,
@@ -110,6 +116,7 @@ public sealed class HeldWindowManager : IDisposable
         {
             win = new HeldWindow(
                 note,
+                decodedImage,
                 line.Theme,
                 natural,
                 startFrame,
@@ -118,9 +125,17 @@ public sealed class HeldWindowManager : IDisposable
             win.Show();
         }
 
-        _heldPaths.Add(full);
-        line.SetHeld(full, true);
-        _open[full] = new HeldEntry(full, note, win, startFrame, line, onHangBack);
+        _suppressSync = true;
+        try
+        {
+            _heldPaths.Add(full);
+            line.SetHeld(full, true);
+            _open[full] = new HeldEntry(full, note, win, startFrame, line, onHangBack);
+        }
+        finally
+        {
+            _suppressSync = false;
+        }
         return true;
     }
 
@@ -132,24 +147,32 @@ public sealed class HeldWindowManager : IDisposable
             return null;
         }
 
-        _open.Remove(full);
-        _heldPaths.Remove(full);
-
-        Rect frame = entry.LastFrameDip;
-        BitmapSource? snap = null;
-        if (entry.Window is { } win)
+        _suppressSync = true;
+        try
         {
-            frame = new Rect(win.Left, win.Top, Math.Max(80, win.ActualWidth), Math.Max(80, win.ActualHeight));
-            if (win.Content is UIElement content)
-            {
-                snap = FlightOverlay.CaptureElement(content, (int)Math.Ceiling(frame.Width), (int)Math.Ceiling(frame.Height));
-            }
-            win.CloseInternal();
-        }
+            _open.Remove(full);
+            _heldPaths.Remove(full);
 
-        entry.Line.SetHeld(full, false);
-        entry.OnHangBack?.Invoke(full, frame, snap);
-        return frame;
+            Rect frame = entry.LastFrameDip;
+            BitmapSource? snap = null;
+            if (entry.Window is { } win)
+            {
+                frame = new Rect(win.Left, win.Top, Math.Max(80, win.ActualWidth), Math.Max(80, win.ActualHeight));
+                if (win.Content is UIElement content)
+                {
+                    snap = FlightOverlay.CaptureElement(content, (int)Math.Ceiling(frame.Width), (int)Math.Ceiling(frame.Height));
+                }
+                win.CloseInternal();
+            }
+
+            entry.Line.SetHeld(full, false);
+            entry.OnHangBack?.Invoke(full, frame, snap);
+            return frame;
+        }
+        finally
+        {
+            _suppressSync = false;
+        }
     }
 
     public void HangAllBack()
@@ -162,35 +185,85 @@ public sealed class HeldWindowManager : IDisposable
 
     public void Dispose()
     {
-        foreach (var (_, entry) in _open)
+        _suppressSync = true;
+        try
         {
-            entry.Window?.CloseInternal();
-            entry.Line.SetHeld(entry.FullPath, false);
+            foreach (var line in _observedLines)
+            {
+                line.PropertyChanged -= OnLinePropertyChanged;
+            }
+            _observedLines.Clear();
+            foreach (var (_, entry) in _open)
+            {
+                entry.Window?.CloseInternal();
+                entry.Line.SetHeld(entry.FullPath, false);
+            }
+            _open.Clear();
+            _heldPaths.Clear();
         }
-        _open.Clear();
-        _heldPaths.Clear();
+        finally
+        {
+            _suppressSync = false;
+        }
     }
 
-    private static Size ComputeNaturalSize(Note note, Rect workDip)
+    private void ObserveLine(Line line)
     {
-        if (note.Kind == ItemKind.Image && File.Exists(note.FilePath))
+        if (_observedLines.Add(line))
         {
-            try
+            line.PropertyChanged += OnLinePropertyChanged;
+        }
+    }
+
+    private void OnLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_suppressSync || sender is not Line line) return;
+        if (!string.Equals(e.PropertyName, nameof(Line.HeldPaths), StringComparison.Ordinal)) return;
+
+        var stale = _open.Where(kv => ReferenceEquals(kv.Value.Line, line) && !line.HeldPaths.Contains(kv.Key))
+                         .Select(kv => kv.Key)
+                         .ToList();
+        foreach (var key in stale)
+        {
+            if (_open.Remove(key, out var entry))
             {
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.UriSource = new Uri(note.FilePath, UriKind.Absolute);
-                bmp.EndInit();
-                double maxW = workDip.Width * 0.65;
-                double maxH = workDip.Height * 0.65;
-                double fit = Math.Min(1.0, Math.Min(maxW / Math.Max(1.0, bmp.Width), maxH / Math.Max(1.0, bmp.Height)));
-                return new Size(Math.Max(160.0, bmp.Width * fit + 16.0), Math.Max(120.0, bmp.Height * fit + 16.0));
+                _heldPaths.Remove(key);
+                entry.Window?.CloseInternal();
             }
-            catch
-            {
-                // 回退默认卡片尺寸
-            }
+        }
+    }
+
+    private static BitmapSource? TryDecodeImageOnce(Note note)
+    {
+        if (note.Kind != ItemKind.Image || !File.Exists(note.FilePath))
+        {
+            return null;
+        }
+        try
+        {
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.UriSource = new Uri(note.FilePath, UriKind.Absolute);
+            bmp.EndInit();
+            bmp.Freeze();
+            return bmp.PixelWidth > 0 && bmp.PixelHeight > 0 ? bmp : null;
+        }
+        catch
+        {
+            // 损坏或无法解码的图片降级按文件摘要展示，不崩主线程
+            return null;
+        }
+    }
+
+    private static Size ComputeNaturalSize(BitmapSource? decodedImage, Rect workDip)
+    {
+        if (decodedImage is not null)
+        {
+            double maxW = workDip.Width * 0.65;
+            double maxH = workDip.Height * 0.65;
+            double fit = Math.Min(1.0, Math.Min(maxW / Math.Max(1.0, decodedImage.Width), maxH / Math.Max(1.0, decodedImage.Height)));
+            return new Size(Math.Max(160.0, decodedImage.Width * fit + 16.0), Math.Max(120.0, decodedImage.Height * fit + 16.0));
         }
         return new Size(320.0, 230.0);
     }
@@ -198,7 +271,6 @@ public sealed class HeldWindowManager : IDisposable
 
 internal sealed class HeldWindow : Window
 {
-    private readonly Note _note;
     private readonly Size _naturalSize;
     private readonly bool _isTextNote;
     private readonly Action _onRequestHangBack;
@@ -210,15 +282,15 @@ internal sealed class HeldWindow : Window
 
     public HeldWindow(
         Note note,
+        BitmapSource? decodedImage,
         LineTheme theme,
         Size naturalSize,
         Rect startFrame,
         Action onRequestHangBack,
         Action onRequestCopy)
     {
-        _note = note;
         _naturalSize = naturalSize;
-        _isTextNote = note.Kind is ItemKind.Text or ItemKind.Code or ItemKind.Link;
+        _isTextNote = decodedImage is null;
         _onRequestHangBack = onRequestHangBack;
         _onRequestCopy = onRequestCopy;
 
@@ -250,23 +322,18 @@ internal sealed class HeldWindow : Window
         var glassFill = Color.FromArgb(0xF0, fill.R, fill.G, fill.B);
 
         var bodyHost = new Grid { Margin = new Thickness(8) };
-        if (!_isTextNote && note.Kind == ItemKind.Image && File.Exists(note.FilePath))
+        if (decodedImage is not null)
         {
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = new Uri(note.FilePath, UriKind.Absolute);
-            bmp.EndInit();
-            bmp.Freeze();
             bodyHost.Children.Add(new Image
             {
-                Source = bmp,
+                Source = decodedImage,
                 Stretch = Stretch.Uniform,
                 IsHitTestVisible = false
             });
         }
         else
         {
+            // 顶部留出 28px Margin 给外框拖拽区，避免 TextBox 吃掉顶部标题带拖拽点击
             _textEditor = new TextBox
             {
                 Text = note.FullText,
@@ -278,7 +345,8 @@ internal sealed class HeldWindow : Window
                 FontSize = 13.0,
                 TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Padding = new Thickness(8, 22, 8, 8)
+                Margin = new Thickness(0, 28, 0, 0),
+                Padding = new Thickness(8, 2, 8, 8)
             };
             bodyHost.Children.Add(_textEditor);
         }

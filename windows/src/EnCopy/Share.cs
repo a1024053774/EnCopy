@@ -12,7 +12,8 @@ public sealed record SharePayload(string Title, Uri? WebLink, string? PlainText,
 
 /// <summary>
 /// 调用 Windows 原生系统共享面板（IDataTransferManagerInterop）：
-/// 链接按 Uri 分享、文件/图片按 StorageItem 分享、纯文本按 Text 分享；共享期间保持绳子不收起。
+/// 链接按 Uri 分享、文件/图片按 StorageItem 分享、纯文本只传文本不带内部 .txt 文件；
+/// 先置位 IsOpen 再激活宿主锚点窗防止 LinePanel 提前失焦收起，且不在 DataRequested 填充瞬间过早关闭。
 /// </summary>
 public sealed class WindowsShareService : IDisposable
 {
@@ -29,13 +30,14 @@ public sealed class WindowsShareService : IDisposable
 
     private Window? _anchorWindow;
     private SharePayload? _activePayload;
+    private bool _dataRequestedDelivered;
     private readonly DispatcherTimer _safetyTimer;
 
     public bool IsOpen { get; private set; }
 
     public WindowsShareService()
     {
-        _safetyTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        _safetyTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(45) };
         _safetyTimer.Tick += (_, _) => Finish();
     }
 
@@ -64,20 +66,23 @@ public sealed class WindowsShareService : IDisposable
                 string.IsNullOrWhiteSpace(single.SummaryLine) ? AppIdentity.AppName : single.SummaryLine,
                 null,
                 single.FullText,
-                File.Exists(single.FilePath) ? [single.FilePath] : []);
+                []);
         }
 
         var allFiles = new List<string>();
         var texts = new List<string>();
         foreach (var n in notes)
         {
-            if (n.FileTargets.Count > 0)
+            if (n.Kind is ItemKind.Image or ItemKind.Video or ItemKind.File)
             {
-                allFiles.AddRange(n.FileTargets.Where(p => File.Exists(p) || Directory.Exists(p)));
-            }
-            else if (n.Kind is ItemKind.Image or ItemKind.Video && File.Exists(n.FilePath))
-            {
-                allFiles.Add(n.FilePath);
+                if (n.FileTargets.Count > 0)
+                {
+                    allFiles.AddRange(n.FileTargets.Where(p => File.Exists(p) || Directory.Exists(p)));
+                }
+                else if (File.Exists(n.FilePath))
+                {
+                    allFiles.Add(n.FilePath);
+                }
             }
             else
             {
@@ -95,9 +100,15 @@ public sealed class WindowsShareService : IDisposable
     {
         if (notes.Count == 0) return false;
         _activePayload = BuildPayload(notes);
+        _dataRequestedDelivered = false;
 
         EnsureAnchorWindow();
         if (_anchorWindow is null) return false;
+
+        // 必须在 Activate 抢夺焦点之前先打开 IsOpen 锁，防止 LinePanel.Deactivated 误判面板失焦收起
+        IsOpen = true;
+        _safetyTimer.Stop();
+        _safetyTimer.Start();
 
         _anchorWindow.Left = anchorDip.Left + anchorDip.Width / 2.0 - 2;
         _anchorWindow.Top = anchorDip.Top + anchorDip.Height / 2.0 - 2;
@@ -105,7 +116,11 @@ public sealed class WindowsShareService : IDisposable
         _anchorWindow.Activate();
 
         var hwnd = new WindowInteropHelper(_anchorWindow).Handle;
-        if (hwnd == IntPtr.Zero) return false;
+        if (hwnd == IntPtr.Zero)
+        {
+            Finish();
+            return false;
+        }
 
         try
         {
@@ -118,9 +133,6 @@ public sealed class WindowsShareService : IDisposable
             dtm.DataRequested -= OnDataRequested;
             dtm.DataRequested += OnDataRequested;
 
-            IsOpen = true;
-            _safetyTimer.Stop();
-            _safetyTimer.Start();
             interop.ShowShareUIForWindow(hwnd);
             return true;
         }
@@ -177,18 +189,23 @@ public sealed class WindowsShareService : IDisposable
                     args.Request.Data.SetStorageItems(items);
                 }
             }
+            _dataRequestedDelivered = true;
+        }
+        catch (Exception ex)
+        {
+            args.Request.FailWithDisplayText(ex.Message);
+            Finish();
         }
         finally
         {
             deferral.Complete();
-            _anchorWindow?.Dispatcher.BeginInvoke(DispatcherPriority.Background, Finish);
         }
     }
 
     private void EnsureAnchorWindow()
     {
         if (_anchorWindow is not null) return;
-        _anchorWindow = new Window
+        var win = new Window
         {
             WindowStyle = WindowStyle.None,
             AllowsTransparency = true,
@@ -198,11 +215,35 @@ public sealed class WindowsShareService : IDisposable
             ShowInTaskbar = false,
             Topmost = true
         };
+        win.Activated += (_, _) =>
+        {
+            // 系统共享浮层关闭后焦点退回锚点窗：此时安全收尾释放 IsOpen 锁
+            if (IsOpen && _dataRequestedDelivered)
+            {
+                Finish();
+            }
+        };
+        win.Deactivated += (_, _) =>
+        {
+            if (!IsOpen || !_dataRequestedDelivered) return;
+            var checkClose = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+            checkClose.Tick += (_, _) =>
+            {
+                checkClose.Stop();
+                if (IsOpen && _dataRequestedDelivered)
+                {
+                    Finish();
+                }
+            };
+            checkClose.Start();
+        };
+        _anchorWindow = win;
     }
 
     private void Finish()
     {
         _safetyTimer.Stop();
+        _dataRequestedDelivered = false;
         IsOpen = false;
         _anchorWindow?.Hide();
     }

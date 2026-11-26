@@ -1116,6 +1116,21 @@ public static class Program
                 panel.RenderOffscreen(1280, 680, darkOverride: theme == LineTheme.Neon);
             }
 
+            // 审查回归 1（P1）：动画帧推进期间不得销毁重建 LineCanvas 卡片实例，且原位变换切实更新
+            line.Theme = LineTheme.Paper;
+            line.CloseBasket();
+            panel.RenderOffscreen(1280, 344);
+            var canvas = (Canvas)root.FindName("LineCanvas")!;
+            var firstCardBefore = canvas.Children.OfType<FrameworkElement>().First(fe => fe.Tag is string);
+            panel.MotionForTest.TriggerHop(line.ShownItems[0].FilePath);
+            panel.MotionForTest.StepManual(1.0 / 120.0);
+            var firstCardAfter = canvas.Children.OfType<FrameworkElement>().First(fe => fe.Tag is string);
+            Check(ReferenceEquals(firstCardBefore, firstCardAfter),
+                "Advancing MotionEngine frames must preserve existing card FrameworkElement instances in LineCanvas");
+            var cardTx = (TransformGroup)firstCardAfter.RenderTransform;
+            var hopTx = cardTx.Children.OfType<TranslateTransform>().First();
+            Check(hopTx.Y < -1.0, $"In-place hop transform updates card Y without rebuilding visual tree (hopY={hopTx.Y:F2})");
+
             for (int i = 0; i < renderedBuffers.Count; i++)
             {
                 for (int j = i + 1; j < renderedBuffers.Count; j++)
@@ -1171,6 +1186,13 @@ public static class Program
         Check(tracker.Update(960, 500, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(2).AddMilliseconds(480)) == HoverAction.Retract,
             "Leaving panel >= 450ms retracts hover-revealed panel");
 
+        // 审查回归 2（P1）：双屏下指针横向移到副屏顶部（x=-500, y=100）也必须触发主屏悬停面板延时收起
+        tracker.Reset();
+        Check(tracker.Update(-500, 100, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(3)) == HoverAction.None,
+            "Moving horizontally off monitor starts retract timer");
+        Check(tracker.Update(-500, 100, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(3).AddMilliseconds(480)) == HoverAction.Retract,
+            "Cursor on adjacent monitor retracts hover-revealed panel after grace");
+
         // 全屏检测与 Alt+C 覆盖
         Check(FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 0, 1920, 1080), "Chrome_WidgetWin_1", primary),
             "Borderless fullscreen app window detected");
@@ -1178,6 +1200,8 @@ public static class Program
             "Desktop Progman window ignored by fullscreen check");
         Check(!FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 30, 1920, 1040), "Notepad", primary),
             "Maximized work-area window is not fullscreen");
+        Check(!FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 0, 1920, 1080), "Notepad", primary, isTitledMaximized: true),
+            "Titled maximized window with auto-hidden taskbar is not misclassified as fullscreen");
         Check(FullScreenDetector.IsNotificationStateFullScreen(3) && FullScreenDetector.IsNotificationStateFullScreen(4) && !FullScreenDetector.IsNotificationStateFullScreen(5),
             "QUNS fullscreen states 3 and 4 recognized");
         Check(FullScreenDetector.ShouldSuppressAutoReveal(isMonitorFullScreen: true, showOverFullScreen: false, openedOnPurpose: false),
@@ -1248,6 +1272,45 @@ public static class Program
         Check(line.HeldPaths.Contains(Path.GetFullPath(holdTarget.FilePath)), "Line tracks held card path");
         var backRect = heldMgr.HangBack(holdTarget.FilePath);
         Check(backRect is not null && !line.HeldPaths.Contains(Path.GetFullPath(holdTarget.FilePath)), "HangBack clears held state and returns departure frame");
+
+        // 审查回归 5（P2）：被 Hold 的卡片若通过 TakeDownNotes 取下，必须同步关闭 HeldWindowManager 中的残留项
+        Check(heldMgr.Hold(holdTarget, line, _ => true, showWindow: false) && heldMgr.HasOpenWindows, "Hold re-opens target");
+        Check(line.TakeDownNotes([holdTarget]), "TakeDownNotes removes held card");
+        Check(!heldMgr.HasOpenWindows, "Taking down a held card closes its HeldWindowManager entry");
+        Check(line.PutBack(), "Restore card after held take-down test");
+
+        // 审查回归 3（P1）：单条纯文本共享只传文本，不附带内部 .txt 临时路径
+        var textSharePayload = WindowsShareService.BuildPayload([line.ShownItems[1]]);
+        Check(textSharePayload.PlainText == line.ShownItems[1].FullText && textSharePayload.FilePaths.Count == 0,
+            $"Single text note share must omit internal .txt file path (count={textSharePayload.FilePaths.Count})");
+
+        // 审查回归 6（P3）：悬停放大窗顶部必须位于搜索框底边之下，绝不遮挡 SearchShell
+        double zoomTop = HoverZoomController.ComputeZoomWindowTopDip(workTopDip: 30, panelContentBottomDip: 298, workHeightDip: 1010, zoomWindowHeightDip: 260);
+        Check(zoomTop >= 306, $"HoverZoomController top ({zoomTop}) must sit below SearchShell bottom (298)");
+
+        // 审查回归 4（P1）：私有图片可移动/入回收站，而 .files/.filelist 清单与外部文件不可入回收站；IFileOperation 记真实回收站路径
+        var privImg = Path.Combine(DataFolder.Root, "Clipboard movable.png");
+        WriteSamplePng(privImg, 80, 60);
+        var manifestFake = Path.Combine(DataFolder.FilesFolder, "Copied 1.filelist");
+        Directory.CreateDirectory(DataFolder.FilesFolder);
+        File.WriteAllText(manifestFake, privImg, new UTF8Encoding(false));
+        Check(DataFolder.IsMovablePrivateItem(privImg), "Private copied image is movable/trashable");
+        Check(!DataFolder.IsMovablePrivateItem(manifestFake), "Internal filelist manifest is never trashable");
+        Check(!DataFolder.IsMovablePrivateItem(Path.Combine(Path.GetTempPath(), "outside-encopy.txt")), "External file outside DataFolder is never trashable");
+
+        history.Record(privImg, "Clipboard movable", DateTime.UtcNow);
+        line.AddNew(privImg);
+        var imgNote = line.ShownItems.First(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase));
+        Check(line.TakeDownNotes([imgNote], sendToRecycleBin: true), "TakeDownNotes sends private image to Recycle Bin or stash");
+        Check(!File.Exists(privImg), "Original private image moved out of DataFolder");
+        Check(line.PutBack() && File.Exists(privImg), "Ctrl+Z PutBack restores recycled image back to DataFolder");
+
+        // 审查回归 5b（P2）：损坏图片执行 Hold 不抛异常
+        var corruptImg = Path.Combine(DataFolder.Root, "Corrupt.png");
+        File.WriteAllBytes(corruptImg, [0x00, 0x01, 0x02, 0x03]);
+        var corruptNote = Note.Load(corruptImg, "Corrupt.png", DateTime.Now)!;
+        Check(heldMgr.Hold(corruptNote, line, _ => true, showWindow: false), "Corrupt image Hold degrades safely without throwing");
+        heldMgr.HangBack(corruptImg);
 
         var linkNote = Note.Parse(Path.Combine(notesDir, "Link s.txt"), "Notes/Link s.txt", "https://example.com/docs", DateTime.Now);
         var sharePayload = WindowsShareService.BuildPayload([linkNote]);

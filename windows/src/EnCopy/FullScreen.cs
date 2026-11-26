@@ -12,11 +12,15 @@ public enum HoverAction
 
 /// <summary>
 /// 全屏应用避让检测（T-060）：
-/// 同时覆盖 SHQueryUserNotificationState（D3D 独占全屏 / 演示模式）与显示器级无边框全屏窗口（浏览器 F11、全屏视频等）。
-/// 默认避让全屏应用；显式按 Alt+C（openedOnPurpose）或开启「在全屏应用上也显示」时放行。
+/// 同时覆盖 SHQueryUserNotificationState（D3D 独占全屏 / 演示模式）与显示器级无边框全屏窗口（浏览器 F11、全屏视频等）；
+/// 带标题栏的常规最大化窗口（即使任务栏自动隐藏）不视为沉浸式全屏。
 /// </summary>
 public static class FullScreenDetector
 {
+    private const int GwlStyle = -16;
+    private const int WsCaption = 0x00C00000;
+    private const int WsMaximize = 0x01000000;
+
     private static readonly HashSet<string> ShellWindowClasses = new(StringComparer.OrdinalIgnoreCase)
     {
         "Progman",
@@ -26,8 +30,16 @@ public static class FullScreenDetector
         "NotifyIconOverflowWindow"
     };
 
-    public static bool IsWindowCoveringMonitor(PixelRect windowRect, string? windowClass, DisplayMonitor monitor)
+    public static bool IsWindowCoveringMonitor(
+        PixelRect windowRect,
+        string? windowClass,
+        DisplayMonitor monitor,
+        bool isTitledMaximized = false)
     {
+        if (isTitledMaximized)
+        {
+            return false;
+        }
         if (!string.IsNullOrWhiteSpace(windowClass) && ShellWindowClasses.Contains(windowClass.Trim()))
         {
             return false;
@@ -76,10 +88,14 @@ public static class FullScreenDetector
             return false;
         }
 
+        int style = GetWindowLong(fg, GwlStyle);
+        bool isTitledMaximized = (style & (WsMaximize | WsCaption)) == (WsMaximize | WsCaption);
+
         return IsWindowCoveringMonitor(
             new PixelRect(rect.Left, rect.Top, rect.Right, rect.Bottom),
             sb.ToString(),
-            monitor);
+            monitor,
+            isTitledMaximized);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -100,6 +116,9 @@ public static class FullScreenDetector
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -110,7 +129,7 @@ public static class FullScreenDetector
 /// <summary>
 /// 屏幕顶边正中 1/3 悬停路过状态机（T-060）：
 /// 仅在 y <= Bounds.Top + 2px 且正中 1/3 区域静置满 0.25s（无鼠标按键按下）时滑下；
-/// 在顶栏点击（如点浏览器标签或顶栏图标）会抑制触发直到指针离开顶栏；离开面板后延时 0.45s 收起。
+/// 离开当前显示器横向范围或面板下沿后延时 0.45s 收起。
 /// </summary>
 public sealed class TopEdgeHoverTracker
 {
@@ -152,7 +171,8 @@ public sealed class TopEdgeHoverTracker
         if (!isRevealed)
         {
             _leftPanelUtc = null;
-            bool inTopStrip = cursorY >= monitor.Bounds.Top && cursorY <= monitor.Bounds.Top + TopBarSuppressionHeightPx;
+            bool inTopStrip = cursorX >= monitor.Bounds.Left && cursorX < monitor.Bounds.Right &&
+                              cursorY >= monitor.Bounds.Top && cursorY <= monitor.Bounds.Top + TopBarSuppressionHeightPx;
             if (mouseButtonDown && inTopStrip)
             {
                 _suppressedByTopClick = true;
@@ -191,7 +211,13 @@ public sealed class TopEdgeHoverTracker
             return HoverAction.None;
         }
 
-        if (keepOpenForMenuOrDrag || mouseButtonDown || cursorY <= panelBottomPhysicalY + PanelGraceMarginPx)
+        bool insidePanelOnMonitor =
+            cursorX >= monitor.Bounds.Left &&
+            cursorX < monitor.Bounds.Right &&
+            cursorY >= monitor.Bounds.Top &&
+            cursorY <= panelBottomPhysicalY + PanelGraceMarginPx;
+
+        if (keepOpenForMenuOrDrag || mouseButtonDown || insidePanelOnMonitor)
         {
             _leftPanelUtc = null;
             return HoverAction.None;

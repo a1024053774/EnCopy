@@ -58,6 +58,18 @@ public static class DataFolder
     }
 
     /// <summary>
+    /// 仅允许 EnCopy 私有生成的笔记与图片执行外部移动或移入系统回收站；
+    /// 外部用户文件与内部 .files / .filelist 清单绝不移入回收站或被拖出移走。
+    /// </summary>
+    public static bool IsMovablePrivateItem(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Contains(path)) return false;
+        var ext = Path.GetExtension(path);
+        return !string.Equals(ext, ".files", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(ext, ".filelist", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// 仅供隔离测试为每个独立用例切换临时根目录；不允许指向用户真实数据目录。
     /// </summary>
     public static void UseTestRoot(string? path)
