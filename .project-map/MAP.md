@@ -58,8 +58,8 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | a40d975 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | e43cf6f |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 72f5ce1 |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 72f5ce1 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | a40d975 |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | e43cf6f |
 | [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 72f5ce1 |
