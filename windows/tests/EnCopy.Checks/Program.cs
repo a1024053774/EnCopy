@@ -57,6 +57,10 @@ public static class Program
             ("BasketGroupsFilterAndNavigation", TestBasketGroupsFilterAndNavigation),
             ("ShortcutRecorderAndPersistence", TestShortcutRecorderAndPersistence),
             ("LinePanelRenderAndClickThrough", () => TestLinePanelRenderAndClickThrough(previewDir)),
+            ("MotionSpringsAndReducedMotion", TestMotionSpringsAndReducedMotion),
+            ("SixThemesAndTrayIcon", () => TestSixThemesAndTrayIcon(previewDir)),
+            ("TopEdgeHoverAndFullScreenAvoidance", TestTopEdgeHoverAndFullScreenAvoidance),
+            ("HeldZoomDragAndTakeDownNeighbours", TestHeldZoomDragAndTakeDownNeighbours),
             ("InstallScriptIsolated", TestInstallScriptIsolated),
         };
 
@@ -360,6 +364,15 @@ public static class Program
         Check(cleared == 1 && dismissed == 0 && q == "", "First Esc clears query without dismissing");
         Check(LineKeyRouter.HandleKeyDown(Key.Escape, ModifierKeys.None, false, q, false, line, _ => { }, () => { }, () => dismissed++, () => cleared++), "Second Esc handled");
         Check(dismissed == 1, "Second Esc dismisses panel");
+
+        // CONTEXT.md / T-070：搜索框里有文字且光标不在末尾时，← → 归输入框移动光标，不切卡片或篮子分组
+        line.PickDefault();
+        var beforeCaretPick = line.Picked?.FullText;
+        Check(!LineKeyRouter.HandleKeyDown(Key.Left, ModifierKeys.None, false, "hello", false, line, _ => { }, () => { }, () => { }, () => { }, caretAtEnd: false),
+            "Left yields to QueryBox when caret is inside query");
+        Check(!LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.None, false, "hello", false, line, _ => { }, () => { }, () => { }, () => { }, caretAtEnd: false),
+            "Right yields to QueryBox when caret is inside query");
+        Check(line.Picked?.FullText == beforeCaretPick, "Picked card unchanged while caret moves inside query");
     }
 
     private static void TestPasteKeyAndUipiFallback()
@@ -979,6 +992,356 @@ public static class Program
         {
             panel.Close();
         }
+    }
+
+    private static void TestMotionSpringsAndReducedMotion()
+    {
+        try
+        {
+            Motion.SetReducedOverride(false);
+            double tReceipt = SpringValue.MeasureSettleTime(Motion.WeightFor(PaperKind.Receipt));
+            double tTag = SpringValue.MeasureSettleTime(Motion.WeightFor(PaperKind.Tag));
+            double tPolaroid = SpringValue.MeasureSettleTime(Motion.WeightFor(PaperKind.Polaroid));
+            double tTractor = SpringValue.MeasureSettleTime(Motion.WeightFor(PaperKind.Tractor));
+            double tFolder = SpringValue.MeasureSettleTime(Motion.WeightFor(PaperKind.Folder));
+            Check(tFolder > 0.1 && tReceipt > tTag && tTag > tPolaroid && tPolaroid > tTractor && tTractor > tFolder,
+                $"Paper weights must settle from lightest (longest) to heaviest (fastest): receipt={tReceipt:F3}s, tag={tTag:F3}s, polaroid={tPolaroid:F3}s, tractor={tTractor:F3}s, folder={tFolder:F3}s");
+
+            using var engine = new MotionEngine();
+            Check(!engine.IsActive && !engine.IsRenderingSubscribed, "MotionEngine starts idle without rendering subscription");
+            engine.BeginReveal(bySummon: true, panelHeight: 344.0);
+            engine.TriggerNewCard("card-a", PaperKind.Receipt);
+            engine.TriggerHop("card-a");
+            Check(engine.IsActive && engine.IsRenderingSubscribed, "MotionEngine activates and subscribes to CompositionTarget.Rendering");
+            Check(engine.PanelSlideY < -10.0 && engine.RopeSagScale < 0.5 && engine.GetPegScale("card-a") > 1.1 && engine.GetCardHop("card-a") < -1.0,
+                "Initial spring displacements applied for panel, rope tautness, peg clamp, and hop");
+
+            for (int frame = 0; frame < 600 && engine.IsActive; frame++)
+            {
+                engine.StepManual(1.0 / 120.0);
+            }
+            Check(!engine.IsActive && !engine.IsRenderingSubscribed, "MotionEngine stops ticking automatically once all springs settle");
+            Check(Math.Abs(engine.PanelSlideY) < 0.01 && Math.Abs(engine.RopeSagScale - 1.0) < 0.01 && Math.Abs(engine.GetPegScale("card-a") - 1.0) < 0.01,
+                "Settled values reach exact targets");
+
+            var now = DateTime.UtcNow;
+            Check(!Motion.CanBreeze(now, now.AddSeconds(-2.0)), "No breeze within 4s of keyboard activity");
+            Check(Motion.CanBreeze(now, now.AddSeconds(-5.0)), "Breeze allowed after 4s quiet");
+
+            var (sink0, grav0) = Motion.FallProgress(0.0);
+            var (sinkMid, gravMid) = Motion.FallProgress(0.10);
+            var (sinkEnd, gravEnd) = Motion.FallProgress(1.0);
+            Check(sink0 == 0 && grav0 == 0 && Math.Abs(sinkMid - 5.0) < 0.05 && gravMid == 0 && Math.Abs(gravEnd - 1.0) < 0.01,
+                $"FallProgress sinks 5px in first 10% then accelerates under gravity (mid={sinkMid},{gravMid}; end={sinkEnd},{gravEnd})");
+
+            // 减弱动态效果开启：仅保留淡入淡出，无位移、无摇摆、无微风
+            Motion.SetReducedOverride(true);
+            Check(Motion.IsReduced, "Reduced motion override reflected");
+            Check(!Motion.CanBreeze(now, now.AddSeconds(-20.0)), "Reduced motion disables breeze");
+            using var reducedEngine = new MotionEngine();
+            reducedEngine.BeginReveal(bySummon: true, panelHeight: 344.0);
+            Check(Math.Abs(reducedEngine.PanelSlideY) < 0.001 && reducedEngine.PanelOpacity < 1.0,
+                "Reduced motion fades opacity without sliding panel");
+            for (int f = 0; f < 30 && reducedEngine.IsActive; f++)
+            {
+                reducedEngine.StepManual(1.0 / 120.0);
+            }
+            Check(!reducedEngine.IsActive && Math.Abs(reducedEngine.PanelOpacity - 1.0) < 0.01, "Reduced motion fade completes cleanly");
+        }
+        finally
+        {
+            Motion.SetReducedOverride(null);
+        }
+    }
+
+    private static void TestSixThemesAndTrayIcon(string? previewDir)
+    {
+        using var history = new History();
+        var line = new Line(history);
+        var notesDir = DataFolder.NotesFolder;
+        Directory.CreateDirectory(notesDir);
+
+        var pText = Path.Combine(notesDir, "Text theme.txt");
+        File.WriteAllText(pText, "主题外观小票\n温暖纸张与六套主题切换", new UTF8Encoding(false));
+        history.Record(pText, "主题外观小票\n温暖纸张与六套主题切换", DateTime.UtcNow.AddSeconds(-40), "Notepad");
+
+        var pCode = Path.Combine(notesDir, "Text code.txt");
+        var codeStr = "public static int Add(int a, int b)\n{\n    return a + b;\n}";
+        File.WriteAllText(pCode, codeStr, new UTF8Encoding(false));
+        history.Record(pCode, codeStr, DateTime.UtcNow.AddSeconds(-30), "Code");
+
+        var pLink = Path.Combine(notesDir, "Link site.txt");
+        File.WriteAllText(pLink, "https://github.com/a1024053774/EnCopy", new UTF8Encoding(false));
+        history.Record(pLink, "https://github.com/a1024053774/EnCopy", DateTime.UtcNow.AddSeconds(-20), "Edge");
+
+        var pImg = Path.Combine(DataFolder.Root, "Clipboard theme.png");
+        WriteSamplePng(pImg, 160, 100);
+        history.Record(pImg, "Clipboard theme", DateTime.UtcNow.AddSeconds(-10), "Photos");
+
+        for (int i = 0; i < 9; i++)
+        {
+            var extra = Path.Combine(notesDir, $"Text extra-{i}.txt");
+            File.WriteAllText(extra, $"Basket overflow item {i}", new UTF8Encoding(false));
+            history.Record(extra, $"Basket overflow item {i}", DateTime.UtcNow.AddSeconds(-100 - i));
+        }
+
+        line.ReloadFromHistory();
+        line.TogglePinByPath(pText);
+
+        var panel = new LinePanel(line, (_, _, _) => true, _ => true, () => { }, () => { });
+        try
+        {
+            var root = (FrameworkElement)panel.Content;
+            var renderedBuffers = new List<(LineTheme Theme, byte[] Pixels)>();
+
+            foreach (var theme in Enum.GetValues<LineTheme>())
+            {
+                line.Theme = theme;
+                line.CloseBasket();
+                panel.RenderOffscreen(1280, 344, darkOverride: theme == LineTheme.Neon);
+                var bmp = RenderVisualToBitmap(root, 1280, 344);
+                var blankPx = SampleBgra(bmp, 24, 90);
+                Check(blankPx[3] == 0, $"Theme {theme} keeps blank area alpha==0 for click-through (got {blankPx[3]})");
+
+                var allPixels = new byte[1280 * 344 * 4];
+                bmp.CopyPixels(allPixels, 1280 * 4, 0);
+                renderedBuffers.Add((theme, allPixels));
+
+                if (!string.IsNullOrWhiteSpace(previewDir))
+                {
+                    SavePng(bmp, Path.Combine(previewDir, $"00-offscreen-theme-{theme.ToString().ToLowerInvariant()}.png"));
+                }
+
+                line.OpenBasket();
+                panel.RenderOffscreen(1280, 680, darkOverride: theme == LineTheme.Neon);
+            }
+
+            // 审查回归 1（P1）：动画帧推进期间不得销毁重建 LineCanvas 卡片实例，且原位变换切实更新
+            line.Theme = LineTheme.Paper;
+            line.CloseBasket();
+            panel.RenderOffscreen(1280, 344);
+            var canvas = (Canvas)root.FindName("LineCanvas")!;
+            var firstCardBefore = canvas.Children.OfType<FrameworkElement>().First(fe => fe.Tag is string);
+            panel.MotionForTest.TriggerHop(line.ShownItems[0].FilePath);
+            panel.MotionForTest.StepManual(1.0 / 120.0);
+            var firstCardAfter = canvas.Children.OfType<FrameworkElement>().First(fe => fe.Tag is string);
+            Check(ReferenceEquals(firstCardBefore, firstCardAfter),
+                "Advancing MotionEngine frames must preserve existing card FrameworkElement instances in LineCanvas");
+            var cardTx = (TransformGroup)firstCardAfter.RenderTransform;
+            var hopTx = cardTx.Children.OfType<TranslateTransform>().First();
+            Check(hopTx.Y < -1.0, $"In-place hop transform updates card Y without rebuilding visual tree (hopY={hopTx.Y:F2})");
+
+            for (int i = 0; i < renderedBuffers.Count; i++)
+            {
+                for (int j = i + 1; j < renderedBuffers.Count; j++)
+                {
+                    Check(!renderedBuffers[i].Pixels.AsSpan().SequenceEqual(renderedBuffers[j].Pixels),
+                        $"Theme {renderedBuffers[i].Theme} and {renderedBuffers[j].Theme} must render distinct visuals");
+                }
+            }
+        }
+        finally
+        {
+            panel.Close();
+        }
+
+        var activeTwo = TrayIcon.RenderIconRgbaForTest(paused: false, itemCount: 2, swayAngle: 0f);
+        var pausedTwo = TrayIcon.RenderIconRgbaForTest(paused: true, itemCount: 2, swayAngle: 0f);
+        var activeEmpty = TrayIcon.RenderIconRgbaForTest(paused: false, itemCount: 0, swayAngle: 0f);
+        var activeSway = TrayIcon.RenderIconRgbaForTest(paused: false, itemCount: 2, swayAngle: 8f);
+        Check(!activeTwo.SequenceEqual(pausedTwo), "Tray icon differs between active and paused states");
+        Check(!activeTwo.SequenceEqual(activeEmpty), "Tray icon differs between empty line and hanging cards");
+        Check(!activeTwo.SequenceEqual(activeSway), "Tray icon pegs visibly sway when angle=8 deg");
+    }
+
+    private static void TestTopEdgeHoverAndFullScreenAvoidance()
+    {
+        var primary = new DisplayMonitor(new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 30, 1920, 1040), 1.0, true);
+        Check(TopEdgeHoverTracker.IsInTopCenterBand(960, 0, primary), "y=0 center is inside top hover band");
+        Check(TopEdgeHoverTracker.IsInTopCenterBand(960, 2, primary), "y=2 center is inside top hover band");
+        Check(!TopEdgeHoverTracker.IsInTopCenterBand(960, 3, primary), "y=3 is outside top hover band");
+        Check(!TopEdgeHoverTracker.IsInTopCenterBand(200, 1, primary), "Left 1/3 browser tab zone does not trigger hover reveal");
+        Check(!TopEdgeHoverTracker.IsInTopCenterBand(1700, 1, primary), "Right 1/3 window close button zone does not trigger hover reveal");
+
+        var tracker = new TopEdgeHoverTracker();
+        var t0 = new DateTime(2026, 11, 26, 12, 0, 0, DateTimeKind.Utc);
+        Check(tracker.Update(960, 1, primary, mouseButtonDown: false, isRevealed: false, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, panelBottomPhysicalY: 374, t0) == HoverAction.None,
+            "Entering top edge starts dwell timer without immediate reveal");
+        Check(tracker.Update(960, 1, primary, false, false, false, false, 374, t0.AddMilliseconds(200)) == HoverAction.None,
+            "200ms dwell < 250ms threshold does not reveal yet");
+        Check(tracker.Update(960, 1, primary, false, false, false, false, 374, t0.AddMilliseconds(260)) == HoverAction.RevealByHover,
+            "260ms dwell >= 250ms triggers RevealByHover");
+
+        // 鼠标按下点击顶栏时抑制触发，离开顶栏前不误滑出
+        tracker.Reset();
+        Check(tracker.Update(960, 1, primary, mouseButtonDown: true, false, false, false, 374, t0) == HoverAction.None, "Click at top suppresses reveal");
+        Check(tracker.Update(960, 1, primary, mouseButtonDown: false, false, false, false, 374, t0.AddMilliseconds(400)) == HoverAction.None, "Remains suppressed until cursor leaves top bar");
+        Check(tracker.Update(960, 100, primary, false, false, false, false, 374, t0.AddMilliseconds(450)) == HoverAction.None, "Leaving top bar clears suppression");
+
+        // 离开已滑下面板后延时收起，但右键菜单或拖拽期间保持不收起
+        Check(tracker.Update(960, 500, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: true, 374, t0.AddSeconds(1)) == HoverAction.None,
+            "Menu/drag keeps hover-revealed panel open");
+        Check(tracker.Update(960, 500, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(2)) == HoverAction.None,
+            "Leaving panel starts retract grace timer");
+        Check(tracker.Update(960, 500, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(2).AddMilliseconds(480)) == HoverAction.Retract,
+            "Leaving panel >= 450ms retracts hover-revealed panel");
+
+        // 审查回归 2（P1）：双屏下指针横向移到副屏顶部（x=-500, y=100）也必须触发主屏悬停面板延时收起
+        tracker.Reset();
+        Check(tracker.Update(-500, 100, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(3)) == HoverAction.None,
+            "Moving horizontally off monitor starts retract timer");
+        Check(tracker.Update(-500, 100, primary, false, isRevealed: true, isPinnedBySummon: false, keepOpenForMenuOrDrag: false, 374, t0.AddSeconds(3).AddMilliseconds(480)) == HoverAction.Retract,
+            "Cursor on adjacent monitor retracts hover-revealed panel after grace");
+
+        // 全屏检测与 Alt+C 覆盖
+        Check(FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 0, 1920, 1080), "Chrome_WidgetWin_1", primary),
+            "Borderless fullscreen app window detected");
+        Check(!FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 0, 1920, 1080), "Progman", primary),
+            "Desktop Progman window ignored by fullscreen check");
+        Check(!FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 30, 1920, 1040), "Notepad", primary),
+            "Maximized work-area window is not fullscreen");
+        Check(!FullScreenDetector.IsWindowCoveringMonitor(new PixelRect(0, 0, 1920, 1080), "Notepad", primary, isTitledMaximized: true),
+            "Titled maximized window with auto-hidden taskbar is not misclassified as fullscreen");
+        Check(FullScreenDetector.IsNotificationStateFullScreen(3) && FullScreenDetector.IsNotificationStateFullScreen(4) && !FullScreenDetector.IsNotificationStateFullScreen(5),
+            "QUNS fullscreen states 3 and 4 recognized");
+        Check(FullScreenDetector.ShouldSuppressAutoReveal(isMonitorFullScreen: true, showOverFullScreen: false, openedOnPurpose: false),
+            "Fullscreen suppresses automatic hover/peek by default");
+        Check(!FullScreenDetector.ShouldSuppressAutoReveal(isMonitorFullScreen: true, showOverFullScreen: false, openedOnPurpose: true),
+            "Explicit Alt+C summon overrides fullscreen suppression");
+        Check(!FullScreenDetector.ShouldSuppressAutoReveal(isMonitorFullScreen: true, showOverFullScreen: true, openedOnPurpose: false),
+            "ShowOverFullScreen setting allows reveal over fullscreen");
+    }
+
+    private static void TestHeldZoomDragAndTakeDownNeighbours()
+    {
+        var zoom = new HoverZoomState();
+        var t0 = new DateTime(2026, 11, 26, 12, 0, 0, DateTimeKind.Utc);
+        Check(zoom.Update("a.png", t0) is null, "Hover zoom waits before opening");
+        Check(zoom.Update("a.png", t0.AddMilliseconds(360)) == "a.png", "Hover zoom opens after 350ms");
+        Check(zoom.Update(null, t0.AddMilliseconds(450)) == "a.png", "100ms gap between cards keeps zoom within 150ms grace");
+        Check(zoom.Update(null, t0.AddMilliseconds(620)) is null, "Leaving cards >= 150ms hides zoom");
+
+        double noteScale = 1.0;
+        var startRect = new Rect(200, 150, 300, 220);
+        var anchor = new Point(260, 194);
+        double fxBefore = (anchor.X - startRect.Left) / startRect.Width;
+        double fyBefore = (anchor.Y - startRect.Top) / startRect.Height;
+        var zoomed = HeldGeometry.ZoomAroundAnchor(startRect, new Size(300, 220), isTextNote: true, ref noteScale, 1.5, anchor);
+        double fxAfter = (anchor.X - zoomed.Left) / zoomed.Width;
+        double fyAfter = (anchor.Y - zoomed.Top) / zoomed.Height;
+        Check(zoomed.Width > 400 && Math.Abs(fxBefore - fxAfter) < 0.001 && Math.Abs(fyBefore - fyAfter) < 0.001,
+            "Held zoom scales window while keeping point under cursor fixed");
+
+        using var history = new History();
+        var line = new Line(history);
+        var notesDir = DataFolder.NotesFolder;
+        Directory.CreateDirectory(notesDir);
+        var paths = new List<string>();
+        for (int i = 0; i < 5; i++)
+        {
+            var p = Path.Combine(notesDir, $"Text item-{i}.txt");
+            File.WriteAllText(p, $"Neighbour item {i}", new UTF8Encoding(false));
+            history.Record(p, $"Neighbour item {i}", DateTime.UtcNow.AddSeconds(-50 + i * 10));
+            paths.Add(p);
+        }
+        line.ReloadFromHistory();
+        line.TogglePinByPath(paths[0]);
+        // Shown order: [Pinned(item-0), item-4, item-3, item-2, item-1]
+        var pivot = line.ShownItems[2].FilePath; // item-3
+        var leftNeighbours = line.Neighbours(pivot, toTheLeft: true);
+        var rightNeighbours = line.Neighbours(pivot, toTheLeft: false);
+        Check(leftNeighbours.Count == 1 && leftNeighbours[0].FullText == "Neighbour item 4",
+            $"Left neighbours must exclude pinned items and include loose left cards (count={leftNeighbours.Count})");
+        Check(rightNeighbours.Count == 2 && rightNeighbours[0].FullText == "Neighbour item 2" && rightNeighbours[1].FullText == "Neighbour item 1",
+            $"Right neighbours must list loose right cards in order (count={rightNeighbours.Count})");
+
+        Check(line.TakeDownNeighbours(pivot, toTheLeft: false), "TakeDownNeighbours removes right cards");
+        Check(line.ShownItems.Count == 3, "2 right cards removed from line");
+        Check(line.PutBack() && line.ShownItems.Count == 5 && line.ShownItems[3].FullText == "Neighbour item 2" && line.ShownItems[4].FullText == "Neighbour item 1",
+            "Ctrl+Z PutBack restores taken-down neighbour cards in exact order");
+
+        var desktopDir = Path.Combine(DataFolder.Root, "DesktopTest");
+        var saved1 = line.SaveToDesktop([line.ShownItems[1]], desktopDir);
+        var saved2 = line.SaveToDesktop([line.ShownItems[1]], desktopDir);
+        Check(saved1.Count == 1 && File.Exists(saved1[0]) && saved2.Count == 1 && File.Exists(saved2[0]) && !string.Equals(saved1[0], saved2[0], StringComparison.OrdinalIgnoreCase),
+            "SaveToDesktop copies card to Desktop with collision-free naming and preserves original note");
+
+        using var heldMgr = new HeldWindowManager();
+        var holdTarget = line.ShownItems[1];
+        Check(heldMgr.Hold(holdTarget, line, _ => true, showWindow: false), "HeldWindowManager holds note");
+        Check(line.HeldPaths.Contains(Path.GetFullPath(holdTarget.FilePath)), "Line tracks held card path");
+        var backRect = heldMgr.HangBack(holdTarget.FilePath);
+        Check(backRect is not null && !line.HeldPaths.Contains(Path.GetFullPath(holdTarget.FilePath)), "HangBack clears held state and returns departure frame");
+
+        // 审查回归 5（P2）：被 Hold 的卡片若通过 TakeDownNotes 取下，必须同步关闭 HeldWindowManager 中的残留项
+        Check(heldMgr.Hold(holdTarget, line, _ => true, showWindow: false) && heldMgr.HasOpenWindows, "Hold re-opens target");
+        Check(line.TakeDownNotes([holdTarget]), "TakeDownNotes removes held card");
+        Check(!heldMgr.HasOpenWindows, "Taking down a held card closes its HeldWindowManager entry");
+        Check(line.PutBack(), "Restore card after held take-down test");
+
+        // 审查回归 3（P1）：单条纯文本共享只传文本，不附带内部 .txt 临时路径
+        var textSharePayload = WindowsShareService.BuildPayload([line.ShownItems[1]]);
+        Check(textSharePayload.PlainText == line.ShownItems[1].FullText && textSharePayload.FilePaths.Count == 0,
+            $"Single text note share must omit internal .txt file path (count={textSharePayload.FilePaths.Count})");
+
+        // 审查回归 6（P3）：悬停放大窗顶部必须位于搜索框底边之下，绝不遮挡 SearchShell
+        double zoomTop = HoverZoomController.ComputeZoomWindowTopDip(workTopDip: 30, panelContentBottomDip: 298, workHeightDip: 1010, zoomWindowHeightDip: 260);
+        Check(zoomTop >= 306, $"HoverZoomController top ({zoomTop}) must sit below SearchShell bottom (298)");
+
+        // 审查回归 4（P1）：私有图片可移动/入回收站，而 .files/.filelist 清单与外部文件不可入回收站；IFileOperation 记真实回收站路径
+        var privImg = Path.Combine(DataFolder.Root, "Clipboard movable.png");
+        WriteSamplePng(privImg, 80, 60);
+        var manifestFake = Path.Combine(DataFolder.FilesFolder, "Copied 1.filelist");
+        Directory.CreateDirectory(DataFolder.FilesFolder);
+        File.WriteAllText(manifestFake, privImg, new UTF8Encoding(false));
+        Check(DataFolder.IsMovablePrivateItem(privImg), "Private copied image is movable/trashable");
+        Check(!DataFolder.IsMovablePrivateItem(manifestFake), "Internal filelist manifest is never trashable");
+        Check(!DataFolder.IsMovablePrivateItem(Path.Combine(Path.GetTempPath(), "outside-encopy.txt")), "External file outside DataFolder is never trashable");
+
+        history.Record(privImg, "Clipboard movable", DateTime.UtcNow);
+        line.AddNew(privImg);
+        var imgNote = line.ShownItems.First(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase));
+
+        static bool DiscardedIsEmpty() =>
+            !Directory.Exists(DataFolder.DiscardedFolder) ||
+            !Directory.EnumerateFileSystemEntries(DataFolder.DiscardedFolder).Any();
+
+        // 复审回归 P2：移入系统回收站失败时绝不能静默退化到私有 DiscardedFolder
+        RecycleBinInterop.SetSimulateFailureForChecks(true);
+        try
+        {
+            Check(!line.TakeDownNotes([imgNote], sendToRecycleBin: true), "Failed Recycle Bin operation must return false instead of silently stashing");
+            Check(File.Exists(privImg) && DiscardedIsEmpty(), "Failed Recycle Bin operation leaves file in place without DiscardedFolder fallback");
+        }
+        finally
+        {
+            RecycleBinInterop.SetSimulateFailureForChecks(false);
+        }
+
+        Check(line.TakeDownNotes([imgNote], sendToRecycleBin: true), "TakeDownNotes sends private image to system Recycle Bin");
+        Check(!File.Exists(privImg) && DiscardedIsEmpty(), "Recycled private image moved to system Recycle Bin without DiscardedFolder copy");
+        Check(line.PutBack() && File.Exists(privImg), "Ctrl+Z PutBack restores recycled image back to DataFolder");
+
+        // 复审回归 P1：外部拖拽落入桌面回收站（Explorer 已将文件移入 $Recycle.Bin）后对账必须生成 Ctrl+Z 撤销记录
+        var dragImgNote = line.ShownItems.First(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase));
+        Check(RecycleBinInterop.MoveFileToRecycleBin(privImg, out var explorerRecycledPath) && !string.IsNullOrEmpty(explorerRecycledPath),
+            "Explorer drop moves private image into $Recycle.Bin");
+        line.PruneMissingFromLine();
+        Check(!line.ShownItems.Any(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase)),
+            "Dragged-to-Recycle-Bin card leaves the line");
+        Check(line.PutBack() && File.Exists(privImg) && line.ShownItems.Any(n => string.Equals(n.FilePath, privImg, StringComparison.OrdinalIgnoreCase)),
+            "Ctrl+Z PutBack restores card dragged into Recycle Bin");
+
+        // 审查回归 5b（P2）：损坏图片执行 Hold 不抛异常
+        var corruptImg = Path.Combine(DataFolder.Root, "Corrupt.png");
+        File.WriteAllBytes(corruptImg, [0x00, 0x01, 0x02, 0x03]);
+        var corruptNote = Note.Load(corruptImg, "Corrupt.png", DateTime.Now)!;
+        Check(heldMgr.Hold(corruptNote, line, _ => true, showWindow: false), "Corrupt image Hold degrades safely without throwing");
+        heldMgr.HangBack(corruptImg);
+
+        var linkNote = Note.Parse(Path.Combine(notesDir, "Link s.txt"), "Notes/Link s.txt", "https://example.com/docs", DateTime.Now);
+        var sharePayload = WindowsShareService.BuildPayload([linkNote]);
+        Check(sharePayload.WebLink == new Uri("https://example.com/docs"), "Share payload extracts Uri for link cards");
     }
 
     private static void TestInstallScriptIsolated()

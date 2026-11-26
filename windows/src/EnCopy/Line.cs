@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -49,6 +51,147 @@ public sealed class Line : INotifyPropertyChanged
     private int _basketMatchCount;
     private bool _basketOpen;
     private Note? _basketPicked;
+    private LineTheme _theme = LineTheme.Paper;
+    private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    public LineTheme Theme
+    {
+        get => _theme;
+        set { if (_theme != value) { _theme = value; OnPropertyChanged(); } }
+    }
+
+    public IReadOnlySet<string> HeldPaths => _heldPaths;
+
+    public void SetHeld(string filePath, bool held)
+    {
+        var full = Path.GetFullPath(filePath);
+        bool changed = held ? _heldPaths.Add(full) : _heldPaths.Remove(full);
+        if (!changed) return;
+        if (held && _selectedPaths.Remove(full))
+        {
+            OnPropertyChanged(nameof(SelectedPaths));
+        }
+        OnPropertyChanged(nameof(HeldPaths));
+    }
+
+    public IReadOnlyList<Note> Neighbours(string filePath, bool toTheLeft)
+    {
+        int idx = IndexInShown(filePath);
+        if (idx < 0) return [];
+        var list = new List<Note>();
+        if (toTheLeft)
+        {
+            for (int i = 0; i < idx; i++)
+            {
+                if (!ShownItems[i].Pinned) list.Add(ShownItems[i]);
+            }
+        }
+        else
+        {
+            for (int i = idx + 1; i < ShownItems.Count; i++)
+            {
+                if (!ShownItems[i].Pinned) list.Add(ShownItems[i]);
+            }
+        }
+        return list;
+    }
+
+    public bool TakeDownNeighbours(string filePath, bool toTheLeft)
+    {
+        var targets = Neighbours(filePath, toTheLeft);
+        return TakeDownNotes(targets);
+    }
+
+    public void PruneMissingFromLine(DateTime? minRecycleDeletedUtc = null)
+    {
+        var missing = _lineItems.Where(n => !File.Exists(n.FilePath) && !Directory.Exists(n.FilePath)).ToList();
+        if (missing.Count == 0) return;
+
+        var preIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < _lineItems.Count; i++)
+        {
+            preIndices[Path.GetFullPath(_lineItems[i].FilePath)] = i;
+        }
+
+        var cutoffUtc = minRecycleDeletedUtc ?? DateTime.UtcNow.AddSeconds(-15);
+        var recycledUndoEntries = new List<UndoEntry>();
+        bool heldChanged = false;
+        foreach (var item in missing)
+        {
+            var full = Path.GetFullPath(item.FilePath);
+            if (!item.Pinned && DataFolder.IsMovablePrivateItem(item.FilePath) &&
+                RecycleBinInterop.TryFindRecycledFile(full, cutoffUtc) is { } recycledPath)
+            {
+                recycledUndoEntries.Add(new UndoEntry(
+                    OriginalPath: item.FilePath,
+                    StashedPath: recycledPath,
+                    PlainText: item.FullText,
+                    AppName: item.AppName,
+                    OriginalUsedUtc: item.UsedAt.ToUniversalTime(),
+                    WasOnLine: true,
+                    WasPinned: false,
+                    OldScreenIndex: preIndices.GetValueOrDefault(full, 0),
+                    IsPinChange: false,
+                    InSystemRecycleBin: true));
+            }
+
+            if (_heldPaths.Remove(full)) heldChanged = true;
+            if (DataFolder.Contains(item.FilePath))
+            {
+                History.Remove(item.FilePath);
+            }
+            _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (recycledUndoEntries.Count > 0)
+        {
+            PushUndoStep(recycledUndoEntries);
+        }
+        if (heldChanged)
+        {
+            OnPropertyChanged(nameof(HeldPaths));
+        }
+        SaveLineState();
+        RefreshCurrentView();
+        if (BasketOpen) LoadBasket();
+    }
+
+    public IReadOnlyList<string> SaveToDesktop(IReadOnlyList<Note> notes, string? desktopFolderOverride = null)
+    {
+        var desktop = desktopFolderOverride ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (string.IsNullOrWhiteSpace(desktop)) return [];
+        Directory.CreateDirectory(desktop);
+
+        var written = new List<string>();
+        foreach (var note in notes)
+        {
+            var sources = note.FileTargets.Count > 0 ? note.FileTargets : [note.FilePath];
+            foreach (var src in sources)
+            {
+                if (!File.Exists(src)) continue;
+                var dest = NextFreePath(Path.Combine(desktop, Path.GetFileName(src)));
+                File.Copy(src, dest, overwrite: false);
+                written.Add(dest);
+            }
+        }
+        return written;
+    }
+
+    private static string NextFreePath(string candidate)
+    {
+        if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
+        var dir = Path.GetDirectoryName(candidate) ?? string.Empty;
+        var baseName = Path.GetFileNameWithoutExtension(candidate);
+        var ext = Path.GetExtension(candidate);
+        int n = 2;
+        string next;
+        do
+        {
+            next = Path.Combine(dir, $"{baseName} {n}{ext}");
+            n++;
+        } while (File.Exists(next) || Directory.Exists(next));
+        return next;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -322,7 +465,8 @@ public sealed class Line : INotifyPropertyChanged
         if (idx >= 0)
         {
             var updated = _lineItems[idx].WithUsedAt(stampLocal);
-            if (updated.Pinned)
+            // 收藏的与拿在手上的留在原位（T-019 / CONTEXT.md）
+            if (updated.Pinned || _heldPaths.Contains(full))
             {
                 _lineItems[idx] = updated;
             }
@@ -528,9 +672,10 @@ public sealed class Line : INotifyPropertyChanged
 
     // MARK: Take Down (Ctrl+Backspace / Delete) & Put Back (Ctrl+Z)
 
-    public bool TakeDownPicked()
+    public bool TakeDownPicked() => TakeDownNotes(GetSelectedNotesInLineOrder());
+
+    public bool TakeDownNotes(IReadOnlyList<Note> targets, bool sendToRecycleBin = false)
     {
-        var targets = GetSelectedNotesInLineOrder();
         if (targets.Count == 0) return false;
 
         // 预先记录移除前每个条目在绳上的原始槽位，确保多选 Ctrl+Z 放回时严格维持原从左到右顺序
@@ -544,7 +689,7 @@ public sealed class Line : INotifyPropertyChanged
         var stepId = Guid.NewGuid().ToString("N");
         var movedToStash = new List<(string Original, string Stashed)>();
 
-        // 两阶段提交：先将全部私有文件移入暂存区，若中途发生 IOException 则原样退回，绝不损毁 History 或绳子状态
+        // 两阶段提交：私有项常规取下移入 DiscardedFolder；移入系统回收站走 IFileOperation(FOF_ALLOWUNDO) 直接记 $Recycle.Bin 路径不留副本
         try
         {
             foreach (var note in targets)
@@ -557,7 +702,24 @@ public sealed class Line : INotifyPropertyChanged
                 bool wasPinned = liveIdx >= 0 && _lineItems[liveIdx].Pinned;
 
                 string? stashed = null;
-                if (DataFolder.Contains(note.FilePath) && File.Exists(note.FilePath))
+                bool inSystemRecycleBin = false;
+                bool isPrivate = DataFolder.Contains(note.FilePath);
+                bool canRecycle = sendToRecycleBin && !wasPinned && DataFolder.IsMovablePrivateItem(note.FilePath);
+
+                if (sendToRecycleBin)
+                {
+                    if (!canRecycle || !File.Exists(note.FilePath) ||
+                        !RecycleBinInterop.MoveFileToRecycleBin(note.FilePath, out var recycledPath) ||
+                        string.IsNullOrEmpty(recycledPath))
+                    {
+                        RollbackMovedToStash(movedToStash);
+                        return false;
+                    }
+                    stashed = recycledPath;
+                    inSystemRecycleBin = true;
+                    movedToStash.Add((note.FilePath, recycledPath));
+                }
+                else if (File.Exists(note.FilePath) && isPrivate)
                 {
                     Directory.CreateDirectory(DataFolder.DiscardedFolder);
                     var dest = Path.Combine(DataFolder.DiscardedFolder, $"{stepId}_{Path.GetFileName(note.FilePath)}");
@@ -575,30 +737,31 @@ public sealed class Line : INotifyPropertyChanged
                     WasOnLine: wasOnLine,
                     WasPinned: wasPinned,
                     OldScreenIndex: wasOnLine ? preIndex : 0,
-                    IsPinChange: false));
+                    IsPinChange: false,
+                    InSystemRecycleBin: inSystemRecycleBin));
             }
         }
         catch (IOException)
         {
-            foreach (var (orig, stash) in movedToStash)
-            {
-                if (File.Exists(stash) && !File.Exists(orig))
-                {
-                    try { File.Move(stash, orig, overwrite: false); } catch { }
-                }
-            }
+            RollbackMovedToStash(movedToStash);
             return false;
         }
 
         if (prepared.Count == 0) return false;
+        bool heldChanged = false;
         foreach (var entry in prepared)
         {
+            var full = Path.GetFullPath(entry.OriginalPath);
+            if (_heldPaths.Remove(full)) heldChanged = true;
             History.Remove(entry.OriginalPath);
             if (entry.WasOnLine)
             {
-                var full = Path.GetFullPath(entry.OriginalPath);
                 _lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
             }
+        }
+        if (heldChanged)
+        {
+            OnPropertyChanged(nameof(HeldPaths));
         }
 
         PushUndoStep(prepared);
@@ -727,6 +890,10 @@ public sealed class Line : INotifyPropertyChanged
                 var dir = Path.GetDirectoryName(entry.OriginalPath);
                 if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                 File.Move(entry.StashedPath, entry.OriginalPath, overwrite: true);
+                if (entry.InSystemRecycleBin)
+                {
+                    RecycleBinInterop.CleanupCompanionMetadataFile(entry.StashedPath);
+                }
             }
             else if (!File.Exists(entry.OriginalPath) && !Directory.Exists(entry.OriginalPath))
             {
@@ -1061,6 +1228,25 @@ public sealed class Line : INotifyPropertyChanged
         _lineItems.AddRange(loose);
     }
 
+    private static void RollbackMovedToStash(List<(string Original, string Stashed)> movedToStash)
+    {
+        foreach (var (orig, stash) in movedToStash)
+        {
+            if (File.Exists(stash) && !File.Exists(orig))
+            {
+                try
+                {
+                    File.Move(stash, orig, overwrite: false);
+                    RecycleBinInterop.CleanupCompanionMetadataFile(stash);
+                }
+                catch
+                {
+                    // 回滚尽力恢复已搬移项
+                }
+            }
+        }
+    }
+
     private void PushUndoStep(List<UndoEntry> entries)
     {
         _undoSteps.Add(new UndoStep(entries));
@@ -1070,7 +1256,7 @@ public sealed class Line : INotifyPropertyChanged
             _undoSteps.RemoveAt(0);
             foreach (var e in dropped.Entries)
             {
-                if (e.StashedPath is not null && File.Exists(e.StashedPath))
+                if (!e.InSystemRecycleBin && e.StashedPath is not null && File.Exists(e.StashedPath))
                 {
                     try { File.Delete(e.StashedPath); } catch { }
                 }
@@ -1245,5 +1431,315 @@ public sealed class Line : INotifyPropertyChanged
         bool WasPinned,
         int OldScreenIndex,
         bool IsPinChange,
-        IReadOnlyList<string>? DisplacedLoosePaths = null);
+        IReadOnlyList<string>? DisplacedLoosePaths = null,
+        bool InSystemRecycleBin = false);
+}
+
+/// <summary>
+/// 通过 COM IFileOperation + FOF_ALLOWUNDO 将私有文件移入系统回收站，
+/// 并由 IFileOperationProgressSink.PostDeleteItem 精确捕获 $Recycle.Bin 落地路径供 Ctrl+Z 还原（不留重复副本）。
+/// </summary>
+public static class RecycleBinInterop
+{
+    private const uint FofSilent = 0x0004;
+    private const uint FofNoConfirmation = 0x0010;
+    private const uint FofAllowUndo = 0x0040;
+    private const uint FofNoErrorUi = 0x0400;
+    private const uint FofxAddUndoRecord = 0x20000000;
+    private const uint TsfDeleteRecycleIfPossible = 0x0080;
+    private const uint SigdnFileSysPath = 0x80058000;
+    private const int EAbort = unchecked((int)0x80004004);
+
+    private static readonly Guid ClsidFileOperation = new("3ad05575-8857-4850-9277-11b85bdb8e09");
+    private static readonly Guid IidShellItem = new("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+
+    [ComImport]
+    [Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellItem
+    {
+        void BindToHandler(IntPtr pbc, [In] ref Guid bhid, [In] ref Guid riid, out IntPtr ppv);
+        void GetParent(out IShellItem ppsi);
+        void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+        void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+        void Compare(IShellItem psi, uint hint, out int piOrder);
+    }
+
+    [ComImport]
+    [Guid("04b0f1a7-9490-44bc-96e1-4296a31252e2")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFileOperationProgressSink
+    {
+        [PreserveSig] int StartOperations();
+        [PreserveSig] int FinishOperations(int hrResult);
+        [PreserveSig] int PreRenameItem(uint dwFlags, IShellItem? psiItem, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostRenameItem(uint dwFlags, IShellItem? psiItem, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrRename, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrMove, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, int hrCopy, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreDeleteItem(uint dwFlags, IShellItem? psiItem);
+        [PreserveSig] int PostDeleteItem(uint dwFlags, IShellItem? psiItem, int hrDelete, IShellItem? psiNewlyCreated);
+        [PreserveSig] int PreNewItem(uint dwFlags, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName);
+        [PreserveSig] int PostNewItem(uint dwFlags, IShellItem? psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, [MarshalAs(UnmanagedType.LPWStr)] string? pszTemplateName, uint dwFileAttributes, int hrNew, IShellItem? psiNewlyCreated);
+        [PreserveSig] int UpdateProgress(uint iWorkTotal, uint iWorkSoFar);
+        [PreserveSig] int ResetTimer();
+        [PreserveSig] int PauseTimer();
+        [PreserveSig] int ResumeTimer();
+    }
+
+    [ComImport]
+    [Guid("947aab5f-0a5c-4c13-b4d6-4bf7836fc9f8")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFileOperation
+    {
+        void Advise([MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink pfops, out uint pdwCookie);
+        void Unadvise(uint dwCookie);
+        void SetOperationFlags(uint dwOperationFlags);
+        void SetProgressMessage([MarshalAs(UnmanagedType.LPWStr)] string pszMessage);
+        void SetProgressDialog([MarshalAs(UnmanagedType.Interface)] object popd);
+        void SetProperties([MarshalAs(UnmanagedType.Interface)] object pproparray);
+        void SetOwnerWindow(IntPtr hwndOwner);
+        void ApplyPropertiesToItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem);
+        void ApplyPropertiesToItems([MarshalAs(UnmanagedType.Interface)] object punkItems);
+        void RenameItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.LPWStr)] string pszNewName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void RenameItems([MarshalAs(UnmanagedType.Interface)] object pUnkItems, [MarshalAs(UnmanagedType.LPWStr)] string pszNewName);
+        void MoveItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszNewName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void MoveItems([MarshalAs(UnmanagedType.Interface)] object punkItems, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder);
+        void CopyItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, [MarshalAs(UnmanagedType.LPWStr)] string? pszCopyName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void CopyItems([MarshalAs(UnmanagedType.Interface)] object punkItems, [MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder);
+        void DeleteItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiItem, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void DeleteItems([MarshalAs(UnmanagedType.Interface)] object punkItems);
+        void NewItem([MarshalAs(UnmanagedType.Interface)] IShellItem psiDestinationFolder, uint dwFileAttributes, [MarshalAs(UnmanagedType.LPWStr)] string pszName, [MarshalAs(UnmanagedType.LPWStr)] string? pszTemplateName, [MarshalAs(UnmanagedType.Interface)] IFileOperationProgressSink? pfopsItem);
+        void PerformOperations();
+        [return: MarshalAs(UnmanagedType.Bool)] bool GetAnyOperationsAborted();
+    }
+
+    private sealed class RecycleProgressSink : IFileOperationProgressSink
+    {
+        public string? RecycledPath { get; private set; }
+
+        public int StartOperations() => 0;
+        public int FinishOperations(int hrResult) => 0;
+        public int PreRenameItem(uint dwFlags, IShellItem? psiItem, string? pszNewName) => 0;
+        public int PostRenameItem(uint dwFlags, IShellItem? psiItem, string? pszNewName, int hrRename, IShellItem? psiNewlyCreated) => 0;
+        public int PreMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostMoveItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName, int hrMove, IShellItem? psiNewlyCreated) => 0;
+        public int PreCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostCopyItem(uint dwFlags, IShellItem? psiItem, IShellItem? psiDestinationFolder, string? pszNewName, int hrCopy, IShellItem? psiNewlyCreated) => 0;
+
+        public int PreDeleteItem(uint dwFlags, IShellItem? psiItem)
+        {
+            // 若目标卷禁用了回收站（即将永久删除而非进回收站），中止操作以退回 DiscardedFolder 保护文件
+            return (dwFlags & TsfDeleteRecycleIfPossible) != 0 ? 0 : EAbort;
+        }
+
+        public int PostDeleteItem(uint dwFlags, IShellItem? psiItem, int hrDelete, IShellItem? psiNewlyCreated)
+        {
+            if (hrDelete >= 0 && psiNewlyCreated is not null)
+            {
+                psiNewlyCreated.GetDisplayName(SigdnFileSysPath, out var path);
+                RecycledPath = path;
+            }
+            return 0;
+        }
+
+        public int PreNewItem(uint dwFlags, IShellItem? psiDestinationFolder, string? pszNewName) => 0;
+        public int PostNewItem(uint dwFlags, IShellItem? psiDestinationFolder, string? pszNewName, string? pszTemplateName, uint dwFileAttributes, int hrNew, IShellItem? psiNewlyCreated) => 0;
+        public int UpdateProgress(uint iWorkTotal, uint iWorkSoFar) => 0;
+        public int ResetTimer() => 0;
+        public int PauseTimer() => 0;
+        public int ResumeTimer() => 0;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHCreateItemFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+        IntPtr pbc,
+        [In] ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IShellItem ppv);
+
+    private static bool _simulateFailureForChecks;
+
+    public static void SetSimulateFailureForChecks(bool fail)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable(DataFolder.ChecksRunnerEnv), "1", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("SetSimulateFailureForChecks is only allowed inside the isolated check runner.");
+        }
+        _simulateFailureForChecks = fail;
+    }
+
+    public static bool MoveFileToRecycleBin(string path, out string? recycledPath)
+    {
+        recycledPath = null;
+        if (_simulateFailureForChecks) return false;
+        if (!File.Exists(path)) return false;
+
+        var full = Path.GetFullPath(path);
+        var startedUtc = DateTime.UtcNow;
+        Guid iid = IidShellItem;
+        if (SHCreateItemFromParsingName(full, IntPtr.Zero, ref iid, out var shellItem) < 0 || shellItem is null)
+        {
+            return false;
+        }
+
+        var opType = Type.GetTypeFromCLSID(ClsidFileOperation);
+        if (opType is null) return false;
+
+        object? rawOp = null;
+        try
+        {
+            rawOp = Activator.CreateInstance(opType);
+            if (rawOp is not IFileOperation fileOp) return false;
+
+            var sink = new RecycleProgressSink();
+            fileOp.SetOperationFlags(FofAllowUndo | FofNoConfirmation | FofSilent | FofNoErrorUi | FofxAddUndoRecord);
+            fileOp.DeleteItem(shellItem, sink);
+            fileOp.PerformOperations();
+            if (fileOp.GetAnyOperationsAborted() || File.Exists(full))
+            {
+                return false;
+            }
+
+            recycledPath = !string.IsNullOrWhiteSpace(sink.RecycledPath) && File.Exists(sink.RecycledPath)
+                ? sink.RecycledPath
+                : TryFindRecycledFile(full, startedUtc);
+            return !string.IsNullOrWhiteSpace(recycledPath) && File.Exists(recycledPath);
+        }
+        catch (COMException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (rawOp is not null && Marshal.IsComObject(rawOp))
+            {
+                Marshal.ReleaseComObject(rawOp);
+            }
+            if (Marshal.IsComObject(shellItem))
+            {
+                Marshal.ReleaseComObject(shellItem);
+            }
+        }
+    }
+
+    public static string? TryFindRecycledFile(string originalFullPath, DateTime minDeletedUtc)
+    {
+        if (string.IsNullOrWhiteSpace(originalFullPath)) return null;
+        var full = Path.GetFullPath(originalFullPath);
+        var root = Path.GetPathRoot(full);
+        var sid = WindowsIdentity.GetCurrent().User?.Value;
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(sid)) return null;
+
+        var recycleDir = Path.Combine(root, "$Recycle.Bin", sid);
+        if (!Directory.Exists(recycleDir)) return null;
+
+        IEnumerable<string> metaFiles;
+        try
+        {
+            metaFiles = Directory.EnumerateFiles(recycleDir, "$I*")
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .ToArray();
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        var floorUtc = minDeletedUtc.AddSeconds(-5);
+        foreach (var iFile in metaFiles)
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(iFile) < floorUtc) continue;
+                var bytes = File.ReadAllBytes(iFile);
+                if (!TryParseRecycleMetadata(bytes, out var origFromMeta, out var deletedUtc)) continue;
+                if (deletedUtc != DateTime.MinValue && deletedUtc < floorUtc) continue;
+                if (!string.Equals(origFromMeta, full, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var metaName = Path.GetFileName(iFile);
+                if (metaName.Length < 3) continue;
+                var rFile = Path.Combine(recycleDir, "$R" + metaName[2..]);
+                if (File.Exists(rFile))
+                {
+                    return rFile;
+                }
+            }
+            catch (IOException)
+            {
+                // 跳过并发写入中的回收站元数据项
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 跳过无权限读取的项
+            }
+        }
+        return null;
+    }
+
+    public static void CleanupCompanionMetadataFile(string recycledDataPath)
+    {
+        if (string.IsNullOrWhiteSpace(recycledDataPath)) return;
+        var name = Path.GetFileName(recycledDataPath);
+        var dir = Path.GetDirectoryName(recycledDataPath);
+        if (string.IsNullOrEmpty(dir) || name.Length < 3 || !name.StartsWith("$R", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        var iFile = Path.Combine(dir, "$I" + name[2..]);
+        if (File.Exists(iFile))
+        {
+            try { File.Delete(iFile); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static bool TryParseRecycleMetadata(byte[] bytes, out string originalFullPath, out DateTime deletedUtc)
+    {
+        originalFullPath = string.Empty;
+        deletedUtc = DateTime.MinValue;
+        if (bytes.Length < 28) return false;
+
+        long version = BitConverter.ToInt64(bytes, 0);
+        long fileTime = BitConverter.ToInt64(bytes, 16);
+        if (fileTime > 0)
+        {
+            try { deletedUtc = DateTime.FromFileTimeUtc(fileTime); } catch (ArgumentOutOfRangeException) { }
+        }
+
+        string raw;
+        if (version == 2)
+        {
+            int charCount = BitConverter.ToInt32(bytes, 24);
+            if (charCount <= 0 || charCount > 32768 || 28 + charCount * 2 > bytes.Length) return false;
+            raw = Encoding.Unicode.GetString(bytes, 28, charCount * 2);
+        }
+        else if (version == 1 && bytes.Length >= 544)
+        {
+            raw = Encoding.Unicode.GetString(bytes, 24, 520);
+        }
+        else
+        {
+            return false;
+        }
+
+        int nul = raw.IndexOf('\0');
+        if (nul >= 0) raw = raw[..nul];
+        if (raw.StartsWith(@"\\?\", StringComparison.Ordinal)) raw = raw[4..];
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        try
+        {
+            originalFullPath = Path.GetFullPath(raw);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 }

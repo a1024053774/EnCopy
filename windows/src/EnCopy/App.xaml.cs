@@ -1,10 +1,16 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Threading;
 
 namespace EnCopy;
 
 public partial class App : Application
 {
+    private const int VkLButton = 0x01;
+    private const int VkRButton = 0x02;
+
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
     private SettingsStore? _settingsStore;
@@ -13,12 +19,16 @@ public partial class App : Application
     private Line? _line;
     private Win32ClipboardBackend? _clipboardBackend;
     private ClipboardWatcher? _clipboardWatcher;
+    private HeldWindowManager? _heldManager;
+    private WindowsShareService? _shareService;
     private LinePanel? _panel;
     private PasteHint? _pasteHint;
     private Paster? _paster;
     private HotKey? _hotKey;
     private TrayIcon? _trayIcon;
     private ShortcutRecorderWindow? _recorder;
+    private DispatcherTimer? _topHoverTimer;
+    private readonly TopEdgeHoverTracker _hoverTracker = new();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -37,18 +47,25 @@ public partial class App : Application
         _settingsStore = new SettingsStore();
         _settings = _settingsStore.Load();
         _history = new History();
-        _line = new Line(_history, keepOnLine: _settings.NormalizedKeepOnLine);
+        _line = new Line(_history, keepOnLine: _settings.NormalizedKeepOnLine)
+        {
+            Theme = _settings.GetActiveTheme()
+        };
+
         var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
         var initialStrip = ScreenPlacement.TopLineStrip(cx, cy, ScreenPlacement.EnumerateMonitors(), 300.0);
         _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(initialStrip.Width));
+
+        _heldManager = new HeldWindowManager();
+        _shareService = new WindowsShareService();
 
         _clipboardBackend = new Win32ClipboardBackend();
         _clipboardWatcher = new ClipboardWatcher(
             _clipboardBackend,
             _history,
             _settings,
-            onNew: path => _line.AddNew(path),
-            onAgain: (path, stampUtc) => _line.Use(path, stampUtc));
+            onNew: HandleNewCopiedItem,
+            onAgain: HandleRepeatedCopiedItem);
         if (_clipboardWatcher.IsEnabled)
         {
             _clipboardWatcher.Start();
@@ -67,7 +84,19 @@ public partial class App : Application
             onPasteNotes: (notes, targetHwnd, plain) => _paster.PasteNotes(notes, targetHwnd, plain),
             onCopyNotes: notes => _paster.WriteMultipleToClipboard(notes, plain: false),
             onVisibilityChanged: RefreshTrayState,
-            onRequestChangeShortcut: OpenShortcutRecorder);
+            onRequestChangeShortcut: OpenShortcutRecorder,
+            heldManager: _heldManager,
+            shareService: _shareService,
+            getZoomOnHover: () => _settings.ZoomOnHover);
+
+        _line.PropertyChanged += (_, args) =>
+        {
+            if (string.Equals(args.PropertyName, nameof(Line.ShownItems), StringComparison.Ordinal) ||
+                string.Equals(args.PropertyName, nameof(Line.TotalCount), StringComparison.Ordinal))
+            {
+                _trayIcon?.Refresh();
+            }
+        };
 
         _trayIcon = new TrayIcon(
             onToggleSummon: () => _panel.SummonOrToggleFromTray(),
@@ -80,6 +109,7 @@ public partial class App : Application
                 else _clipboardWatcher.Stop();
             },
             isPaused: () => _settings.RecordingPaused,
+            getItemCount: () => _line.LineItems.Count,
             onSetKeepOnLine: keep =>
             {
                 _settings.KeepOnLine = keep;
@@ -87,6 +117,21 @@ public partial class App : Application
                 _line.SetKeepOnLine(keep);
             },
             getKeepOnLine: () => _settings.NormalizedKeepOnLine,
+            onSetTheme: theme =>
+            {
+                _settings.SetActiveTheme(theme);
+                _settingsStore.Save(_settings);
+                _line.Theme = theme;
+            },
+            getTheme: () => _line.Theme,
+            onSetZoomOnHover: zoom =>
+            {
+                _settings.ZoomOnHover = zoom;
+                _settingsStore.Save(_settings);
+            },
+            getZoomOnHover: () => _settings.ZoomOnHover,
+            onHangAllBack: () => _heldManager.HangAllBack(),
+            hasHeldItems: () => _heldManager.HasOpenWindows,
             onOpenShortcutRecorder: OpenShortcutRecorder,
             getActiveShortcut: () => _settings.GetActiveShortcut(),
             onQuit: () => Shutdown());
@@ -96,16 +141,92 @@ public partial class App : Application
         {
             _trayIcon.ShowHotKeyConflict(s);
         }
+
+        _topHoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(35) };
+        _topHoverTimer.Tick += (_, _) => PollTopEdgeHover();
+        _topHoverTimer.Start();
     }
 
-    private void RefreshTrayState()
+    private void HandleNewCopiedItem(string path)
     {
-        _trayIcon?.UpdateState(
-            _panel?.IsSummoned ?? false,
-            _settings.RecordingPaused,
-            _settings.NormalizedKeepOnLine,
-            _settings.GetActiveShortcut());
+        if (_line is null) return;
+        _line.AddNew(path);
+        if (_panel is { IsSummoned: true })
+        {
+            _panel.NotifyNewCardHung(path);
+            _trayIcon?.Refresh();
+            return;
+        }
+
+        _trayIcon?.TriggerCopySway();
+
+        if (_settings.PeeksAtNew && _panel is not null)
+        {
+            var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
+            var mon = ScreenPlacement.PickMonitor(cx, cy, ScreenPlacement.EnumerateMonitors());
+            var selfHwnd = new WindowInteropHelper(_panel).Handle;
+            if (!FullScreenDetector.BlocksLineOnMonitor(mon, _settings.ShowOverFullScreen, selfHwnd))
+            {
+                _panel.PeekNewItem(_settings.NormalizedPeekSeconds, path);
+            }
+        }
     }
+
+    private void HandleRepeatedCopiedItem(string path, DateTime stampUtc)
+    {
+        if (_line is null) return;
+        _line.Use(path, stampUtc);
+        if (_panel is not { IsSummoned: true })
+        {
+            _trayIcon?.TriggerCopySway();
+        }
+    }
+
+    private void PollTopEdgeHover()
+    {
+        if (_panel is null) return;
+        if (!_settings.OpensFromTopEdge && !_panel.IsSummoned)
+        {
+            _hoverTracker.Reset();
+            return;
+        }
+
+        var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
+        var monitors = ScreenPlacement.EnumerateMonitors();
+        var mon = _panel.IsSummoned ? _panel.ActiveMonitor : ScreenPlacement.PickMonitor(cx, cy, monitors);
+        bool mouseDown = ((GetAsyncKeyState(VkLButton) & 0x8000) != 0) || ((GetAsyncKeyState(VkRButton) & 0x8000) != 0);
+
+        if (_panel.IsPeeking && mon.Bounds.Contains(cx, cy) && cy <= _panel.PanelBottomPhysicalY)
+        {
+            _panel.PromotePeekToHover();
+        }
+
+        var action = _hoverTracker.Update(
+            cx,
+            cy,
+            mon,
+            mouseDown,
+            isRevealed: _panel.IsSummoned,
+            isPinnedBySummon: _panel.IsPinnedBySummon,
+            keepOpenForMenuOrDrag: _panel.IsInteractionHoldActive || _panel.IsPeeking,
+            panelBottomPhysicalY: _panel.PanelBottomPhysicalY,
+            nowUtc: DateTime.UtcNow);
+
+        if (action == HoverAction.RevealByHover && _settings.OpensFromTopEdge)
+        {
+            var selfHwnd = new WindowInteropHelper(_panel).Handle;
+            if (!FullScreenDetector.BlocksLineOnMonitor(mon, _settings.ShowOverFullScreen, selfHwnd))
+            {
+                _panel.RevealByHover();
+            }
+        }
+        else if (action == HoverAction.Retract)
+        {
+            _panel.Dismiss(restoreForeground: false, animateTuck: true);
+        }
+    }
+
+    private void RefreshTrayState() => _trayIcon?.Refresh();
 
     /// <summary>
     /// 全应用唯一的热键实例化与切换入口，保证全局仅占用一个快捷键。
@@ -144,7 +265,6 @@ public partial class App : Application
         }
 
         var current = _settings.GetActiveShortcut();
-        // 先释放当前热键，避免自己占用自己的旧组合键导致无法重新录回原键
         _hotKey?.Dispose();
         _hotKey = null;
 
@@ -178,7 +298,10 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _topHoverTimer?.Stop();
         _recorder?.CloseSilently();
+        _heldManager?.Dispose();
+        _shareService?.Dispose();
         _hotKey?.Dispose();
         _clipboardWatcher?.Dispose();
         _clipboardBackend?.Dispose();
@@ -195,4 +318,7 @@ public partial class App : Application
         }
         base.OnExit(e);
     }
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 }

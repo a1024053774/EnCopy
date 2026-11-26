@@ -8,6 +8,9 @@
         ShowInTaskbar="False"
         ResizeMode="NoResize">
     <Grid x:Name="RootGrid" Background="{x:Null}">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="PanelSlideTransform" X="0" Y="0" />
+        </Grid.RenderTransform>
         <Grid.RowDefinitions>
             <RowDefinition Height="208" />
             <RowDefinition Height="Auto" />

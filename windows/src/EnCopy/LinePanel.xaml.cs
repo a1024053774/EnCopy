@@ -1,9 +1,14 @@
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using WF = System.Windows.Forms;
 
@@ -12,6 +17,7 @@ namespace EnCopy;
 /// <summary>
 /// 顶部绳子与篮子面板按键路由器：
 /// IME 组字态下完整让渡方向键、Enter 与 Esc 给中文输入法；
+/// 搜索框有文字且光标不在末尾时（T-070 / CONTEXT.md），←/→ 归输入框移动光标；
 /// 非组字态支持 ←/→ 挑选、Shift+←/→ 多选、Tab/Shift+Tab 筛选种类、Ctrl+P 收藏、Ctrl+Backspace/Delete 取下、Ctrl+Z 放回、↓ 展开篮子与组跳转。
 /// </summary>
 public static class LineKeyRouter
@@ -27,7 +33,8 @@ public static class LineKeyRouter
         Action copyPicked,
         Action dismiss,
         Action clearQuery,
-        bool? canUndoQuery = null)
+        bool? canUndoQuery = null,
+        bool caretAtEnd = true)
     {
         if (isImeComposing || key == Key.ImeProcessed || key == Key.DeadCharProcessed)
         {
@@ -99,6 +106,8 @@ public static class LineKeyRouter
             return true;
         }
 
+        bool caretInsideQuery = !string.IsNullOrEmpty(currentQuery) && (!caretAtEnd || hasQuerySelection);
+
         if (line.BasketOpen)
         {
             if (modifiers == ModifierKeys.None)
@@ -111,10 +120,10 @@ public static class LineKeyRouter
                     case Key.Up:
                         line.VerticalArrow(-1);
                         return true;
-                    case Key.Left:
+                    case Key.Left when !caretInsideQuery:
                         line.MoveBasketGroup(-1);
                         return true;
-                    case Key.Right:
+                    case Key.Right when !caretInsideQuery:
                         line.MoveBasketGroup(1);
                         return true;
                 }
@@ -125,6 +134,10 @@ public static class LineKeyRouter
         if (modifiers is ModifierKeys.None or ModifierKeys.Shift)
         {
             bool extend = modifiers == ModifierKeys.Shift;
+            if ((key is Key.Left or Key.Right) && (caretInsideQuery || (extend && !string.IsNullOrEmpty(currentQuery))))
+            {
+                return false;
+            }
             if (key == Key.Left)
             {
                 line.MovePick(-1, extendSelection: extend);
@@ -149,6 +162,9 @@ public static class LineKeyRouter
 public partial class LinePanel : Window
 {
     private const int GcsCompStr = 0x0008;
+    private const int GwlExStyle = -20;
+    private const int WsExNoActivate = 0x08000000;
+    private const int WsExToolWindow = 0x00000080;
     private const double CollapsedPanelHeight = 344.0;
 
     private readonly Line _line;
@@ -156,26 +172,73 @@ public partial class LinePanel : Window
     private readonly Func<IReadOnlyList<Note>, bool> _onCopyNotes;
     private readonly Action _onVisibilityChanged;
     private readonly Action _onRequestChangeShortcut;
+    private readonly HeldWindowManager? _heldManager;
+    private readonly WindowsShareService? _shareService;
+    private readonly Func<bool>? _getZoomOnHover;
+
+    private readonly MotionEngine _motion = new();
+    private readonly HoverZoomController _zoomController = new();
     private readonly DispatcherTimer _copiedResetTimer;
     private readonly DispatcherTimer _singleClickTimer;
+    private readonly DispatcherTimer _breezeTimer;
+    private readonly DispatcherTimer _peekTimer;
+    private readonly DispatcherTimer _hoverZoomPollTimer;
     private readonly CardClickCoordinator _clickCoordinator;
 
     private IntPtr _previousForegroundHwnd;
+    private DisplayMonitor _activeMonitor;
+    private Note? _hoveredCard;
     private bool _isDismissing;
+    private bool _isTucking;
+    private bool _isPinnedBySummon;
+    private bool _showBasketHandle = true;
+    private bool _isDraggingOut;
+    private int _openContextMenus;
+    private DateTime _lastKeyUtc = DateTime.MinValue;
     private DateTime _lastDeactivatedUtc = DateTime.MinValue;
     private string? _conflictNotice;
     private double _maxPanelHeight = 680.0;
     private bool _scrollBasketToPicked = true;
     private Border? _pickedBasketRowBorder;
 
-    public bool IsSummoned => IsVisible;
+    public bool IsSummoned => IsVisible && !_isTucking;
+    public MotionEngine MotionForTest => _motion;
+    public bool IsPinnedBySummon => IsSummoned && _isPinnedBySummon;
+    public bool IsPeeking => IsSummoned && _peekTimer.IsEnabled;
+    public bool IsInteractionHoldActive => _isDraggingOut || _openContextMenus > 0 || (_shareService?.IsOpen ?? false);
+    public DisplayMonitor ActiveMonitor => _activeMonitor;
+
+    public double PanelContentBottomDip
+    {
+        get
+        {
+            if (SearchShell.Visibility != Visibility.Visible)
+            {
+                return Top + ScreenPlacement.LineBandHeight;
+            }
+            var pt = SearchShell.TranslatePoint(new Point(0, SearchShell.ActualHeight), this);
+            return Top + Math.Max(ScreenPlacement.LineBandHeight, pt.Y);
+        }
+    }
+
+    public int PanelBottomPhysicalY
+    {
+        get
+        {
+            double scale = _activeMonitor.DpiScale > 0 ? _activeMonitor.DpiScale : 1.0;
+            return (int)Math.Round((Top + ActualHeight) * scale);
+        }
+    }
 
     public LinePanel(
         Line line,
         Func<IReadOnlyList<Note>, IntPtr, bool, bool> onPasteNotes,
         Func<IReadOnlyList<Note>, bool> onCopyNotes,
         Action onVisibilityChanged,
-        Action onRequestChangeShortcut)
+        Action onRequestChangeShortcut,
+        HeldWindowManager? heldManager = null,
+        WindowsShareService? shareService = null,
+        Func<bool>? getZoomOnHover = null)
     {
         InitializeComponent();
         _line = line;
@@ -183,6 +246,11 @@ public partial class LinePanel : Window
         _onCopyNotes = onCopyNotes;
         _onVisibilityChanged = onVisibilityChanged;
         _onRequestChangeShortcut = onRequestChangeShortcut;
+        _heldManager = heldManager;
+        _shareService = shareService;
+        _getZoomOnHover = getZoomOnHover;
+
+        _motion.FrameUpdated += ApplyMotionFrame;
 
         _copiedResetTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1100) };
         _copiedResetTimer.Tick += (_, _) =>
@@ -206,14 +274,16 @@ public partial class LinePanel : Window
                     if (_onCopyNotes([note]))
                     {
                         _line.Use(note.FilePath);
+                        _motion.TriggerHop(note.FilePath);
                         FlashCopiedFeedback(note.FilePath);
                     }
                 }
-                QueryBox.Focus();
+                if (_isPinnedBySummon) QueryBox.Focus();
             },
             onDoubleClick: note =>
             {
                 _line.PickCard(note, extendSelection: false);
+                LaunchFlyToCursorFor(note);
                 _onPasteNotes([note], _previousForegroundHwnd, false);
             },
             scheduleTimer: () =>
@@ -228,11 +298,58 @@ public partial class LinePanel : Window
             _clickCoordinator.FlushPendingSingleClick();
         };
 
-        _line.PropertyChanged += (_, _) =>
+        _breezeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _breezeTimer.Tick += (_, _) =>
         {
+            ScheduleNextBreeze();
+            if (IsVisible && !IsInteractionHoldActive && Motion.CanBreeze(DateTime.UtcNow, _lastKeyUtc))
+            {
+                _motion.TriggerGust(_line.ShownItems, summoned: _isPinnedBySummon);
+            }
+        };
+
+        _peekTimer = new DispatcherTimer();
+        _peekTimer.Tick += (_, _) =>
+        {
+            _peekTimer.Stop();
+            if (IsVisible && !_isPinnedBySummon && !IsInteractionHoldActive)
+            {
+                var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
+                if (cy > PanelBottomPhysicalY + 16)
+                {
+                    Dismiss(restoreForeground: false, animateTuck: true);
+                }
+            }
+        };
+
+        _hoverZoomPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+        _hoverZoomPollTimer.Tick += (_, _) =>
+        {
+            if (!IsSummoned || (_getZoomOnHover is not null && !_getZoomOnHover()) || IsInteractionHoldActive || _line.BasketOpen)
+            {
+                _zoomController.Hide();
+                return;
+            }
+            _zoomController.Update(_hoveredCard, _activeMonitor, ThemePalette.IsDarkMode(), _line.Theme, PanelContentBottomDip);
+        };
+
+        _line.PropertyChanged += (_, e) =>
+        {
+            if (string.Equals(e.PropertyName, nameof(Line.BasketOpen), StringComparison.Ordinal) && _line.BasketOpen && IsVisible)
+            {
+                _motion.BounceRope(Motion.BasketTaut, bySummon: true);
+            }
             if (IsVisible)
             {
                 RenderAll();
+            }
+        };
+
+        SearchShell.PreviewMouseLeftButtonDown += (_, _) =>
+        {
+            if (!_isPinnedBySummon)
+            {
+                PromoteToInteractiveSummon();
             }
         };
 
@@ -242,10 +359,18 @@ public partial class LinePanel : Window
         Deactivated += (_, _) =>
         {
             _lastDeactivatedUtc = DateTime.UtcNow;
-            if (IsVisible)
+            if (IsVisible && _isPinnedBySummon && !IsInteractionHoldActive)
             {
                 Dismiss(restoreForeground: false);
             }
+        };
+        Closed += (_, _) =>
+        {
+            _breezeTimer.Stop();
+            _peekTimer.Stop();
+            _hoverZoomPollTimer.Stop();
+            _zoomController.Dispose();
+            _motion.Dispose();
         };
     }
 
@@ -255,9 +380,30 @@ public partial class LinePanel : Window
         if (IsVisible) RenderAll();
     }
 
+    public void NotifyNewCardHung(string filePath)
+    {
+        if (!IsVisible) return;
+        var note = _line.ShownItems.FirstOrDefault(n => string.Equals(n.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+        if (note is not null)
+        {
+            _motion.TriggerNewCard(note.FilePath, note.Paper);
+        }
+    }
+
+    public void AnimateHeldReturn(string filePath, Rect fromDip, BitmapSource? snapshot)
+    {
+        if (!IsVisible || snapshot is null) return;
+        if (PaperCardView.TryFindCardVisual(LineCanvas, filePath, out var cardEl) && cardEl is not null)
+        {
+            var pt = cardEl.TranslatePoint(new Point(0, 0), this);
+            var targetDip = new Rect(Left + pt.X, Top + pt.Y, cardEl.ActualWidth > 0 ? cardEl.ActualWidth : ScreenPlacement.CardWidth, ScreenPlacement.CardHeight);
+            FlightOverlay.FlyBackToLine(snapshot, fromDip, targetDip);
+        }
+    }
+
     public void SummonOrToggle()
     {
-        if (IsVisible)
+        if (IsSummoned && _isPinnedBySummon)
         {
             Dismiss(restoreForeground: true);
             return;
@@ -267,7 +413,7 @@ public partial class LinePanel : Window
 
     public void SummonOrToggleFromTray()
     {
-        if (IsVisible)
+        if (IsSummoned && _isPinnedBySummon)
         {
             Dismiss(restoreForeground: true);
             return;
@@ -281,50 +427,100 @@ public partial class LinePanel : Window
 
     public void Summon()
     {
-        var selfHwnd = new WindowInteropHelper(this).Handle;
-        var fg = WindowInteropHelperEx.CurrentForegroundWindow();
-        if (fg != IntPtr.Zero && fg != selfHwnd && !IsTaskbarWindow(fg))
-        {
-            _previousForegroundHwnd = fg;
-        }
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
+        _peekTimer.Stop();
+        RecordPreviousForeground();
 
-        _clickCoordinator.Cancel();
-        _scrollBasketToPicked = true;
-        _line.CloseBasket();
-        _line.KindFilter = KindFilter.All;
-        _line.Query = string.Empty;
-        if (!string.Equals(QueryBox.Text, string.Empty, StringComparison.Ordinal))
-        {
-            QueryBox.Text = string.Empty;
-        }
+        _isPinnedBySummon = true;
+        _showBasketHandle = true;
+        PrepareAndPlaceOnCursorScreen();
 
-        var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
-        var monitors = ScreenPlacement.EnumerateMonitors();
-        var expandedRect = ScreenPlacement.TopLineStrip(cx, cy, monitors, 680.0);
-        _maxPanelHeight = expandedRect.Height;
-        var rect = ScreenPlacement.TopLineStrip(cx, cy, monitors, CollapsedPanelHeight);
-        _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(rect.Width));
-        _line.ReloadFromHistory();
-        _line.PickDefault();
-
-        Left = rect.Left;
-        Top = rect.Top;
-        Width = rect.Width;
-        Height = rect.Height;
-
+        SetNoActivateStyle(noActivate: false);
+        ShowActivated = true;
         RenderAll();
+        _motion.BeginReveal(bySummon: true, CollapsedPanelHeight, _line.ShownItems);
         Show();
         Activate();
         QueryBox.Focus();
+        StartActiveTimers();
         _onVisibilityChanged();
     }
 
-    public void Dismiss(bool restoreForeground, IntPtr? targetOverride = null)
+    public void RevealByHover()
     {
-        if (!IsVisible || _isDismissing) return;
+        if (IsSummoned) return;
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
+        _peekTimer.Stop();
+        RecordPreviousForeground();
+
+        _isPinnedBySummon = false;
+        _showBasketHandle = true;
+        PrepareAndPlaceOnCursorScreen();
+
+        ShowActivated = false;
+        SetNoActivateStyle(noActivate: true);
+        RenderAll();
+        _motion.BeginReveal(bySummon: false, CollapsedPanelHeight, _line.ShownItems);
+        Show();
+        StartActiveTimers();
+        _onVisibilityChanged();
+    }
+
+    public void PromotePeekToHover()
+    {
+        if (!IsPeeking) return;
+        _peekTimer.Stop();
+        _showBasketHandle = true;
+        RenderAll();
+    }
+
+    public void PeekNewItem(double durationSeconds, string? newFilePath = null)
+    {
+        if (!IsSummoned)
+        {
+            _isTucking = false;
+            _motion.CancelLinearWithoutCallback();
+            RecordPreviousForeground();
+            _isPinnedBySummon = false;
+            _showBasketHandle = false;
+            PrepareAndPlaceOnCursorScreen();
+
+            ShowActivated = false;
+            SetNoActivateStyle(noActivate: true);
+            RenderAll();
+            _motion.BeginReveal(bySummon: false, CollapsedPanelHeight, _line.ShownItems);
+            Show();
+            StartActiveTimers();
+            _onVisibilityChanged();
+        }
+
+        if (newFilePath is not null)
+        {
+            NotifyNewCardHung(newFilePath);
+        }
+
+        if (!_isPinnedBySummon)
+        {
+            _peekTimer.Stop();
+            _peekTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(durationSeconds, 0.5, 10.0));
+            _peekTimer.Start();
+        }
+    }
+
+    public void Dismiss(bool restoreForeground, IntPtr? targetOverride = null, bool animateTuck = false)
+    {
+        if (!IsSummoned || _isDismissing) return;
         _isDismissing = true;
         try
         {
+            _peekTimer.Stop();
+            _breezeTimer.Stop();
+            _hoverZoomPollTimer.Stop();
+            _zoomController.Hide();
+            _hoveredCard = null;
+
             var target = targetOverride ?? _previousForegroundHwnd;
             _clickCoordinator.Cancel();
             _copiedResetTimer.Stop();
@@ -336,13 +532,35 @@ public partial class LinePanel : Window
             {
                 QueryBox.Text = string.Empty;
             }
-            // 先趁面板仍处于前台窗口时把焦点归还原窗口，再 Hide() 避免失去 Win32 切焦点资格
+
             if (restoreForeground && target != IntPtr.Zero)
             {
                 WindowInteropHelperEx.RestoreForeground(target);
             }
-            Hide();
-            _onVisibilityChanged();
+
+            _isPinnedBySummon = false;
+            if (animateTuck && !IsInChecksRunner())
+            {
+                _isTucking = true;
+                _onVisibilityChanged();
+                _motion.BeginTuck(CollapsedPanelHeight, () =>
+                {
+                    if (!_isTucking) return;
+                    _isTucking = false;
+                    Hide();
+                    _motion.SnapAllToRest();
+                    ApplyMotionFrame();
+                    _onVisibilityChanged();
+                });
+            }
+            else
+            {
+                _isTucking = false;
+                _motion.SnapAllToRest();
+                ApplyMotionFrame();
+                Hide();
+                _onVisibilityChanged();
+            }
         }
         finally
         {
@@ -355,6 +573,9 @@ public partial class LinePanel : Window
         ThemePalette.SetDarkOverride(darkOverride);
         try
         {
+            _motion.SnapAllToRest();
+            ApplyMotionFrame();
+            _showBasketHandle = true;
             Width = width;
             Height = height;
             _maxPanelHeight = height;
@@ -373,6 +594,116 @@ public partial class LinePanel : Window
         }
     }
 
+    private void PromoteToInteractiveSummon()
+    {
+        _isTucking = false;
+        _motion.CancelLinearWithoutCallback();
+        PanelSlideTransform.Y = 0.0;
+        RootGrid.Opacity = 1.0;
+        _peekTimer.Stop();
+        RecordPreviousForeground();
+        _isPinnedBySummon = true;
+        _showBasketHandle = true;
+        SetNoActivateStyle(noActivate: false);
+        Activate();
+        QueryBox.Focus();
+        StartActiveTimers();
+        RenderAll();
+        _onVisibilityChanged();
+    }
+
+    private void RecordPreviousForeground()
+    {
+        var selfHwnd = new WindowInteropHelper(this).Handle;
+        var fg = WindowInteropHelperEx.CurrentForegroundWindow();
+        if (fg != IntPtr.Zero && fg != selfHwnd && !IsTaskbarWindow(fg))
+        {
+            GetWindowThreadProcessId(fg, out uint pid);
+            if (pid != (uint)Environment.ProcessId)
+            {
+                _previousForegroundHwnd = fg;
+            }
+        }
+    }
+
+    private void PrepareAndPlaceOnCursorScreen()
+    {
+        _clickCoordinator.Cancel();
+        _scrollBasketToPicked = true;
+        _line.CloseBasket();
+        _line.KindFilter = KindFilter.All;
+        _line.Query = string.Empty;
+        if (!string.Equals(QueryBox.Text, string.Empty, StringComparison.Ordinal))
+        {
+            QueryBox.Text = string.Empty;
+        }
+
+        var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
+        var monitors = ScreenPlacement.EnumerateMonitors();
+        _activeMonitor = ScreenPlacement.PickMonitor(cx, cy, monitors);
+        var expandedRect = ScreenPlacement.TopLineStrip(cx, cy, monitors, 680.0);
+        _maxPanelHeight = expandedRect.Height;
+        var rect = ScreenPlacement.TopLineStrip(cx, cy, monitors, CollapsedPanelHeight);
+        _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(rect.Width));
+        _line.ReloadFromHistory();
+        _line.PickDefault();
+
+        Left = rect.Left;
+        Top = rect.Top;
+        Width = rect.Width;
+        Height = rect.Height;
+    }
+
+    private void StartActiveTimers()
+    {
+        ScheduleNextBreeze();
+        _breezeTimer.Start();
+        _hoverZoomPollTimer.Start();
+    }
+
+    private void ScheduleNextBreeze()
+    {
+        _breezeTimer.Interval = TimeSpan.FromSeconds(7.0 + Random.Shared.NextDouble() * 9.0);
+    }
+
+    private void ApplyMotionFrame()
+    {
+        PanelSlideTransform.Y = _motion.PanelSlideY;
+        RootGrid.Opacity = _motion.PanelOpacity;
+        double stripWidth = Width > 100 ? Width : 1280;
+        PaperCardView.ApplyMotionTransforms(LineCanvas, stripWidth, _motion);
+    }
+
+    private void BuildRopeCanvasOnly(double? overrideCanvasWidth = null)
+    {
+        bool isDark = ThemePalette.IsDarkMode();
+        double stripWidth = overrideCanvasWidth ?? (Width > 100 ? Width : 1280);
+        var callbacks = new CardInteractionCallbacks(
+            OnMouseClick: (note, clicks, extend) => _clickCoordinator.HandleClick(note, clicks, extend),
+            OnHoverChanged: note => _hoveredCard = note,
+            OnStartDrag: StartCardDragOut,
+            OnDiscardCross: DiscardSingleCardWithFall,
+            OnHangBackHeld: note => _heldManager?.HangBack(note.FilePath),
+            BuildContextMenu: BuildCardContextMenu);
+
+        PaperCardView.BuildRopeAndCards(
+            LineCanvas,
+            stripWidth,
+            _line,
+            isDark,
+            callbacks,
+            onBasketHandleClick: () =>
+            {
+                if (!_isPinnedBySummon) PromoteToInteractiveSummon();
+                _scrollBasketToPicked = true;
+                if (_line.BasketOpen) _line.CloseBasket();
+                else _line.OpenBasket();
+                QueryBox.Focus();
+            },
+            motion: _motion,
+            showBasketHandle: _showBasketHandle);
+    }
+
     private void RenderAll(double? overrideCanvasWidth = null)
     {
         bool isDark = ThemePalette.IsDarkMode();
@@ -387,7 +718,7 @@ public partial class LinePanel : Window
             }
         }
 
-        // 外壳主题自适应（纸面本身永远保持浅色）
+        SearchShell.Visibility = _showBasketHandle ? Visibility.Visible : Visibility.Collapsed;
         SearchShell.Width = _line.BasketOpen ? Math.Min(640.0, Math.Max(420.0, stripWidth - 40.0)) : 440.0;
         SearchShell.Background = ThemePalette.Brush(ThemePalette.ChromeFill(isDark));
         SearchShell.BorderBrush = ThemePalette.Brush(ThemePalette.ChromeBorder(isDark));
@@ -412,22 +743,274 @@ public partial class LinePanel : Window
 
         UpdateActiveFilterPill();
         UpdateConflictNotice(isDark);
-
-        PaperCardView.BuildRopeAndCards(
-            LineCanvas,
-            stripWidth,
-            _line,
-            isDark,
-            onCardMouseClick: (note, clicks, extend) => _clickCoordinator.HandleClick(note, clicks, extend),
-            onBasketHandleClick: () =>
-            {
-                _scrollBasketToPicked = true;
-                if (_line.BasketOpen) _line.CloseBasket();
-                else _line.OpenBasket();
-                QueryBox.Focus();
-            });
-
+        BuildRopeCanvasOnly(overrideCanvasWidth);
         RenderBasketSection(isDark);
+    }
+
+    private void StartCardDragOut(Note note, UIElement cardVisual)
+    {
+        _clickCoordinator.Cancel();
+        _zoomController.Hide();
+
+        var full = Path.GetFullPath(note.FilePath);
+        var group = _line.SelectedPaths.Contains(full) && _line.SelectedPaths.Count > 1
+            ? _line.GetSelectedNotesInLineOrder()
+            : [note];
+
+        var data = new DataObject();
+        var dropFiles = new StringCollection();
+        var texts = new List<string>();
+
+        foreach (var item in group)
+        {
+            if (item.FileTargets.Count > 0)
+            {
+                foreach (var target in item.FileTargets.Where(p => File.Exists(p) || Directory.Exists(p)))
+                {
+                    dropFiles.Add(Path.GetFullPath(target));
+                }
+            }
+            else if (File.Exists(item.FilePath))
+            {
+                dropFiles.Add(Path.GetFullPath(item.FilePath));
+            }
+
+            if (item.Kind is ItemKind.Text or ItemKind.Code or ItemKind.Link)
+            {
+                texts.Add(item.FullText);
+                if (group.Count == 1 && string.Equals(Path.GetExtension(item.FilePath), ".rtf", StringComparison.OrdinalIgnoreCase) && File.Exists(item.FilePath))
+                {
+                    data.SetData(DataFormats.Rtf, File.ReadAllText(item.FilePath, Encoding.UTF8));
+                }
+            }
+        }
+
+        if (texts.Count > 0)
+        {
+            data.SetData(DataFormats.UnicodeText, string.Join(Environment.NewLine, texts), autoConvert: true);
+        }
+        if (dropFiles.Count > 0)
+        {
+            data.SetFileDropList(dropFiles);
+        }
+        data.SetData(ClipboardWatcher.SelfCopyFormat, new byte[] { 1 });
+
+        bool allMovablePrivate = group.All(n => !n.Pinned && DataFolder.IsMovablePrivateItem(n.FilePath));
+        var allowed = allMovablePrivate
+            ? (DragDropEffects.Copy | DragDropEffects.Move)
+            : DragDropEffects.Copy;
+
+        _isDraggingOut = true;
+        var dragStartedUtc = DateTime.UtcNow;
+        try
+        {
+            var result = DragDrop.DoDragDrop(cardVisual, data, allowed);
+            // Windows Explorer 同卷优化移动或拖入桌面回收站可能自行移走文件并返回 DragDropEffects.None，统一检查文件是否仍在原处并识别回收站项记入撤销栈
+            _line.PruneMissingFromLine(dragStartedUtc);
+            if (allMovablePrivate)
+            {
+                var delayedCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+                delayedCheckTimer.Tick += (_, _) =>
+                {
+                    delayedCheckTimer.Stop();
+                    _line.PruneMissingFromLine(dragStartedUtc);
+                };
+                delayedCheckTimer.Start();
+            }
+            if (result != DragDropEffects.None && (result & DragDropEffects.Move) == 0)
+            {
+                var stamp = DateTime.UtcNow;
+                for (int i = group.Count - 1; i >= 0; i--)
+                {
+                    if (File.Exists(group[i].FilePath) || Directory.Exists(group[i].FilePath))
+                    {
+                        _line.Use(group[i].FilePath, stamp.AddMilliseconds(group.Count - 1 - i));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            _isDraggingOut = false;
+        }
+    }
+
+    private ContextMenu BuildCardContextMenu(Note note, UIElement cardVisual)
+    {
+        _clickCoordinator.Cancel();
+        _zoomController.Hide();
+
+        var full = Path.GetFullPath(note.FilePath);
+        bool multi = _line.SelectedPaths.Contains(full) && _line.SelectedPaths.Count > 1;
+        var targets = multi ? _line.GetSelectedNotesInLineOrder() : [note];
+
+        var menu = new ContextMenu();
+        menu.Opened += (_, _) => _openContextMenus++;
+        menu.Closed += (_, _) => _openContextMenus = Math.Max(0, _openContextMenus - 1);
+
+        if (multi)
+        {
+            menu.Items.Add(new MenuItem
+            {
+                Header = Localization.Format("{0} selected", targets.Count),
+                IsEnabled = false
+            });
+            menu.Items.Add(new Separator());
+        }
+
+        AddMenuItem(menu, Localization.L("Copy"), () =>
+        {
+            if (_onCopyNotes(targets))
+            {
+                foreach (var t in targets) _line.Use(t.FilePath);
+                FlashCopiedFeedback(targets[0].FilePath);
+            }
+        });
+
+        AddMenuItem(menu, Localization.L("Copy Path"), () =>
+        {
+            var pathsText = string.Join(Environment.NewLine, targets.SelectMany(t => t.FileTargets.Count > 0 ? t.FileTargets : [t.FilePath]));
+            var pathNote = Note.Parse(targets[0].FilePath, targets[0].RelativePath, pathsText, DateTime.Now);
+            _onCopyNotes([pathNote]);
+        });
+
+        AddMenuItem(menu, Localization.L("Open"), () =>
+        {
+            foreach (var t in targets)
+            {
+                var openPath = t.FileTargets.FirstOrDefault() ?? t.FilePath;
+                if (File.Exists(openPath) || Directory.Exists(openPath))
+                {
+                    Process.Start(new ProcessStartInfo { FileName = openPath, UseShellExecute = true });
+                }
+            }
+        });
+
+        if (!multi && note.Link is { } uri)
+        {
+            AddMenuItem(menu, Localization.L("Open Link"), () =>
+                Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true }));
+        }
+
+        AddMenuItem(menu, Localization.L("Show in Explorer"), () =>
+        {
+            var revealPath = (targets[0].FileTargets.FirstOrDefault() ?? targets[0].FilePath);
+            if (File.Exists(revealPath) || Directory.Exists(revealPath))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{Path.GetFullPath(revealPath)}\"",
+                    UseShellExecute = true
+                });
+            }
+        });
+
+        if (!multi && _heldManager is not null && note.Kind != ItemKind.Video)
+        {
+            AddMenuItem(menu, Localization.L("Hold"), () =>
+            {
+                _heldManager.Hold(
+                    note,
+                    _line,
+                    _onCopyNotes,
+                    onHangBack: (p, fromRect, snap) => AnimateHeldReturn(p, fromRect, snap));
+            });
+        }
+
+        if (_shareService is not null)
+        {
+            menu.Items.Add(new Separator());
+            AddMenuItem(menu, Localization.L("Share…"), () =>
+            {
+                var cardDip = GetVisualScreenDip(cardVisual);
+                _shareService.ShowForNotes(targets, cardDip);
+            });
+        }
+
+        menu.Items.Add(new Separator());
+        if (targets.Any(t => !t.Pinned))
+        {
+            AddMenuItem(menu, Localization.L("Pin"), () =>
+            {
+                foreach (var t in targets.Where(x => !x.Pinned)) _line.TogglePinByPath(t.FilePath);
+            });
+        }
+        if (targets.Any(t => t.Pinned))
+        {
+            AddMenuItem(menu, Localization.L("Unpin"), () =>
+            {
+                foreach (var t in targets.Where(x => x.Pinned)) _line.TogglePinByPath(t.FilePath);
+            });
+        }
+
+        AddMenuItem(menu, Localization.L("Save to Desktop"), () => _line.SaveToDesktop(targets));
+
+        menu.Items.Add(new Separator());
+        AddMenuItem(menu, Localization.L("Take down"), () =>
+        {
+            if (targets.Count == 1) DiscardSingleCardWithFall(targets[0], cardVisual);
+            else _line.TakeDownNotes(targets);
+        });
+
+        if (!multi && !note.Pinned)
+        {
+            if (DataFolder.IsMovablePrivateItem(note.FilePath))
+            {
+                AddMenuItem(menu, Localization.L("Move to Recycle Bin"), () =>
+                {
+                    var rect = GetVisualScreenDip(cardVisual);
+                    if (_line.TakeDownNotes([note], sendToRecycleBin: true))
+                    {
+                        FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
+                    }
+                });
+            }
+
+            var leftNeighbours = _line.Neighbours(note.FilePath, toTheLeft: true);
+            AddMenuItem(menu, Localization.L("Take down everything to the left"),
+                () => _line.TakeDownNeighbours(note.FilePath, toTheLeft: true),
+                enabled: leftNeighbours.Count > 0);
+
+            var rightNeighbours = _line.Neighbours(note.FilePath, toTheLeft: false);
+            AddMenuItem(menu, Localization.L("Take down everything to the right"),
+                () => _line.TakeDownNeighbours(note.FilePath, toTheLeft: false),
+                enabled: rightNeighbours.Count > 0);
+        }
+
+        return menu;
+    }
+
+    private static void AddMenuItem(ContextMenu menu, string header, Action onClick, bool enabled = true)
+    {
+        var item = new MenuItem { Header = header, IsEnabled = enabled };
+        item.Click += (_, _) => onClick();
+        menu.Items.Add(item);
+    }
+
+    private void DiscardSingleCardWithFall(Note note, UIElement cardVisual)
+    {
+        var rect = GetVisualScreenDip(cardVisual);
+        FlightOverlay.FallCard(cardVisual, rect, Line.TiltFor(note.FilePath));
+        _line.TakeDownNotes([note]);
+    }
+
+    private void LaunchFlyToCursorFor(Note note)
+    {
+        if (!IsVisible || _line.BasketOpen) return;
+        if (!PaperCardView.TryFindCardVisual(LineCanvas, note.FilePath, out var cardEl) || cardEl is null) return;
+        var fromDip = GetVisualScreenDip(cardEl);
+        var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
+        double scale = _activeMonitor.DpiScale > 0 ? _activeMonitor.DpiScale : 1.0;
+        FlightOverlay.FlyToCursor(cardEl, fromDip, new Point(cx / scale, cy / scale));
+    }
+
+    private Rect GetVisualScreenDip(UIElement visual)
+    {
+        var rel = visual.TranslatePoint(new Point(0, 0), this);
+        double w = visual is FrameworkElement fe && fe.ActualWidth > 0 ? fe.ActualWidth : ScreenPlacement.CardWidth;
+        double h = visual is FrameworkElement fe2 && fe2.ActualHeight > 0 ? fe2.ActualHeight : ScreenPlacement.CardHeight;
+        return new Rect(Left + rel.X, Top + rel.Y, w, h);
     }
 
     private void RenderBasketSection(bool isDark)
@@ -443,7 +1026,6 @@ public partial class LinePanel : Window
         BasketScroller.MaxHeight = Math.Max(140.0, _maxPanelHeight - ScreenPlacement.LineBandHeight - noticeOverhead);
         BasketDivider.Background = ThemePalette.Brush(ThemePalette.DividerColor(isDark));
 
-        // 种类筛选胶囊栏
         BasketChipsBar.Children.Clear();
         AddKindChip(KindFilter.All, Localization.L("All"), _line.BasketMatchCount, ThemePalette.ChromeSubText(isDark), isDark);
         AddKindChip(KindFilter.Text, Localization.L("Text"), _line.BasketKindCounts.GetValueOrDefault(KindFilter.Text), ThemePalette.TagColor(ItemKind.Text), isDark);
@@ -451,7 +1033,6 @@ public partial class LinePanel : Window
         AddKindChip(KindFilter.Image, Localization.L("Images"), _line.BasketKindCounts.GetValueOrDefault(KindFilter.Image), ThemePalette.TagColor(ItemKind.Image), isDark);
         AddKindChip(KindFilter.File, Localization.L("Files"), _line.BasketKindCounts.GetValueOrDefault(KindFilter.File), ThemePalette.TagColor(ItemKind.File), isDark);
 
-        // 按天/按月分组列表
         BasketGroupsHost.Children.Clear();
         _pickedBasketRowBorder = null;
 
@@ -509,11 +1090,11 @@ public partial class LinePanel : Window
                     string.Equals(_line.BasketPicked.FilePath, row.Note.FilePath, StringComparison.OrdinalIgnoreCase);
                 var rowUi = PaperCardView.BuildBasketRow(
                     row,
+                    _line.Theme,
                     picked,
                     isDark,
                     onSelect: r =>
                     {
-                        // 鼠标选中不自动跳转滚动条，避免双击窗口内微偏而错失第二次点击
                         _scrollBasketToPicked = false;
                         _line.BasketPicked = r.Note;
                         QueryBox.Focus();
@@ -579,7 +1160,7 @@ public partial class LinePanel : Window
             CornerRadius = new CornerRadius(12),
             Cursor = Cursors.Hand,
             Opacity = count == 0 && !active ? 0.45 : 1.0,
-            Background = ThemePalette.Brush(active ? ThemePalette.ChipActiveFill(isDark) : ThemePalette.ChipIdleFill(isDark)),
+            Background = ThemePalette.Brush(active ? ThemePalette.PickedColor(_line.Theme) : ThemePalette.ChipIdleFill(isDark)),
             Child = panel
         };
         chip.MouseLeftButtonDown += (_, e) =>
@@ -648,8 +1229,23 @@ public partial class LinePanel : Window
 
     private void HandleRouting(KeyEventArgs e)
     {
+        _lastKeyUtc = DateTime.UtcNow;
+        _zoomController.Hide();
         _scrollBasketToPicked = true;
+
+        // 捕获即将被 Ctrl+Backspace / Delete 取下的卡片视觉快照，以便在数据移除前先启动下坠动画
+        bool isTakeDownKey =
+            (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Back) ||
+            (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Delete && string.IsNullOrEmpty(QueryBox.Text));
+        if (isTakeDownKey && !_line.BasketOpen && _line.Picked is { } aboutToFall &&
+            PaperCardView.TryFindCardVisual(LineCanvas, aboutToFall.FilePath, out var fallEl) && fallEl is not null)
+        {
+            FlightOverlay.FallCard(fallEl, GetVisualScreenDip(fallEl), Line.TiltFor(aboutToFall.FilePath));
+        }
+
         bool composing = e.Key == Key.ImeProcessed || e.Key == Key.DeadCharProcessed || HasActiveImeCompositionString();
+        bool caretAtEnd = QueryBox.SelectionLength == 0 && QueryBox.CaretIndex == QueryBox.Text.Length;
+
         bool handled = LineKeyRouter.HandleKeyDown(
             e.Key,
             Keyboard.Modifiers,
@@ -665,7 +1261,8 @@ public partial class LinePanel : Window
                 QueryBox.Text = string.Empty;
                 _line.Query = string.Empty;
             },
-            canUndoQuery: !string.IsNullOrEmpty(QueryBox.Text) && QueryBox.CanUndo);
+            canUndoQuery: !string.IsNullOrEmpty(QueryBox.Text) && QueryBox.CanUndo,
+            caretAtEnd: caretAtEnd);
 
         if (handled)
         {
@@ -688,6 +1285,8 @@ public partial class LinePanel : Window
     {
         var selected = _line.GetSelectedNotesInLineOrder();
         if (selected.Count == 0) return;
+        // 飞向指针动画与立即粘贴并行触发：粘贴在第 0 帧立刻执行，绝不等动画
+        LaunchFlyToCursorFor(selected[0]);
         _onPasteNotes(selected, _previousForegroundHwnd, plain);
     }
 
@@ -700,14 +1299,16 @@ public partial class LinePanel : Window
             var stamp = DateTime.UtcNow;
             for (int i = selected.Count - 1; i >= 0; i--)
             {
-                _line.Use(selected[i].FilePath, stamp.AddMilliseconds(selected.Count - 1 - i));
+                _line.Use(selected[i].FilePath, stamp.AddMilliseconds(groupOffset: selected.Count - 1 - i));
             }
+            _motion.TriggerHop(selected[0].FilePath);
             FlashCopiedFeedback(selected[0].FilePath);
         }
     }
 
     private void QueryBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        _lastKeyUtc = DateTime.UtcNow;
         PlaceholderText.Visibility = string.IsNullOrEmpty(QueryBox.Text) ? Visibility.Visible : Visibility.Collapsed;
         _line.Query = QueryBox.Text;
     }
@@ -716,6 +1317,20 @@ public partial class LinePanel : Window
     {
         e.Handled = true;
         _onRequestChangeShortcut();
+    }
+
+    private void SetNoActivateStyle(bool noActivate)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        int ex = GetWindowLong(hwnd, GwlExStyle);
+        int next = noActivate
+            ? (ex | WsExNoActivate | WsExToolWindow)
+            : ((ex & ~WsExNoActivate) | WsExToolWindow);
+        if (next != ex)
+        {
+            SetWindowLong(hwnd, GwlExStyle, next);
+        }
     }
 
     private bool HasActiveImeCompositionString()
@@ -737,7 +1352,7 @@ public partial class LinePanel : Window
 
     private static bool IsTaskbarWindow(IntPtr hwnd)
     {
-        var sb = new System.Text.StringBuilder(64);
+        var sb = new StringBuilder(64);
         int len = GetClassName(hwnd, sb, sb.Capacity);
         if (len <= 0) return false;
         var cls = sb.ToString();
@@ -745,15 +1360,20 @@ public partial class LinePanel : Window
                string.Equals(cls, "Shell_SecondaryTrayWnd", StringComparison.Ordinal);
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+    private static bool IsInChecksRunner() =>
+        string.Equals(Environment.GetEnvironmentVariable(DataFolder.ChecksRunnerEnv), "1", StringComparison.Ordinal);
 
-    [DllImport("imm32.dll")]
-    private static extern IntPtr ImmGetContext(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    [DllImport("imm32.dll")] private static extern IntPtr ImmGetContext(IntPtr hWnd);
+    [DllImport("imm32.dll", CharSet = CharSet.Unicode)] private static extern int ImmGetCompositionString(IntPtr hIMC, int dwIndex, IntPtr lpBuf, int dwBufLen);
+    [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
+}
 
-    [DllImport("imm32.dll", CharSet = CharSet.Unicode)]
-    private static extern int ImmGetCompositionString(IntPtr hIMC, int dwIndex, IntPtr lpBuf, int dwBufLen);
-
-    [DllImport("imm32.dll")]
-    private static extern bool ImmReleaseContext(IntPtr hWnd, IntPtr hIMC);
+file static class DateTimeExtensions
+{
+    public static DateTime AddMilliseconds(this DateTime dt, int groupOffset) =>
+        dt.AddMilliseconds((double)groupOffset);
 }

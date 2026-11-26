@@ -3,12 +3,26 @@ using Microsoft.Win32;
 
 namespace EnCopy;
 
+public enum LineTheme
+{
+    Paper,
+    Pixel,
+    Skeuo,
+    Minimal,
+    Neon,
+    Washi
+}
+
 /// <summary>
-/// 系统深浅色与纸张色板（T-059）：
-/// 麻绳、搜索胶囊与篮子外壳随 Windows 系统深浅主题切换；五种纸卡片在暗黑模式下保持温暖浅色纸面，种类标签六色固定区分。
+/// 六套晾衣绳与设置纸张主题色板（对齐 Mac 版 Theme.swift，T-060）：
+/// 纸（Paper）、像素（Pixel）、拟物（Skeuo）、极简（Minimal）、霓虹（Neon）、手账（Washi）。
 /// </summary>
 public static class ThemePalette
 {
+    private static readonly FontFamily MonoFont = new("Consolas, Cascadia Mono, Microsoft YaHei UI");
+    private static readonly FontFamily SerifFont = new("Georgia, SimSun, Microsoft YaHei UI");
+    private static readonly FontFamily SansFont = new("Segoe UI, Microsoft YaHei UI");
+
     private static bool? _darkOverride;
 
     public static void SetDarkOverride(bool? isDark) => _darkOverride = isDark;
@@ -34,7 +48,17 @@ public static class ThemePalette
         return false;
     }
 
-    // 固定 6 色种类标签（对应 Mac BasketList.swift KindTag.color）
+    public static string ThemeTitle(LineTheme theme) => theme switch
+    {
+        LineTheme.Pixel => Localization.L("Pixel"),
+        LineTheme.Skeuo => Localization.L("Skeuomorphic"),
+        LineTheme.Minimal => Localization.L("Minimal"),
+        LineTheme.Neon => Localization.L("Neon"),
+        LineTheme.Washi => Localization.L("Journal"),
+        _ => Localization.L("Paper")
+    };
+
+    // 固定 6 色种类标签（所有主题通用）
     public static Color TagColor(ItemKind kind) => kind switch
     {
         ItemKind.Text => Color.FromRgb(0xDC, 0x85, 0x1A),
@@ -46,7 +70,7 @@ public static class ThemePalette
         _ => Color.FromRgb(0xDC, 0x85, 0x1A)
     };
 
-    // 五种纸卡片在任何系统主题下均保持浅色纸质感
+    // Paper 主题经典纸张色
     public static readonly Color ReceiptFill = Color.FromRgb(0xFB, 0xFA, 0xF4);
     public static readonly Color TractorLightStripe = Color.FromRgb(0xF5, 0xF8, 0xF0);
     public static readonly Color TractorDarkStripe = Color.FromRgb(0xE1, 0xED, 0xD6);
@@ -63,6 +87,107 @@ public static class ThemePalette
     public static readonly Color KraftSoft = Color.FromRgb(0x5C, 0x4A, 0x33);
     public static readonly Color MarkdownLinkInk = Color.FromRgb(0x99, 0x5C, 0x14);
     public static readonly Color PickedAmber = Color.FromRgb(0xD3, 0x8A, 0x22);
+
+    public static Color CardFill(LineTheme theme, PaperKind paper) => theme switch
+    {
+        LineTheme.Paper => paper switch
+        {
+            PaperKind.Tractor => TractorLightStripe,
+            PaperKind.Tag => KraftFill,
+            PaperKind.Polaroid => PolaroidFill,
+            PaperKind.Folder => ManilaFill,
+            _ => ReceiptFill
+        },
+        LineTheme.Pixel => paper switch
+        {
+            PaperKind.Tractor => Color.FromRgb(0x1C, 0x26, 0x38),
+            PaperKind.Tag => Color.FromRgb(0x8C, 0xD1, 0xFA),
+            PaperKind.Folder => Color.FromRgb(0xFC, 0xCC, 0x5C),
+            _ => Color.FromRgb(0xFA, 0xF7, 0xE8)
+        },
+        LineTheme.Skeuo => paper switch
+        {
+            PaperKind.Tag => Color.FromRgb(0xED, 0xDE, 0xBD),
+            PaperKind.Tractor => Color.FromRgb(0xED, 0xF2, 0xE6),
+            _ => Color.FromRgb(0xFC, 0xFA, 0xF0)
+        },
+        LineTheme.Minimal => Colors.White,
+        LineTheme.Neon => Color.FromArgb(0xEB, 0x0F, 0x0F, 0x1F),
+        LineTheme.Washi => paper switch
+        {
+            PaperKind.Tag => Color.FromRgb(0xF5, 0xE6, 0xDC),
+            PaperKind.Tractor => Color.FromRgb(0xEB, 0xF0, 0xF5),
+            _ => Color.FromRgb(0xFA, 0xF5, 0xE6)
+        },
+        _ => ReceiptFill
+    };
+
+    public static Color CardInk(LineTheme theme, PaperKind paper) => theme switch
+    {
+        LineTheme.Paper when paper == PaperKind.Tag || paper == PaperKind.Folder => KraftInk,
+        LineTheme.Pixel when paper == PaperKind.Tractor => Color.FromRgb(0x8C, 0xFA, 0x9E),
+        LineTheme.Neon => paper == PaperKind.Tag ? Color.FromRgb(0xFF, 0x73, 0xD9) : Color.FromRgb(0xDB, 0xF7, 0xFF),
+        LineTheme.Minimal => Color.FromRgb(0x1F, 0x1F, 0x1F),
+        _ => PaperInk
+    };
+
+    public static Color CardSoft(LineTheme theme, PaperKind paper) => theme switch
+    {
+        LineTheme.Paper when paper == PaperKind.Tag || paper == PaperKind.Folder => KraftSoft,
+        LineTheme.Pixel when paper == PaperKind.Tractor => Color.FromRgb(0x73, 0xBF, 0x80),
+        LineTheme.Neon => Color.FromRgb(0x8C, 0xBF, 0xD9),
+        LineTheme.Minimal => Color.FromRgb(0x80, 0x80, 0x80),
+        _ => PaperSoft
+    };
+
+    public static double CardCorner(LineTheme theme) => theme switch
+    {
+        LineTheme.Pixel => 0.0,
+        LineTheme.Minimal => 10.0,
+        LineTheme.Neon => 8.0,
+        LineTheme.Washi => 3.5,
+        _ => 2.0
+    };
+
+    public static (Color Color, double Width)? CardEdge(LineTheme theme, PaperKind paper) => theme switch
+    {
+        LineTheme.Pixel => (Colors.Black, 2.0),
+        LineTheme.Minimal => (Color.FromRgb(0xDB, 0xDB, 0xDB), 0.9),
+        LineTheme.Neon => (paper == PaperKind.Tag ? Color.FromRgb(0xFF, 0x4D, 0xCC) : Color.FromRgb(0x33, 0xF2, 0xFF), 1.4),
+        LineTheme.Skeuo => (Color.FromArgb(0x38, 0x5A, 0x46, 0x2E), 0.9),
+        LineTheme.Washi => (Color.FromArgb(0x30, 0x8C, 0x76, 0x62), 0.8),
+        _ => null
+    };
+
+    public static Color PickedColor(LineTheme theme) => theme switch
+    {
+        LineTheme.Pixel => Color.FromRgb(0xFF, 0xD4, 0x00),
+        LineTheme.Minimal => Color.FromRgb(0x25, 0x72, 0xEB),
+        LineTheme.Neon => Color.FromRgb(0xFF, 0x4D, 0xCC),
+        LineTheme.Washi => Color.FromRgb(0xED, 0x73, 0x66),
+        _ => PickedAmber
+    };
+
+    public static double PickedWidth(LineTheme theme) => theme == LineTheme.Pixel ? 4.0 : 2.5;
+
+    public static FontFamily CardFont(LineTheme theme, bool code = false)
+    {
+        if (code || theme is LineTheme.Paper or LineTheme.Pixel)
+        {
+            return MonoFont;
+        }
+        return theme is LineTheme.Skeuo or LineTheme.Washi ? SerifFont : SansFont;
+    }
+
+    public static Color SettingsBackdropColor(LineTheme theme) => theme switch
+    {
+        LineTheme.Pixel => Color.FromRgb(0x5C, 0x94, 0xED),
+        LineTheme.Skeuo => Color.FromRgb(0x8C, 0x69, 0x47),
+        LineTheme.Minimal => Color.FromRgb(0xF2, 0xF2, 0xF4),
+        LineTheme.Neon => Color.FromRgb(0x0A, 0x0A, 0x17),
+        LineTheme.Washi => Color.FromRgb(0xF5, 0xED, 0xDB),
+        _ => Color.FromRgb(0xE6, 0xD9, 0xC2)
+    };
 
     // 随系统深浅色切换的外壳与绳索色彩
     public static Color RopeMain(bool dark) => dark ? Color.FromRgb(0xA9, 0x8A, 0x5E) : Color.FromRgb(0x8A, 0x6D, 0x45);
