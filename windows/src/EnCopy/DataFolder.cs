@@ -3,7 +3,7 @@ using System.IO;
 namespace EnCopy;
 
 /// <summary>
-/// 唯一决定 Windows 版 EnCopy 数据目录的位置；所有历史数据库、笔记与设置都放在此处，
+/// 唯一决定 Windows 版 EnCopy 数据目录的位置；所有历史数据库、笔记、绳子状态与设置都放在此处，
 /// 测试模式（ENCOPY_CHECKS_RUNNER=1）必须显式提供隔离目录，严禁触碰真实数据文件夹。
 /// </summary>
 public static class DataFolder
@@ -40,8 +40,22 @@ public static class DataFolder
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName);
 
     public static string NotesFolder => Path.Combine(Root, "Notes");
+    public static string FilesFolder => Path.Combine(Root, "Files");
+    public static string DiscardedFolder => Path.Combine(Root, "Discarded");
     public static string HistoryDatabasePath => Path.Combine(Root, "History.sqlite");
     public static string SettingsPath => Path.Combine(Root, "Settings.json");
+    public static string LineStatePath => Path.Combine(Root, "LineState.json");
+
+    /// <summary>
+    /// 判断指定路径是否位于 EnCopy 私有数据目录下，避免清理或撤回操作误删外部原文件。
+    /// </summary>
+    public static bool Contains(string path)
+    {
+        var rootFull = Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var targetFull = Path.GetFullPath(path);
+        return targetFull.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// 仅供隔离测试为每个独立用例切换临时根目录；不允许指向用户真实数据目录。

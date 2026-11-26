@@ -138,7 +138,7 @@ public static class PasteKey
 
 public interface IPastePlatform
 {
-    bool WriteClipboard(Note note, bool plain);
+    bool WriteClipboardText(string text, byte[]? rtfBytes);
     void TuckAway(IntPtr restoreTargetWindow);
     bool CanSendInputTo(IntPtr targetWindow);
     bool SendCtrlV();
@@ -146,7 +146,8 @@ public interface IPastePlatform
 }
 
 /// <summary>
-/// 选中项贴回原前台窗口：写入剪贴板（带 SelfCopy）、收起并恢复焦点、UIPI 检测通过后发送 Ctrl+V，
+/// 选中项贴回原前台窗口（支持单选及 Shift+方向键多选按顺序合并粘贴）：
+/// 写入剪贴板（带 SelfCopy）、收起并恢复焦点、UIPI 检测通过后发送 Ctrl+V，
 /// 面对管理员高权限窗口时只复制并弹出顶部 PasteHint。
 /// </summary>
 public sealed class Paster
@@ -160,20 +161,49 @@ public sealed class Paster
         _platform = platform;
     }
 
-    public bool PastePicked(IntPtr targetWindow, bool plain = false)
+    public bool WriteToClipboard(Note note, bool plain = false)
     {
-        var picked = _line.Picked;
-        if (picked is null) return false;
-        return Paste(picked, targetWindow, plain);
+        byte[]? rtf = !plain &&
+            string.Equals(Path.GetExtension(note.FilePath), ".rtf", StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(note.FilePath)
+            ? File.ReadAllBytes(note.FilePath)
+            : null;
+        return _platform.WriteClipboardText(note.FullText, rtf);
     }
 
-    public bool Paste(Note note, IntPtr targetWindow, bool plain = false)
+    public bool WriteMultipleToClipboard(IReadOnlyList<Note> notes, bool plain = false)
     {
-        if (!_platform.WriteClipboard(note, plain))
+        if (notes.Count == 0) return false;
+        if (notes.Count == 1)
+        {
+            return WriteToClipboard(notes[0], plain);
+        }
+        var joined = string.Join("\n\n", notes.Select(n => n.FullText));
+        return _platform.WriteClipboardText(joined, rtfBytes: null);
+    }
+
+    public bool PastePicked(IntPtr targetWindow, bool plain = false)
+    {
+        var selected = _line.GetSelectedNotesInLineOrder();
+        return selected.Count > 0 && PasteNotes(selected, targetWindow, plain);
+    }
+
+    public bool Paste(Note note, IntPtr targetWindow, bool plain = false) =>
+        PasteNotes([note], targetWindow, plain);
+
+    public bool PasteNotes(IReadOnlyList<Note> notes, IntPtr targetWindow, bool plain = false)
+    {
+        if (notes.Count == 0) return false;
+        if (!WriteMultipleToClipboard(notes, plain))
         {
             return false;
         }
-        _line.Use(note.FilePath);
+        // 从右往左更新使用时间，使最先选中（左侧）的卡片在放回绳头后仍排在最前
+        var stamp = DateTime.UtcNow;
+        for (int i = notes.Count - 1; i >= 0; i--)
+        {
+            _line.Use(notes[i].FilePath, stamp.AddMilliseconds(notes.Count - 1 - i));
+        }
         _platform.TuckAway(targetWindow);
         if (_platform.CanSendInputTo(targetWindow))
         {
@@ -203,13 +233,7 @@ public sealed class Win32PastePlatform : IPastePlatform
         _showHint = showHint;
     }
 
-    public bool WriteClipboard(Note note, bool plain)
-    {
-        byte[]? rtf = !plain && string.Equals(Path.GetExtension(note.FilePath), ".rtf", StringComparison.OrdinalIgnoreCase) && File.Exists(note.FilePath)
-            ? File.ReadAllBytes(note.FilePath)
-            : null;
-        return _clipboard.TryWrite(note.FullText, rtf);
-    }
+    public bool WriteClipboardText(string text, byte[]? rtfBytes) => _clipboard.TryWrite(text, rtfBytes);
 
     public void TuckAway(IntPtr restoreTargetWindow) => _tuckAndRestore(restoreTargetWindow);
 
@@ -278,7 +302,6 @@ public static class WindowInteropHelperEx
         IntPtr hProc = OpenProcess(ProcessQueryLimitedInformation, false, pid);
         if (hProc == IntPtr.Zero)
         {
-            // ERROR_ACCESS_DENIED (5) 常见于目标进程权限高于当前进程（UIPI 拦截）。
             return false;
         }
         try
@@ -365,7 +388,12 @@ public sealed class PasteHint
         EnsureWindow();
         if (_window is null || _rootBorder is null || _label is null) return;
 
+        bool dark = ThemePalette.IsDarkMode();
+        _rootBorder.Background = ThemePalette.Brush(ThemePalette.ChromeFill(dark));
+        _rootBorder.BorderBrush = ThemePalette.Brush(ThemePalette.ChromeBorder(dark));
+        _label.Foreground = ThemePalette.Brush(ThemePalette.ChromeText(dark));
         _label.Text = message ?? Localization.L("Copied. Press Ctrl+V to paste.");
+
         _rootBorder.Measure(new Size(600, 100));
         double w = Math.Max(220, _rootBorder.DesiredSize.Width + 4);
         double h = Math.Max(40, _rootBorder.DesiredSize.Height + 4);
@@ -396,15 +424,15 @@ public sealed class PasteHint
         {
             FontSize = 13,
             FontWeight = FontWeights.Medium,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x2B, 0x25, 0x1F)),
+            Foreground = ThemePalette.Brush(ThemePalette.PaperInk),
             VerticalAlignment = VerticalAlignment.Center
         };
 
         _rootBorder = new Border
         {
             CornerRadius = new CornerRadius(18),
-            Background = new SolidColorBrush(Color.FromArgb(0xF5, 0xFB, 0xF8, 0xF1)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x7A, 0x67, 0x4E)),
+            Background = ThemePalette.Brush(ThemePalette.ChromeFill(dark: false)),
+            BorderBrush = ThemePalette.Brush(ThemePalette.ChromeBorder(dark: false)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(16, 8, 16, 8),
             Child = _label
@@ -414,7 +442,7 @@ public sealed class PasteHint
         {
             WindowStyle = WindowStyle.None,
             AllowsTransparency = true,
-            Background = Brushes.Transparent,
+            Background = null,
             Topmost = true,
             ShowInTaskbar = false,
             ShowActivated = false,

@@ -7,13 +7,16 @@ using WF = System.Windows.Forms;
 namespace EnCopy;
 
 /// <summary>
-/// 系统托盘图标与菜单（麻绳双夹子矢量图标），并承接 Alt+C 冲突气泡通知。
+/// 系统托盘图标与菜单（麻绳双夹子矢量图标），提供唤起、暂停、绳上容量、快捷键修改与数据文件夹入口。
 /// </summary>
 public sealed class TrayIcon : IDisposable
 {
     private readonly WF.NotifyIcon _notify;
     private readonly WF.ToolStripMenuItem _summonItem;
     private readonly WF.ToolStripMenuItem _pauseItem;
+    private readonly WF.ToolStripMenuItem _shortcutItem;
+    private readonly WF.ToolStripMenuItem _keepFitItem;
+    private readonly List<(int Value, WF.ToolStripMenuItem Item)> _keepChoiceItems = [];
     private readonly SD.Icon _activeIcon;
     private readonly SD.Icon _pausedIcon;
 
@@ -22,6 +25,10 @@ public sealed class TrayIcon : IDisposable
         Func<bool> isSummoned,
         Action<bool> onSetPaused,
         Func<bool> isPaused,
+        Action<int?> onSetKeepOnLine,
+        Func<int?> getKeepOnLine,
+        Action onOpenShortcutRecorder,
+        Func<Shortcut?> getActiveShortcut,
         Action onQuit)
     {
         _activeIcon = CreateRopeIcon(paused: false);
@@ -32,18 +39,44 @@ public sealed class TrayIcon : IDisposable
         {
             bool next = !isPaused();
             onSetPaused(next);
-            UpdateState(isSummoned(), next);
+            UpdateState(isSummoned(), next, getKeepOnLine(), getActiveShortcut());
         })
         {
             ToolTipText = Localization.L("Nothing you copy is kept while this is on")
         };
+
+        var keepMenu = new WF.ToolStripMenuItem(Localization.L("Keep on line"));
+        _keepFitItem = new WF.ToolStripMenuItem(Localization.L("As many as fit"), null, (_, _) =>
+        {
+            onSetKeepOnLine(null);
+            UpdateState(isSummoned(), isPaused(), null, getActiveShortcut());
+        });
+        keepMenu.DropDownItems.Add(_keepFitItem);
+        keepMenu.DropDownItems.Add(new WF.ToolStripSeparator());
+        foreach (int choice in AppSettings.KeepChoices)
+        {
+            int captured = choice;
+            var item = new WF.ToolStripMenuItem(Localization.Format("{0} items", captured), null, (_, _) =>
+            {
+                onSetKeepOnLine(captured);
+                UpdateState(isSummoned(), isPaused(), captured, getActiveShortcut());
+            });
+            _keepChoiceItems.Add((captured, item));
+            keepMenu.DropDownItems.Add(item);
+        }
+
+        _shortcutItem = new WF.ToolStripMenuItem(FormatShortcutLabel(getActiveShortcut()), null, (_, _) => onOpenShortcutRecorder());
+
         var openFolderItem = new WF.ToolStripMenuItem(Localization.L("Open data folder"), null, (_, _) => OpenDataFolder());
         var quitItem = new WF.ToolStripMenuItem(Localization.L("Quit EnCopy"), null, (_, _) => onQuit());
 
         var menu = new WF.ContextMenuStrip();
-        menu.Opening += (_, _) => UpdateState(isSummoned(), isPaused());
+        menu.Opening += (_, _) => UpdateState(isSummoned(), isPaused(), getKeepOnLine(), getActiveShortcut());
         menu.Items.Add(_summonItem);
         menu.Items.Add(_pauseItem);
+        menu.Items.Add(new WF.ToolStripSeparator());
+        menu.Items.Add(keepMenu);
+        menu.Items.Add(_shortcutItem);
         menu.Items.Add(new WF.ToolStripSeparator());
         menu.Items.Add(openFolderItem);
         menu.Items.Add(new WF.ToolStripSeparator());
@@ -65,16 +98,22 @@ public sealed class TrayIcon : IDisposable
         };
     }
 
-    public void UpdateState(bool summoned, bool paused)
+    public void UpdateState(bool summoned, bool paused, int? keepOnLine, Shortcut? activeShortcut)
     {
         _summonItem.Text = summoned ? Localization.L("Hide line") : Localization.L("Show line");
         _pauseItem.Checked = paused;
+        _keepFitItem.Checked = keepOnLine is null;
+        foreach (var (value, item) in _keepChoiceItems)
+        {
+            item.Checked = keepOnLine == value;
+        }
+        _shortcutItem.Text = FormatShortcutLabel(activeShortcut);
         _notify.Icon = paused ? _pausedIcon : _activeIcon;
     }
 
     public void ShowHotKeyConflict(Shortcut shortcut)
     {
-        _notify.BalloonTipTitle = Localization.L("Alt+C could not be registered");
+        _notify.BalloonTipTitle = Localization.L("Global shortcut could not be registered");
         _notify.BalloonTipText = Localization.Format("Shortcut {0} is in use by another app.", shortcut.Display);
         _notify.BalloonTipIcon = WF.ToolTipIcon.Warning;
         _notify.ShowBalloonTip(5000);
@@ -86,6 +125,12 @@ public sealed class TrayIcon : IDisposable
         _notify.Dispose();
         _activeIcon.Dispose();
         _pausedIcon.Dispose();
+    }
+
+    private static string FormatShortcutLabel(Shortcut? shortcut)
+    {
+        var keyText = shortcut is { } s ? s.Display : Localization.L("None");
+        return $"{Localization.L("Change Shortcut…")} ({keyText})";
     }
 
     private static void OpenDataFolder()

@@ -45,7 +45,7 @@ public sealed class History : IDisposable
         public int BasketTotal { get; set; }
     }
 
-    public sealed record StoredEntry(string FullPath, string RelativePath, double UsedUnix);
+    public sealed record StoredEntry(string FullPath, string RelativePath, double UsedUnix, string? AppName);
 
     private readonly string _rootDir;
     private readonly SqliteConnection _db;
@@ -108,7 +108,7 @@ public sealed class History : IDisposable
         foreach (var rel in paths)
         {
             var abs = AbsolutePath(rel);
-            if (!File.Exists(abs))
+            if (!ExistsOnDisk(abs))
             {
                 RemoveByRelativePath(rel);
                 continue;
@@ -118,15 +118,16 @@ public sealed class History : IDisposable
         return null;
     }
 
-    public void Record(string fullPath, string? plainText = null, DateTime? usedAt = null)
+    public void Record(string fullPath, string? plainText = null, DateTime? usedAt = null, string? appName = null)
     {
-        var rel = RelativePath(fullPath);
-        if (rel is null || !File.Exists(fullPath)) return;
+        var storagePath = StoredKeyFor(fullPath);
+        if (storagePath is null || !ExistsOnDisk(fullPath)) return;
 
-        var text = plainText ?? Note.ReadPlainText(fullPath);
-        if (text is null) return;
+        var text = plainText ?? Note.ReadPlainText(fullPath) ?? Path.GetFileName(fullPath);
 
-        var modified = new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0;
+        var modified = File.Exists(fullPath)
+            ? new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0
+            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         var used = usedAt.HasValue
             ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
             : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
@@ -139,13 +140,15 @@ public sealed class History : IDisposable
         {
             upsert.Transaction = tx;
             upsert.CommandText = """
-                INSERT INTO item (path, hash, modified, used) VALUES (@path, @hash, @mod, @used)
-                ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified
+                INSERT INTO item (path, hash, modified, used, app) VALUES (@path, @hash, @mod, @used, @app)
+                ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified, used = excluded.used,
+                    app = COALESCE(excluded.app, item.app)
                 """;
-            upsert.Parameters.AddWithValue("@path", rel);
+            upsert.Parameters.AddWithValue("@path", storagePath);
             upsert.Parameters.AddWithValue("@hash", hash);
             upsert.Parameters.AddWithValue("@mod", modified);
             upsert.Parameters.AddWithValue("@used", used);
+            upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
             upsert.ExecuteNonQuery();
         }
 
@@ -154,7 +157,7 @@ public sealed class History : IDisposable
         {
             idCmd.Transaction = tx;
             idCmd.CommandText = "SELECT id FROM item WHERE path = @path";
-            idCmd.Parameters.AddWithValue("@path", rel);
+            idCmd.Parameters.AddWithValue("@path", storagePath);
             id = (long)(idCmd.ExecuteScalar() ?? 0L);
         }
         if (id == 0)
@@ -183,36 +186,46 @@ public sealed class History : IDisposable
 
     public void Use(string fullPath, DateTime? usedAt = null)
     {
-        var rel = RelativePath(fullPath);
-        if (rel is null) return;
+        var key = StoredKeyFor(fullPath);
+        if (key is null) return;
         var used = usedAt.HasValue
             ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
             : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
         using var cmd = _db.CreateCommand();
         cmd.CommandText = "UPDATE item SET used = @used WHERE path = @path";
         cmd.Parameters.AddWithValue("@used", used);
-        cmd.Parameters.AddWithValue("@path", rel);
+        cmd.Parameters.AddWithValue("@path", key);
         cmd.ExecuteNonQuery();
+    }
+
+    public void Remove(string fullPath)
+    {
+        var key = StoredKeyFor(fullPath);
+        if (key is null) return;
+        RemoveByRelativePath(key);
     }
 
     public IReadOnlyList<StoredEntry> RecentEntries(int limit = 200)
     {
         var list = new List<StoredEntry>();
         using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT path, used FROM item ORDER BY used DESC, id DESC LIMIT @limit";
+        cmd.CommandText = "SELECT path, used, app FROM item ORDER BY used DESC, id DESC LIMIT @limit";
         cmd.Parameters.AddWithValue("@limit", limit);
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
             var rel = reader.GetString(0);
             var abs = AbsolutePath(rel);
-            if (File.Exists(abs))
+            if (ExistsOnDisk(abs))
             {
-                list.Add(new StoredEntry(abs, rel, reader.GetDouble(1)));
+                var app = reader.IsDBNull(2) ? null : reader.GetString(2);
+                list.Add(new StoredEntry(abs, rel, reader.GetDouble(1), app));
             }
         }
         return list;
     }
+
+    public IReadOnlyList<StoredEntry> AllEntries() => RecentEntries(limit: int.MaxValue);
 
     public Found Search(IReadOnlyList<string> words, IReadOnlyList<string> onLinePaths, int limit)
     {
@@ -240,7 +253,7 @@ public sealed class History : IDisposable
         }
 
         var sql = $"""
-            SELECT item.path, item.used
+            SELECT item.path, item.used, item.app
             FROM item_text
             JOIN item ON item.id = item_text.rowid
             WHERE {string.Join(" AND ", conditions)}
@@ -263,6 +276,7 @@ public sealed class History : IDisposable
             {
                 var rel = reader.GetString(0);
                 var usedUnix = reader.GetDouble(1);
+                var app = reader.IsDBNull(2) ? null : reader.GetString(2);
                 var abs = AbsolutePath(rel);
                 var full = Path.GetFullPath(abs);
                 if (onLineSet.Contains(full))
@@ -271,11 +285,11 @@ public sealed class History : IDisposable
                 }
                 else if (found.Basket.Count < limit)
                 {
-                    if (File.Exists(abs))
+                    if (ExistsOnDisk(abs))
                     {
                         found.BasketTotal++;
                         found.Basket.Add(abs);
-                        found.Entries.Add(new StoredEntry(abs, rel, usedUnix));
+                        found.Entries.Add(new StoredEntry(abs, rel, usedUnix, app));
                     }
                     else
                     {
@@ -309,11 +323,20 @@ public sealed class History : IDisposable
         return pathFull[prefix.Length..].Replace('\\', '/');
     }
 
-    public string AbsolutePath(string relativePath)
+    public string? StoredKeyFor(string fullPath) =>
+        RelativePath(fullPath) ?? (Path.IsPathRooted(fullPath) ? Path.GetFullPath(fullPath) : null);
+
+    public string AbsolutePath(string storedPath)
     {
-        var parts = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (Path.IsPathRooted(storedPath))
+        {
+            return storedPath;
+        }
+        var parts = storedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         return parts.Aggregate(_rootDir, Path.Combine);
     }
+
+    private static bool ExistsOnDisk(string fullPath) => File.Exists(fullPath) || Directory.Exists(fullPath);
 
     private void RemoveByRelativePath(string rel)
     {

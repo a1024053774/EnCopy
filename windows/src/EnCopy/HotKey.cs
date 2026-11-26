@@ -1,7 +1,17 @@
 using System.Runtime.InteropServices;
+using System.Windows.Input;
 using System.Windows.Interop;
 
 namespace EnCopy;
+
+public enum ShortcutInputResult
+{
+    Valid,
+    Cancel,
+    Clear,
+    ModifierOnly,
+    InvalidNeedsModifier
+}
 
 public readonly record struct Shortcut(uint Modifiers, uint VirtualKey, string Display)
 {
@@ -14,6 +24,107 @@ public readonly record struct Shortcut(uint Modifiers, uint VirtualKey, string D
     public const uint VkC = 0x43;
 
     public static readonly Shortcut Standard = new(ModAlt, VkC, "Alt+C");
+
+    /// <summary>
+    /// 解析改键窗口的键盘按键：必须含 Ctrl / Alt / Win 至少一个修饰键；
+    /// 单独 Esc 取消，单独 Delete/Backspace 移除快捷键，纯修饰键与非法单键分别返回明确状态。
+    /// </summary>
+    public static ShortcutInputResult TryFromKeyInput(
+        Key key,
+        Key systemKey,
+        ModifierKeys modifiers,
+        out Shortcut shortcut,
+        Key imeProcessedKey = Key.None)
+    {
+        shortcut = default;
+        var actualKey = key switch
+        {
+            Key.System => systemKey,
+            Key.ImeProcessed when imeProcessedKey != Key.None => imeProcessedKey,
+            _ => key
+        };
+        if (actualKey == Key.None)
+        {
+            return ShortcutInputResult.ModifierOnly;
+        }
+        if (IsModifierKey(actualKey))
+        {
+            return ShortcutInputResult.ModifierOnly;
+        }
+        if (modifiers == ModifierKeys.None)
+        {
+            if (actualKey == Key.Escape)
+            {
+                return ShortcutInputResult.Cancel;
+            }
+            if (actualKey is Key.Back or Key.Delete)
+            {
+                return ShortcutInputResult.Clear;
+            }
+            return ShortcutInputResult.InvalidNeedsModifier;
+        }
+
+        // 仅按 Shift+字母 仍会干扰日常英文大小写输入，要求至少包含 Ctrl / Alt / Win。
+        bool hasCommandModifier = (modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0;
+        if (!hasCommandModifier)
+        {
+            return ShortcutInputResult.InvalidNeedsModifier;
+        }
+
+        int vk = KeyInterop.VirtualKeyFromKey(actualKey);
+        if (vk <= 0)
+        {
+            return ShortcutInputResult.InvalidNeedsModifier;
+        }
+
+        uint winMods = 0;
+        if ((modifiers & ModifierKeys.Control) != 0) winMods |= ModControl;
+        if ((modifiers & ModifierKeys.Alt) != 0) winMods |= ModAlt;
+        if ((modifiers & ModifierKeys.Shift) != 0) winMods |= ModShift;
+        if ((modifiers & ModifierKeys.Windows) != 0) winMods |= ModWin;
+
+        shortcut = new Shortcut(winMods, (uint)vk, FormatDisplay(modifiers, actualKey));
+        return ShortcutInputResult.Valid;
+    }
+
+    public static string FormatDisplay(ModifierKeys modifiers, Key key)
+    {
+        var parts = new List<string>(5);
+        if ((modifiers & ModifierKeys.Control) != 0) parts.Add("Ctrl");
+        if ((modifiers & ModifierKeys.Alt) != 0) parts.Add("Alt");
+        if ((modifiers & ModifierKeys.Shift) != 0) parts.Add("Shift");
+        if ((modifiers & ModifierKeys.Windows) != 0) parts.Add("Win");
+        parts.Add(FormatKeyName(key));
+        return string.Join('+', parts);
+    }
+
+    private static string FormatKeyName(Key key)
+    {
+        if (key == Key.Space) return Localization.L("Space");
+        if (key is >= Key.D0 and <= Key.D9) return ((char)('0' + (key - Key.D0))).ToString();
+        if (key is >= Key.NumPad0 and <= Key.NumPad9) return "Num" + (key - Key.NumPad0);
+        return key switch
+        {
+            Key.OemComma => ",",
+            Key.OemPeriod => ".",
+            Key.OemQuestion => "/",
+            Key.OemSemicolon => ";",
+            Key.OemQuotes => "'",
+            Key.OemOpenBrackets => "[",
+            Key.OemCloseBrackets => "]",
+            Key.OemPipe => "\\",
+            Key.OemMinus => "-",
+            Key.OemPlus => "=",
+            Key.OemTilde => "`",
+            _ => key.ToString()
+        };
+    }
+
+    private static bool IsModifierKey(Key key) => key is
+        Key.LeftCtrl or Key.RightCtrl or
+        Key.LeftAlt or Key.RightAlt or
+        Key.LeftShift or Key.RightShift or
+        Key.LWin or Key.RWin;
 }
 
 public interface IHotKeyBackend : IDisposable

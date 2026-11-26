@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -37,6 +38,8 @@ public static class Program
         }
 
         Directory.CreateDirectory(fullCheckDir);
+        string? previewDir = PreviewDirArg(args);
+
         var results = new List<(string Name, Action Run)>
         {
             ("EditionIsolation", TestEditionIsolation),
@@ -48,7 +51,13 @@ public static class Program
             ("HotKeyConflictNotice", TestHotKeyConflictNotice),
             ("LocalizationBilingual", TestLocalizationBilingual),
             ("SettingsAndNoteParsing", TestSettingsAndNoteParsing),
-            ("TracerPanelXamlAndRender", () => TestTracerPanelXamlAndRender(PreviewOutputPath(args))),
+            ("PaperKindsAndMarkdown", TestPaperKindsAndMarkdown),
+            ("RopeSlotsPinMoveToHeadAndOverflow", TestRopeSlotsPinMoveToHeadAndOverflow),
+            ("TakeDownPutBackAndMultiSelect", TestTakeDownPutBackAndMultiSelect),
+            ("BasketGroupsFilterAndNavigation", TestBasketGroupsFilterAndNavigation),
+            ("ShortcutRecorderAndPersistence", TestShortcutRecorderAndPersistence),
+            ("LinePanelRenderAndClickThrough", () => TestLinePanelRenderAndClickThrough(previewDir)),
+            ("InstallScriptIsolated", TestInstallScriptIsolated),
         };
 
         int failed = 0;
@@ -58,6 +67,7 @@ public static class Program
             Directory.CreateDirectory(caseDir);
             DataFolder.UseTestRoot(caseDir);
             Localization.SetLanguageOverride(null);
+            ThemePalette.SetDarkOverride(null);
             try
             {
                 run();
@@ -99,7 +109,6 @@ public static class Program
             onAgain: (p, ts) => line.Use(p, ts));
         watcher.Start();
 
-        // 0. 剪贴板占用重试耗尽时不抛出 COMException，而是返回 fallback（P1 回归）
         int retryWaits = 0;
         var exhaustedRead = Win32ClipboardBackend.RetryClipboard<string?>(
             () => throw new System.Runtime.InteropServices.COMException("locked", unchecked((int)0x800401D0)),
@@ -121,12 +130,10 @@ public static class Program
             onRetryWait: () => { });
         Check(transientWrite && writeAttempts == 3, "Clipboard retry succeeds after transient lock");
 
-        // 1. 隐私与自身标记必须过滤，不入库
         backend.Push(new ClipboardSnapshot(1, ContainsSelfCopy: true, ContainsFiles: false, IsPrivacyBlocked: false, "self-secret", null));
         backend.Push(new ClipboardSnapshot(2, ContainsSelfCopy: false, ContainsFiles: false, IsPrivacyBlocked: true, "pw-secret", null));
         Check(history.Count == 0, "SelfCopy and privacy-marked copies are ignored");
 
-        // 2. 200ms 内连续两次不同复制（模拟 50ms 突发），两条都要进 SQLite
         var sw = Stopwatch.StartNew();
         backend.Push(new ClipboardSnapshot(3, false, false, false, "First burst note alpha", null));
         Thread.Sleep(40);
@@ -136,29 +143,24 @@ public static class Program
         Check(line.ShownItems.Count == 2, "Both burst items appear on line");
         Check(line.ShownItems[0].FullText == "Second burst note beta", "Newest burst item sits at head");
 
-        // 3. 链接与 RTF 富文本入库
         var rtfBytes = Encoding.ASCII.GetBytes(@"{\rtf1\ansi {\b Bold} word}");
         backend.Push(new ClipboardSnapshot(5, false, false, false, "Bold word", rtfBytes));
         backend.Push(new ClipboardSnapshot(6, false, false, false, "https://github.com/a1024053774/EnCopy", null));
         Check(history.Count == 4, "Link and RTF note recorded");
         Check(line.ShownItems[0].Kind == ItemKind.Link && line.ShownItems[0].Title == "github.com", "Link parsed with site title");
 
-        // 4. 重复复制旧项不重复写文件，而是挪到最前
         backend.Push(new ClipboardSnapshot(7, false, false, false, "First burst note alpha", null));
         Check(history.Count == 4, "Duplicate text does not create a 5th row");
         Check(line.ShownItems[0].FullText == "First burst note alpha", "Re-copied item moves back to head");
 
-        // 5. 模拟重启：重新打开 History 与 Line 仍保留全部 4 条且顺序保持
         using var historyReopened = new History();
         var lineReopened = new Line(historyReopened);
         Check(lineReopened.ShownItems.Count == 4, "Items persist across reopen");
         Check(lineReopened.ShownItems[0].FullText == "First burst note alpha", "Most recently used item remains first after reopen");
 
-        // 6. 同毫秒突发后立刻重复复制旧项：重开 History 后最近一次复制仍排第一（P3 回归）
         backend.Push(new ClipboardSnapshot(8, false, false, false, "Same-ms item one", null));
         backend.Push(new ClipboardSnapshot(9, false, false, false, "Same-ms item two", null));
         backend.Push(new ClipboardSnapshot(10, false, false, false, "Same-ms item three", null));
-        // 连续交替复现相同条目，全部落在纯 onAgain 单调时间戳路径，确保不倒挂回 UtcNow
         for (uint seq = 11; seq <= 25; seq += 3)
         {
             backend.Push(new ClipboardSnapshot(seq, false, false, false, "Same-ms item two", null));
@@ -273,26 +275,21 @@ public static class Program
         backend.Push(new ClipboardSnapshot(2, false, false, false, "Menú de configuración", null));
         backend.Push(new ClipboardSnapshot(3, false, false, false, "发票 #2041：¥1,280", null));
 
-        // 短词（2个中文字）
         line.Query = "周会";
         Check(line.ShownItems.Count == 1 && line.ShownItems[0].Title.Contains("周会"), "2-char Chinese search finds match via instr");
 
-        // 单字
         line.Query = "票";
         Check(line.ShownItems.Count == 1 && line.ShownItems[0].Title.Contains("2041"), "1-char Chinese search finds match");
 
-        // 长词（>=3 字符 FTS5 trigram + 重音/大小写折叠）
         line.Query = "menu";
         Check(line.ShownItems.Count == 1 && line.ShownItems[0].FullText.Contains("Menú"), "Diacritic & case folded trigram search matches Menú");
 
-        // 混合短词 + 长词 AND 过滤
         line.Query = "周会 进度表";
         Check(line.ShownItems.Count == 1, "Combined short + long words match expected note");
 
         line.Query = "周会 2041";
         Check(line.ShownItems.Count == 0, "Disjoint words return empty match");
 
-        // >500 条历史搜索回归（P2）：第 1 条落到 500 名之后仍可搜到且 ShownItems.Count == MatchCount
         var notesDir = DataFolder.NotesFolder;
         Directory.CreateDirectory(notesDir);
         var baseUtc = DateTime.UtcNow.AddMinutes(-10);
@@ -321,36 +318,47 @@ public static class Program
         watcher.Start();
         backend.Push(new ClipboardSnapshot(1, false, false, false, "older item", null));
         backend.Push(new ClipboardSnapshot(2, false, false, false, "newer item", null));
-        line.PickNewest();
+        line.PickDefault();
 
         int pastedPlain = -1;
+        int copied = 0;
         int dismissed = 0;
         int cleared = 0;
 
-        // 组字态下方向键、回车、Esc 全都不拦截，交还输入法
-        foreach (var k in new[] { Key.Up, Key.Down, Key.Enter, Key.Escape })
+        foreach (var k in new[] { Key.Left, Key.Right, Key.Up, Key.Down, Key.Enter, Key.Escape, Key.Tab })
         {
-            bool handled = TracerKeyRouter.HandleKeyDown(k, ModifierKeys.None, isImeComposing: true, "pin", line,
-                p => pastedPlain = p ? 1 : 0, () => dismissed++, () => cleared++);
+            bool handled = LineKeyRouter.HandleKeyDown(k, ModifierKeys.None, isImeComposing: true, "pin", false, line,
+                p => pastedPlain = p ? 1 : 0, () => copied++, () => dismissed++, () => cleared++);
             Check(!handled, $"IME composing must not swallow {k}");
         }
-        Check(pastedPlain == -1 && dismissed == 0 && cleared == 0, "No actions triggered during IME composition");
+        Check(pastedPlain == -1 && copied == 0 && dismissed == 0 && cleared == 0, "No actions triggered during IME composition");
 
-        // 非组字态：Down 选第二条，Up 回第一条
-        Check(TracerKeyRouter.HandleKeyDown(Key.Down, ModifierKeys.None, false, "", line, _ => { }, () => { }, () => { }), "Down handled");
-        Check(line.Picked?.FullText == "older item", "Down picks older item");
-        Check(TracerKeyRouter.HandleKeyDown(Key.Up, ModifierKeys.None, false, "", line, _ => { }, () => { }, () => { }), "Up handled");
-        Check(line.Picked?.FullText == "newer item", "Up picks newer item");
+        Check(LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { }), "Right handled");
+        Check(line.Picked?.FullText == "older item", "Right picks older item");
+        Check(LineKeyRouter.HandleKeyDown(Key.Left, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { }), "Left handled");
+        Check(line.Picked?.FullText == "newer item", "Left picks newer item");
 
-        // Shift+Enter 纯文本粘贴，Enter 普通粘贴
-        Check(TracerKeyRouter.HandleKeyDown(Key.Enter, ModifierKeys.Shift, false, "", line, p => pastedPlain = p ? 1 : 0, () => { }, () => { }), "Shift+Enter handled");
+        Check(LineKeyRouter.HandleKeyDown(Key.C, ModifierKeys.Control, false, "", hasQuerySelection: false, line, _ => { }, () => copied++, () => { }, () => { }), "Ctrl+C without query selection copies picked card");
+        Check(copied == 1, "Copy callback invoked once");
+        Check(!LineKeyRouter.HandleKeyDown(Key.C, ModifierKeys.Control, false, "abc", hasQuerySelection: true, line, _ => { }, () => copied++, () => { }, () => { }), "Ctrl+C with query text selection stays with TextBox");
+
+        // Ctrl+Z 与 QueryBox.CanUndo 交互：输入框仍有可撤销打字时让位给 TextBox，无输入撤回时触发绳子 PutBack()
+        line.PickCard(line.ShownItems[0]);
+        Check(line.TakeDownPicked() && line.CanPutBack, "TakeDown prepares undo step for Ctrl+Z test");
+        Check(!LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "typed", false, line, _ => { }, () => { }, () => { }, () => { }, canUndoQuery: true),
+            "Ctrl+Z yields to QueryBox when canUndoQuery is true");
+        Check(line.CanPutBack, "PutBack remains pending while QueryBox handles Ctrl+Z");
+        Check(LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "typed", false, line, _ => { }, () => { }, () => { }, () => { }, canUndoQuery: false),
+            "Ctrl+Z triggers PutBack when canUndoQuery is false even with non-empty query");
+        Check(!line.CanPutBack, "PutBack executed when QueryBox has nothing to undo");
+
+        Check(LineKeyRouter.HandleKeyDown(Key.Enter, ModifierKeys.Shift, false, "", false, line, p => pastedPlain = p ? 1 : 0, () => { }, () => { }, () => { }), "Shift+Enter handled");
         Check(pastedPlain == 1, "Shift+Enter requests plain paste");
 
-        // 第一次 Esc 清搜索词，第二次 Esc 收起
         string q = "hello";
-        Check(TracerKeyRouter.HandleKeyDown(Key.Escape, ModifierKeys.None, false, q, line, _ => { }, () => dismissed++, () => { q = ""; cleared++; }), "First Esc handled");
+        Check(LineKeyRouter.HandleKeyDown(Key.Escape, ModifierKeys.None, false, q, false, line, _ => { }, () => { }, () => dismissed++, () => { q = ""; cleared++; }), "First Esc handled");
         Check(cleared == 1 && dismissed == 0 && q == "", "First Esc clears query without dismissing");
-        Check(TracerKeyRouter.HandleKeyDown(Key.Escape, ModifierKeys.None, false, q, line, _ => { }, () => dismissed++, () => cleared++), "Second Esc handled");
+        Check(LineKeyRouter.HandleKeyDown(Key.Escape, ModifierKeys.None, false, q, false, line, _ => { }, () => { }, () => dismissed++, () => cleared++), "Second Esc handled");
         Check(dismissed == 1, "Second Esc dismisses panel");
     }
 
@@ -372,18 +380,15 @@ public static class Program
         var rtfBytes = Encoding.ASCII.GetBytes(@"{\rtf1\ansi {\b Styled}}");
         backend.Push(new ClipboardSnapshot(1, false, false, false, "Styled", rtfBytes));
 
-        // 普通窗口：发 Ctrl+V
         var normalPlatform = new FakePastePlatform { CanSend = true };
         var paster = new Paster(line, normalPlatform);
         Check(paster.PastePicked(new IntPtr(100), plain: false), "Normal paste succeeds");
         Check(normalPlatform.LastPlainText == "Styled" && normalPlatform.LastRtfBytes is not null, "Normal paste keeps RTF bytes");
         Check(normalPlatform.SendCalls == 1 && normalPlatform.HintCalls == 0, "Normal window receives SendInput without PasteHint");
 
-        // ⇧⏎ 纯文本贴：去掉 RTF
         Check(paster.PastePicked(new IntPtr(100), plain: true), "Plain paste succeeds");
         Check(normalPlatform.LastPlainText == "Styled" && normalPlatform.LastRtfBytes is null, "Plain paste strips RTF");
 
-        // 管理员窗口（UIPI 拦截）：只复制并显示提示，不发 SendInput
         var adminPlatform = new FakePastePlatform { CanSend = false };
         var adminPaster = new Paster(line, adminPlatform);
         Check(adminPaster.PastePicked(new IntPtr(200), plain: false), "Admin fallback returns true after copying");
@@ -398,12 +403,12 @@ public static class Program
             new(new PixelRect(-1920, 0, 0, 1080), new PixelRect(-1920, 0, 0, 1040), 1.0, false)
         };
 
-        var onPrimary = ScreenPlacement.TopCenterPanel(500, 300, monitors);
-        Check(onPrimary.Left >= 0 && onPrimary.Left + onPrimary.Width <= 2048, $"Primary DIP bounds expected (got Left={onPrimary.Left})");
-        Check(Math.Abs(onPrimary.Top - 12.0) < 0.01, "Top margin matches 12 DIP on primary");
+        var primaryStrip = ScreenPlacement.TopLineStrip(500, 300, monitors, 300);
+        Check(Math.Abs(primaryStrip.Width - 2048.0) < 0.01 && Math.Abs(primaryStrip.Top) < 0.01, "Primary clothesline strip spans full DIP width at top edge");
+        Check(ScreenPlacement.ComputeVisibleCapacity(primaryStrip.Width) == 10, $"Expected 10 cards fit on 2048 DIP screen (got {ScreenPlacement.ComputeVisibleCapacity(primaryStrip.Width)})");
 
-        var onSecondary = ScreenPlacement.TopCenterPanel(-1000, 200, monitors);
-        Check(onSecondary.Left < 0 && onSecondary.Left >= -1920 && onSecondary.Left + onSecondary.Width <= 0, $"Secondary DIP bounds expected (got Left={onSecondary.Left})");
+        var secondaryStrip = ScreenPlacement.TopLineStrip(-1000, 200, monitors, 300);
+        Check(Math.Abs(secondaryStrip.Left - (-1920.0)) < 0.01 && Math.Abs(secondaryStrip.Width - 1920.0) < 0.01, "Secondary strip lands on secondary monitor top edge");
     }
 
     private static void TestHotKeyConflictNotice()
@@ -418,88 +423,656 @@ public static class Program
     {
         Localization.SetLanguageOverride("en");
         Check(Localization.L("Copied. Press Ctrl+V to paste.") == "Copied. Press Ctrl+V to paste.", "English copy matches");
+        Check(Localization.Format("Basket {0}", 4) == "Basket 4", "English basket format matches");
 
         Localization.SetLanguageOverride("zh-Hans");
         Check(Localization.L("Copied. Press Ctrl+V to paste.") == "已复制，按 Ctrl+V 粘贴", "Simplified Chinese copy matches");
+        Check(Localization.Format("Basket {0}", 4) == "篮子 4 件", "Chinese basket format matches");
         Check(Localization.Format("{0} of {1}", 3, 10) == "3 / 10", "Chinese count format matches");
     }
 
     private static void TestSettingsAndNoteParsing()
     {
         var store = new SettingsStore();
-        var saved = new AppSettings { RecordingPaused = true, TextEnabled = true, LinksEnabled = false };
+        var saved = new AppSettings { RecordingPaused = true, TextEnabled = true, LinksEnabled = false, KeepOnLine = 50 };
         store.Save(saved);
         var loaded = store.Load();
-        Check(loaded.RecordingPaused && loaded.TextEnabled && !loaded.LinksEnabled, "SettingsStore round-trips settings atomically");
+        Check(loaded.RecordingPaused && loaded.TextEnabled && !loaded.LinksEnabled && loaded.NormalizedKeepOnLine == 50,
+            "SettingsStore round-trips settings atomically including KeepOnLine");
 
         var codeNote = Note.Parse("Notes/Code.txt", "Notes/Code.txt", "  var x = 1;\n  return x + 2;", DateTime.Now);
-        Check(codeNote.Kind == ItemKind.Code && codeNote.IsCode, "Indented semicolon block classifies as Code");
+        Check(codeNote.Kind == ItemKind.Code && codeNote.Paper == PaperKind.Tractor && codeNote.IsCode,
+            "Indented semicolon block classifies as Code/Tractor");
 
         var linkNote = Note.Parse("Notes/Link.txt", "Notes/Link.txt", "https://www.example.com/docs/intro?ref=123", DateTime.Now);
-        Check(linkNote.Kind == ItemKind.Link && linkNote.Title == "example.com" && linkNote.LinkPath == "/docs/intro"
-            && linkNote.FullText == "https://www.example.com/docs/intro?ref=123", "Link keeps full URL while summarizing host and path");
+        Check(linkNote.Kind == ItemKind.Link && linkNote.Paper == PaperKind.Tag && linkNote.Title == "example.com" && linkNote.LinkPath == "/docs/intro"
+            && linkNote.FullText == "https://www.example.com/docs/intro?ref=123", "Link parses to Tag paper with host and path");
 
         var rtfBytes = Encoding.ASCII.GetBytes(@"{\rtf1\ansi {\b Hello} EnCopy}");
         var extracted = Note.ExtractTextFromRtf(rtfBytes);
         Check(extracted == "Hello EnCopy", $"RTF extracts plain text cleanly (got '{extracted}')");
     }
 
-    private static string? PreviewOutputPath(string[] args)
-    {
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], "--render-preview", StringComparison.OrdinalIgnoreCase))
-            {
-                return args[i + 1];
-            }
-        }
-        return null;
-    }
-
-    private static void TestTracerPanelXamlAndRender(string? previewPath)
+    private static void TestPaperKindsAndMarkdown()
     {
         Localization.SetLanguageOverride("zh-Hans");
+
+        var mdText = "# 周五采购清单\n- [x] **牛奶** 与 `面包`\n- [ ] 水果 [超市](https://example.com)";
+        Check(Markdown.LooksLikeMarkdown(mdText), "Markdown heuristic detects heading + checklist + inline emphasis");
+
+        var mdPath = Path.Combine(DataFolder.NotesFolder, "md-sample.txt");
+        Directory.CreateDirectory(DataFolder.NotesFolder);
+        File.WriteAllText(mdPath, mdText, new UTF8Encoding(false));
+        var mdNote = Note.Load(mdPath, "Notes/md-sample.txt", DateTime.Now);
+        Check(mdNote is not null && mdNote.IsMarkdown && mdNote.Paper == PaperKind.Receipt && mdNote.Title == "周五采购清单",
+            "Markdown heading stripped into receipt Title while keeping FullText verbatim");
+        Check(mdNote!.FullText == mdText, "Raw Markdown preserved for copy/paste");
+
+        var inlines = Markdown.BuildInlines(mdNote.Body, 9.0, Brushes.Black, Brushes.Gray, Brushes.Brown);
+        Check(inlines.Count >= 4, "Markdown.BuildInlines renders formatted runs for checklists and inline code");
+
+        // 5 种纸张 + 视频区分 6 色 TagColor
+        var pngPath = Path.Combine(DataFolder.NotesFolder, "shot.png");
+        WriteSamplePng(pngPath, 160, 100);
+        var mp4Path = Path.Combine(DataFolder.NotesFolder, "clip.mp4");
+        File.WriteAllBytes(mp4Path, [0, 1, 2]);
+        var filesListPath = Path.Combine(DataFolder.FilesFolder, "stack.filelist");
+        Directory.CreateDirectory(DataFolder.FilesFolder);
+        File.WriteAllLines(filesListPath, [pngPath, mp4Path], new UTF8Encoding(false));
+
+        var imgNote = Note.Load(pngPath, "Notes/shot.png", DateTime.Now);
+        var vidNote = Note.Load(mp4Path, "Notes/clip.mp4", DateTime.Now);
+        var fileNote = Note.Load(filesListPath, "Files/stack.filelist", DateTime.Now);
+        Check(imgNote?.Kind == ItemKind.Image && imgNote.Paper == PaperKind.Polaroid, "PNG renders as Polaroid image");
+        Check(vidNote?.Kind == ItemKind.Video && vidNote.Paper == PaperKind.Polaroid, "MP4 renders as Polaroid video");
+        Check(fileNote?.Kind == ItemKind.File && fileNote.Paper == PaperKind.Folder && fileNote.Title == "2 个文件",
+            $"Multi-file .filelist renders as Folder with count (got '{fileNote?.Title}')");
+
+        var distinctColors = new[]
+        {
+            ThemePalette.TagColor(ItemKind.Text),
+            ThemePalette.TagColor(ItemKind.Code),
+            ThemePalette.TagColor(ItemKind.Link),
+            ThemePalette.TagColor(ItemKind.Image),
+            ThemePalette.TagColor(ItemKind.Video),
+            ThemePalette.TagColor(ItemKind.File)
+        }.Distinct().Count();
+        Check(distinctColors == 6, "All 6 ItemKind badges have distinct colors");
+    }
+
+    private static void TestRopeSlotsPinMoveToHeadAndOverflow()
+    {
         var backend = new FakeClipboardBackend();
         using var history = new History();
         var line = new Line(history);
+        line.SetVisibleCapacity(4);
+
         using var watcher = new ClipboardWatcher(backend, history, new AppSettings(), line.AddNew, (p, ts) => line.Use(p, ts));
         watcher.Start();
 
-        backend.Push(new ClipboardSnapshot(1, false, false, false, "周会改到周四下午三点\n记得带上项目进度表", null));
-        backend.Push(new ClipboardSnapshot(2, false, false, false, "  var total = items.Count;\n  return total;", null));
-        backend.Push(new ClipboardSnapshot(3, false, false, false, "https://github.com/a1024053774/EnCopy", null));
-        line.PickNewest();
+        var labels = new[] { "A-one", "B-two", "C-three", "D-four", "E-five", "F-six" };
+        uint seq = 1;
+        foreach (var label in labels)
+        {
+            backend.Push(new ClipboardSnapshot(seq++, false, false, false, label, null));
+            Thread.Sleep(15);
+        }
 
-        var panel = new TracerPanel(line, onPaste: (_, _, _) => true, onVisibilityChanged: () => { });
+        // 容量 4：最新 F, E, D, C 挂在绳上；最老 A, B 落入篮子且历史记录不丢
+        Check(line.LineItems.Count == 4, $"Expected 4 items on line, got {line.LineItems.Count}");
+        Check(line.BasketCount == 2 && history.Count == 6, $"Expected 2 in basket out of 6 total (basket={line.BasketCount}, hist={history.Count})");
+        Check(line.LineItems[0].FullText == "F-six" && line.LineItems[3].FullText == "C-three", "Loose cards hang newest-to-oldest right of knot");
+
+        // 选中 D-four 按 Ctrl+P 收藏到绳结左（index 0）
+        line.PickCard(line.LineItems[2]);
+        Check(line.Picked?.FullText == "D-four", "Picked D-four before pinning");
+        line.TogglePinPicked();
+        Check(line.PinnedCount == 1 && line.LineItems[0].FullText == "D-four" && line.LineItems[0].Pinned,
+            "Pinned item moves left of knot at index 0");
+
+        // 新增一条 G-seven：D-four 牢牢留在 index 0，G-seven 挂到 index 1，最老非收藏 C-three 被挤入篮子
+        backend.Push(new ClipboardSnapshot(seq++, false, false, false, "G-seven", null));
+        Check(line.PinnedCount == 1 && line.LineItems[0].FullText == "D-four", "Pinned item never leaves left of knot");
+        Check(line.LineItems[1].FullText == "G-seven" && line.LineItems[3].FullText == "E-five",
+            "New item takes first loose slot after knot; oldest loose C-three overflowed to basket");
+        Check(line.BasketCount == 3, "Basket now holds 3 items (A, B, C)");
+
+        // 单击/再次复制/贴回 E-five -> 非收藏回到绳头（index 1），收藏卡 D-four 原地不动
+        backend.Push(new ClipboardSnapshot(seq++, false, false, false, "E-five", null));
+        Check(line.LineItems[0].FullText == "D-four", "Pinned stays at index 0");
+        Check(line.LineItems[1].FullText == "E-five" && line.LineItems[2].FullText == "G-seven", "Re-copied loose item moves right after knot");
+
+        // 再次复制篮子里的 A-one -> 召回绳头（index 1），最老非收藏 F-six 落回篮子
+        backend.Push(new ClipboardSnapshot(seq++, false, false, false, "A-one", null));
+        Check(line.LineItems[1].FullText == "A-one" && line.BasketCount == 3, "Re-copying basket item brings it to head of line");
+
+        // 重开 History + Line 验证 LineState.json 持久化收藏与顺序
+        using var reopenedHistory = new History();
+        var reopenedLine = new Line(reopenedHistory);
+        reopenedLine.SetVisibleCapacity(4);
+        Check(reopenedLine.PinnedCount == 1 && reopenedLine.LineItems[0].FullText == "D-four" && reopenedLine.LineItems[1].FullText == "A-one",
+            "Reopened line restores pinned position left of knot and loose order from LineState.json");
+
+        // TiltFor 角度必须在 [-2.3, 2.3] 度内（防止 uint 下溢倒置）
+        for (int i = 0; i < 30; i++)
+        {
+            double tilt = Line.TiltFor($"C:/notes/sample-card-{i}.txt");
+            Check(Math.Abs(tilt) <= 2.3, $"Card tilt must stay near horizontal (got {tilt})");
+        }
+
+        // KeepOnLine=25 滚动后，Tab 筛选或搜索缩窄列表时必须归零/夹紧 ScrollOffset
+        reopenedLine.SetKeepOnLine(25);
+        for (int k = 0; k < 4; k++)
+        {
+            var extraPath = Path.Combine(DataFolder.NotesFolder, $"extra-scroll-{k}.txt");
+            File.WriteAllText(extraPath, $"Extra scroll note {k}", new UTF8Encoding(false));
+            reopenedHistory.Record(extraPath, $"Extra scroll note {k}", DateTime.UtcNow.AddSeconds(k));
+            reopenedLine.AddNew(extraPath);
+        }
+        reopenedLine.ScrollBy(ScreenPlacement.CardSpacing * 3);
+        Check(reopenedLine.ScrollOffset > 0, "ScrollBy advances ScrollOffset when items exceed VisibleCapacity");
+        reopenedLine.CycleKindFilter(2); // Link
+        Check(reopenedLine.ScrollOffset == 0 && reopenedLine.ScrollOffset <= reopenedLine.MaxScrollOffset(),
+            $"Filtering must clamp ScrollOffset (got {reopenedLine.ScrollOffset}, max={reopenedLine.MaxScrollOffset()})");
+        reopenedLine.KindFilter = KindFilter.All;
+
+        // CardClickCoordinator 竞态回归：双击 slot>=1 的卡片时不得被 Click1 提前挪回绳头而误贴邻居
+        reopenedLine.ReloadFromHistory();
+        Note slot1Target = reopenedLine.ShownItems[1];
+        string? doubleClickedText = null;
+        int singleClickCalls = 0;
+        bool timerArmed = false;
+        var coord = new CardClickCoordinator(
+            onSingleClick: (n, _) => { singleClickCalls++; reopenedLine.Use(n.FilePath); },
+            onDoubleClick: n => doubleClickedText = n.FullText,
+            scheduleTimer: () => timerArmed = true,
+            cancelTimer: () => timerArmed = false);
+        coord.HandleClick(slot1Target, clickCount: 1, extendSelection: false);
+        Check(timerArmed && singleClickCalls == 0, "Click1 arms timer without immediately reordering line");
+        coord.HandleClick(slot1Target, clickCount: 2, extendSelection: false);
+        Check(!timerArmed && singleClickCalls == 0 && doubleClickedText == slot1Target.FullText,
+            $"Click2 cancels single-click timer and double-clicks exact target '{slot1Target.FullText}' (got '{doubleClickedText}')");
+    }
+
+    private static void TestTakeDownPutBackAndMultiSelect()
+    {
+        var backend = new FakeClipboardBackend();
+        using var history = new History();
+        var line = new Line(history);
+        line.SetVisibleCapacity(5);
+        using var watcher = new ClipboardWatcher(backend, history, new AppSettings(), line.AddNew, (p, ts) => line.Use(p, ts));
+        watcher.Start();
+
+        backend.Push(new ClipboardSnapshot(1, false, false, false, "Slot-3-Alpha", null));
+        Thread.Sleep(12);
+        backend.Push(new ClipboardSnapshot(2, false, false, false, "Slot-2-Beta", null));
+        Thread.Sleep(12);
+        backend.Push(new ClipboardSnapshot(3, false, false, false, "Slot-1-Gamma", null));
+        Thread.Sleep(12);
+        backend.Push(new ClipboardSnapshot(4, false, false, false, "Slot-0-Delta", null));
+
+        // 1. Shift+Right 多选：连续框选 Delta (index 0) 与 Gamma (index 1) 并按顺序合并粘贴
+        line.PickCard(line.ShownItems[0]);
+        LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.Shift, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        var selected = line.GetSelectedNotesInLineOrder();
+        Check(selected.Count == 2 && selected[0].FullText == "Slot-0-Delta" && selected[1].FullText == "Slot-1-Gamma",
+            "Shift+Right multi-selects left-to-right cards");
+
+        var fakePaste = new FakePastePlatform { CanSend = true };
+        var paster = new Paster(line, fakePaste);
+        Check(paster.PastePicked(new IntPtr(100), plain: false), "Multi-select paste succeeds");
+        Check(fakePaste.LastPlainText == "Slot-0-Delta\n\nSlot-1-Gamma",
+            $"Multi-select joins selected cards in line order (got '{fakePaste.LastPlainText}')");
+
+        // 2. 多选连续框选 [1, 2] 并 TakeDown + Ctrl+Z 放回：必须严格恢复原始 [1, 2] 顺序，不能倒序
+        line.PickCard(line.ShownItems[1]);
+        LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.Shift, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        string orig1 = line.LineItems[1].FullText;
+        string orig2 = line.LineItems[2].FullText;
+        Check(LineKeyRouter.HandleKeyDown(Key.Back, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { }),
+            "Ctrl+Backspace takes down multi-selection");
+        Check(line.LineItems.Count == 2 && line.CanPutBack, "Both selected cards removed from line");
+        line.Query = orig2;
+        Check(line.MatchCount == 0, "Taken down item no longer shows in search");
+        line.Query = string.Empty;
+
+        Check(LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { }),
+            "Ctrl+Z puts multi-selected items back");
+        Check(!line.CanPutBack && line.LineItems.Count == 4 && line.LineItems[1].FullText == orig1 && line.LineItems[2].FullText == orig2,
+            $"PutBack must preserve exact original order ([1]='{line.LineItems[1].FullText}', [2]='{line.LineItems[2].FullText}')");
+
+        // 3. Ctrl+P 收藏后 Ctrl+Z 撤销收藏
+        line.PickCard(line.LineItems[2]);
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 1 && line.LineItems[0].FullText == orig2, "Pinned card moves left of knot");
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 0 && line.LineItems[2].FullText == orig2, "Ctrl+Z reverts pin back to original loose index");
+
+        // 4. 多选 TakeDown 时第 2 件文件被外部进程独占锁定抛出 IOException：必须全批回滚，SQLite 与文件都不丢失
+        line.PickCard(line.LineItems[1]);
+        LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.Shift, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        string lockedPath = line.LineItems[2].FilePath;
+        using (File.Open(lockedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            Check(!line.TakeDownPicked(), "TakeDownPicked aborts cleanly when a selected file is locked");
+        }
+        Check(line.LineItems.Count == 4 && history.Count == 4 && File.Exists(line.LineItems[1].FilePath) && File.Exists(lockedPath),
+            "IOException rollback keeps all files, SQLite rows, and line items intact");
+    }
+
+    private static void TestBasketGroupsFilterAndNavigation()
+    {
+        Localization.SetLanguageOverride("zh-Hans");
+        using var history = new History();
+        Directory.CreateDirectory(DataFolder.NotesFolder);
+        Directory.CreateDirectory(DataFolder.FilesFolder);
+
+        var now = DateTime.Now;
+        void RecordNote(string name, string content, DateTime localStamp)
+        {
+            var p = Path.Combine(DataFolder.NotesFolder, name);
+            File.WriteAllText(p, content, new UTF8Encoding(false));
+            history.Record(p, content, localStamp.ToUniversalTime(), appName: "Notepad");
+        }
+
+        // 7 条历史：3 条在今天（占满容量 3 的绳子），其余 4 条按天/按月落入篮子
+        RecordNote("04-month.txt", "https://docs.microsoft.com/dotnet", now.Date.AddDays(-45).AddHours(10));
+        RecordNote("03-week.txt", "  int sum = 0;\n  return sum;", now.Date.AddDays(-3).AddHours(14));
+        RecordNote("02-yesterday.txt", "昨天会议记录\n确认上线清单", now.Date.AddDays(-1).AddHours(16));
+        RecordNote("01-today-1.txt", "今天最早一条文本", now.Date.AddHours(8));
+        RecordNote("00b-today-mid.txt", "今天第二条文本", now.Date.AddHours(9));
+        RecordNote("00a-today-head.txt", "最新挂在绳头", now.Date.AddHours(10));
+
+        var filePath = Path.Combine(DataFolder.FilesFolder, "report.filelist");
+        var dummyTarget = Path.Combine(DataFolder.NotesFolder, "01-today-1.txt");
+        File.WriteAllLines(filePath, [dummyTarget], new UTF8Encoding(false));
+        history.Record(filePath, "01-today-1.txt", now.Date.AddDays(-2).AddHours(11).ToUniversalTime());
+
+        var line = new Line(history);
+        line.SetVisibleCapacity(3); // 绳上留 3 条，其余 4 条进篮子
+
+        Check(line.LineItems.Count == 3 && line.BasketCount == 4,
+            $"Expected 3 on line and 4 in basket (line={line.LineItems.Count}, basket={line.BasketCount})");
+
+        // Tab 循环筛选（全部 -> 文字 -> 链接 -> 图片 -> 文件 -> 全部）
+        line.CycleKindFilter(1);
+        Check(line.KindFilter == KindFilter.Text, "First Tab switches to Text");
+        line.CycleKindFilter(1);
+        Check(line.KindFilter == KindFilter.Link, "Second Tab switches to Link");
+        line.CycleKindFilter(-2);
+        Check(line.KindFilter == KindFilter.All, "Shift+Tab x2 returns to All");
+
+        // 按 ↓ 展开篮子列表
+        LineKeyRouter.HandleKeyDown(Key.Down, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.BasketOpen && line.BasketMatchCount == 4, "Down arrow opens basket with 4 items");
+        Check(line.BasketKindCounts[KindFilter.Text] == 2, "Pre-filter chips count Text+Code together (2 items)");
+        Check(line.BasketKindCounts[KindFilter.Link] == 1 && line.BasketKindCounts[KindFilter.File] == 1,
+            "Chips accurately count links and files before KindFilter narrows rows");
+
+        // 模态守卫回归：篮子空筛选（BasketPicked == null）时绝不穿透选中/贴出背后绳子上的卡
+        line.Query = "NoSuchNeedle987";
+        Check(line.BasketOpen && line.BasketPicked is null, "Empty basket search leaves BasketPicked null");
+        Check(line.GetSelectedNotesInLineOrder().Count == 0, "Modal basket returns empty selection instead of falling through to rope");
+        var guardPaste = new FakePastePlatform { CanSend = true };
+        var guardPaster = new Paster(line, guardPaste);
+        Check(!guardPaster.PastePicked(new IntPtr(100), false) && guardPaste.SendCalls == 0,
+            "Enter with empty basket must not paste behind-the-scenes rope card");
+        line.Query = string.Empty;
+
+        // 分组顺序：昨天 -> 本周 -> 更早月份（Today 三条此时全部在绳上）
+        Check(line.BasketGroups.Count == 3, $"Expected 3 date groups in basket (got {line.BasketGroups.Count})");
+        Check(line.BasketGroups[0].Title == "昨天" && line.BasketGroups[1].Title == "本周",
+            $"Expected 昨天 & 本周 headers (got '{line.BasketGroups[0].Title}', '{line.BasketGroups[1].Title}')");
+
+        // 篮子里按 → 跳到「本周」第一行（report.filelist），按 Ctrl+P 收藏到绳结左，按 ← 回第一组，在首行按 ↑ 回到绳上
+        var firstPicked = line.BasketPicked;
+        LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.BasketPicked is not null && line.BasketPicked.Kind == ItemKind.File && line.BasketPicked.FilePath != firstPicked?.FilePath,
+            "Right arrow jumps to next basket group (report.filelist)");
+
+        var displacedBeforePin = line.LineItems[2].FilePath;
+        var pinnedPath = line.BasketPicked!.FilePath;
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 1 && string.Equals(line.LineItems[0].FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase),
+            "Ctrl+P in basket pins picked item onto left of knot");
+        Check(!line.BasketGroups.SelectMany(g => g.Rows).Any(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
+            "Pinned item leaves the basket list");
+
+        // Ctrl+Z 撤销从篮子刚收藏的条目：应撤回篮子、补回被挤下绳的卡片并恢复 LineState.json，之后仍可再次 Ctrl+P 收藏上绳
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 0 && line.BasketGroups.SelectMany(g => g.Rows).Any(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
+            "Ctrl+Z after basket Ctrl+P unpins and returns item to basket");
+        Check(line.LineItems.Count == 3 && string.Equals(line.LineItems[2].FilePath, displacedBeforePin, StringComparison.OrdinalIgnoreCase) && line.BasketCount == 4,
+            $"Ctrl+Z after basket Ctrl+P on full line must restore displaced card onto line (count={line.LineItems.Count}, basket={line.BasketCount})");
+
+        // 若被挤掉的卡在撤销前已被重新 Use() 拉回绳上，Ctrl+Z 取消收藏时仍需从篮子补齐满绳且不把刚取消收藏的那件拉成普通卡
+        line.BasketPicked = line.BasketGroups.SelectMany(g => g.Rows).First(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)).Note;
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        line.Use(displacedBeforePin, DateTime.UtcNow.AddSeconds(1));
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 0 && line.LineItems.Count == 3 &&
+              !line.LineItems.Any(n => string.Equals(n.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)),
+            $"Ctrl+Z after intervening Use() must backfill full line from basket without leaving {line.LineItems.Count} cards");
+        line.BasketPicked = line.BasketGroups.SelectMany(g => g.Rows).First(r => string.Equals(r.Note.FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase)).Note;
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.PinnedCount == 1 && string.Equals(line.LineItems[0].FilePath, pinnedPath, StringComparison.OrdinalIgnoreCase),
+            "Re-pinning restored basket item succeeds cleanly");
+
+        LineKeyRouter.HandleKeyDown(Key.Left, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        var topGroupFirstRow = line.BasketGroups[0].Rows[0].Note;
+        Check(string.Equals(line.BasketPicked?.FilePath, topGroupFirstRow.FilePath, StringComparison.OrdinalIgnoreCase),
+            "Left arrow jumps to first basket group row");
+
+        // 在第 0 行按 ↑ 关闭篮子，回到绳子最前一条
+        while (!string.Equals(line.BasketPicked?.FilePath, topGroupFirstRow.FilePath, StringComparison.OrdinalIgnoreCase))
+        {
+            LineKeyRouter.HandleKeyDown(Key.Up, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        }
+        LineKeyRouter.HandleKeyDown(Key.Up, ModifierKeys.None, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(!line.BasketOpen && line.Picked is not null, "Up arrow on first basket row closes basket and returns pick to line");
+
+        // 调高 KeepOnLine 使绳不满且未挤掉任何卡时，从篮子 Ctrl+P 再 Ctrl+Z 绝不能把无关篮子条目拉上绳（P2 回归）
+        line.SetKeepOnLine(25);
+        int prePinCount = line.LineItems.Count;
+        int prePinBasket = line.BasketCount;
+        line.OpenBasket();
+        LineKeyRouter.HandleKeyDown(Key.P, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.LineItems.Count == prePinCount + 1, "Zero-displacement basket pin adds pinned card to line");
+        LineKeyRouter.HandleKeyDown(Key.Z, ModifierKeys.Control, false, "", false, line, _ => { }, () => { }, () => { }, () => { });
+        Check(line.LineItems.Count == prePinCount && line.BasketCount == prePinBasket,
+            $"Zero-displacement Ctrl+Z must return exact count {prePinCount} without pulling basket items (got {line.LineItems.Count})");
+
+        // 交叉调度不变量（[Pin -> AddNew -> Undo] 与 [Pin1 -> Pin2 -> Undo -> Undo]）：撤销篮子收藏不得用更老卡顶掉后挤下的更新卡
+        using var schedHistory = new History(Path.Combine(DataFolder.Root, "schedule.sqlite"));
+        string AddSchedNote(string fileName, string text, DateTime utcStamp)
+        {
+            var p = Path.Combine(DataFolder.NotesFolder, fileName);
+            File.WriteAllText(p, text, new UTF8Encoding(false));
+            schedHistory.Record(p, text, utcStamp);
+            return p;
+        }
+
+        var utcNow = DateTime.UtcNow;
+        AddSchedNote("sched-Y.txt", "sched-Y", utcNow.AddMinutes(-180));
+        var schedP2 = AddSchedNote("sched-P2.txt", "sched-P2", utcNow.AddMinutes(-120));
+        var schedP1 = AddSchedNote("sched-P1.txt", "sched-P1", utcNow.AddMinutes(-60));
+        var schedZ = AddSchedNote("sched-Z.txt", "sched-Z", utcNow.AddMinutes(-30));
+        AddSchedNote("sched-B.txt", "sched-B", utcNow.AddMinutes(-20));
+        AddSchedNote("sched-A.txt", "sched-A", utcNow.AddMinutes(-10));
+
+        var schedLine = new Line(schedHistory, lineStatePath: Path.Combine(DataFolder.Root, "sched-LineState.json"));
+        schedLine.SetVisibleCapacity(3);
+        Check(schedLine.LineItems.Count == 3 && schedLine.LineItems[2].FullText == "sched-Z", "Schedule setup holds [A, B, Z]");
+
+        // 1) [Pin -> AddNew -> Undo]: Pin(P1) 挤下 Z -> AddNew(N) 挤下更晚的 B -> PutBack() 应优先补回更新的 B 而非更老的 Z
+        schedLine.TogglePinByPath(schedP1);
+        var schedN = AddSchedNote("sched-N.txt", "sched-N", utcNow.AddMinutes(-5));
+        schedLine.AddNew(schedN);
+        Check(schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-N", "sched-A"]),
+            "After Pin(P1) + AddNew(N), line holds [P1*, N, A]");
+        Check(schedLine.PutBack(), "PutBack undoes Pin(P1)");
+        Check(schedLine.PinnedCount == 0 && schedLine.LineItems.Count == 3 &&
+              schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-N", "sched-A", "sched-B"]),
+            $"[Pin -> AddNew -> Undo] must preserve loose-card recency [N, A, B] (got [{string.Join(", ", schedLine.LineItems.Select(n => n.FullText))}])");
+
+        // 2) [Pin1 -> Pin2 -> Undo -> Undo]: 连续收藏两件后再两次 PutBack，应逐格恢复 A、B
+        schedLine.TogglePinByPath(schedP1);
+        schedLine.TogglePinByPath(schedP2);
+        Check(schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-P2", "sched-N"]),
+            "After two basket pins, line holds [P1*, P2*, N]");
+        Check(schedLine.PutBack() && schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-P1", "sched-N", "sched-A"]),
+            "First PutBack after double pin restores A cleanly");
+        Check(schedLine.PutBack() && schedLine.PinnedCount == 0 &&
+              schedLine.LineItems.Select(n => n.FullText).SequenceEqual(["sched-N", "sched-A", "sched-B"]),
+            "Second PutBack after double pin restores B cleanly");
+    }
+
+    private static void TestShortcutRecorderAndPersistence()
+    {
+        Check(Shortcut.TryFromKeyInput(Key.C, Key.None, ModifierKeys.None, out _) == ShortcutInputResult.InvalidNeedsModifier,
+            "Bare letter key must be rejected");
+        Check(Shortcut.TryFromKeyInput(Key.C, Key.None, ModifierKeys.Shift, out _) == ShortcutInputResult.InvalidNeedsModifier,
+            "Shift-only letter combo must be rejected");
+        Check(Shortcut.TryFromKeyInput(Key.LeftCtrl, Key.None, ModifierKeys.Control, out _) == ShortcutInputResult.ModifierOnly,
+            "Modifier-only press waits for main key");
+        Check(Shortcut.TryFromKeyInput(Key.Escape, Key.None, ModifierKeys.None, out _) == ShortcutInputResult.Cancel,
+            "Plain Escape cancels recorder");
+        Check(Shortcut.TryFromKeyInput(Key.Delete, Key.None, ModifierKeys.None, out _) == ShortcutInputResult.Clear,
+            "Plain Delete removes shortcut");
+
+        var parsed = Shortcut.TryFromKeyInput(Key.Space, Key.None, ModifierKeys.Control | ModifierKeys.Shift, out var custom);
+        Check(parsed == ShortcutInputResult.Valid && (custom.Display == "Ctrl+Shift+空格" || custom.Display == "Ctrl+Shift+Space"),
+            $"Expected valid Ctrl+Shift+Space (got {parsed}, '{custom.Display}')");
+
+        // Alt 组合键与中文 IME 活跃状态下 ImeProcessedKey 都能正确解析
+        var parsedAlt = Shortcut.TryFromKeyInput(Key.System, Key.C, ModifierKeys.Alt, out var altC);
+        Check(parsedAlt == ShortcutInputResult.Valid && altC.Display == "Alt+C" && altC.VirtualKey == Shortcut.VkC,
+            $"Expected valid Alt+C via Key.System (got {parsedAlt}, '{altC.Display}')");
+
+        var parsedIme = Shortcut.TryFromKeyInput(Key.ImeProcessed, Key.None, ModifierKeys.Control | ModifierKeys.Alt, out var imeCombo, Key.K);
+        Check(parsedIme == ShortcutInputResult.Valid && imeCombo.Display == "Ctrl+Alt+K",
+            $"Expected valid Ctrl+Alt+K via ImeProcessedKey (got {parsedIme}, '{imeCombo.Display}')");
+
+        // 取消或关闭录制窗口不得触动 commit 回调或重写 Settings.json
+        int commitCalls = 0;
+        var cancelWindow = new ShortcutRecorderWindow(Shortcut.Standard, _ => true, _ => commitCalls++);
+        cancelWindow.CloseSilently();
+        Check(commitCalls == 0, "Closing recorder without confirming must not persist ShortcutCustomized");
+
+        var store = new SettingsStore();
+        var s1 = new AppSettings();
+        s1.SetActiveShortcut(custom);
+        store.Save(s1);
+        var loaded1 = store.Load();
+        Check(loaded1.GetActiveShortcut() is { } restored && restored.VirtualKey == custom.VirtualKey && restored.Modifiers == custom.Modifiers,
+            "Custom shortcut persists across SettingsStore reload");
+
+        loaded1.SetActiveShortcut(null);
+        store.Save(loaded1);
+        var loadedNone = store.Load();
+        Check(loadedNone.GetActiveShortcut() is null, "Removed shortcut persists as None rather than snapping back to Alt+C");
+    }
+
+    private static void TestLinePanelRenderAndClickThrough(string? previewDir)
+    {
+        Localization.SetLanguageOverride("zh-Hans");
+        Directory.CreateDirectory(DataFolder.NotesFolder);
+        Directory.CreateDirectory(DataFolder.FilesFolder);
+
+        using var history = new History();
+        var now = DateTime.Now;
+
+        void AddFile(string name, string content, DateTime stamp)
+        {
+            var p = Path.Combine(DataFolder.NotesFolder, name);
+            File.WriteAllText(p, content, new UTF8Encoding(false));
+            history.Record(p, content, stamp.ToUniversalTime(), appName: "Notepad");
+        }
+
+        // 篮子条目（旧）
+        AddFile("08-old-link.txt", "https://learn.microsoft.com/en-us/dotnet/desktop/wpf/", now.AddDays(-40));
+        AddFile("07-old-code.txt", "  var builder = Host.CreateBuilder();\n  builder.Run();", now.AddDays(-2));
+        AddFile("06-old-text.txt", "昨天的报销单已审批通过，请归档。", now.AddDays(-1));
+
+        // 绳上 5 种纸张 + 1 件收藏
+        AddFile("05-pin-note.txt", "# 常用提示词\n**请保持简短**，附真实路径 `windows/`", now.AddMinutes(-20));
+        AddFile("04-code.txt", "  public sealed class Rope\n  {\n      public int Pegs => 6;\n  }", now.AddMinutes(-12));
+        AddFile("03-link.txt", "https://github.com/a1024053774/EnCopy/pulls", now.AddMinutes(-8));
+
+        var imgPath = Path.Combine(DataFolder.NotesFolder, "preview.png");
+        WriteSamplePng(imgPath, 240, 140);
+        history.Record(imgPath, "preview screenshot", now.AddMinutes(-5).ToUniversalTime());
+
+        var fileStackPath = Path.Combine(DataFolder.FilesFolder, "bundle.filelist");
+        File.WriteAllLines(fileStackPath, [imgPath, Path.Combine(DataFolder.NotesFolder, "04-code.txt")], new UTF8Encoding(false));
+        history.Record(fileStackPath, "preview.png\n04-code.txt", now.AddMinutes(-3).ToUniversalTime());
+
+        AddFile("01-receipt.txt", "# 发布检查\n- [x] **check.ps1** 全绿\n- [ ] 桌面走查", now.AddMinutes(-1));
+
+        var line = new Line(history);
+        line.SetVisibleCapacity(6);
+        line.PickCard(line.LineItems[0]); // 选中最右下的收藏候选，Pin 到绳结左侧
+        var pinTarget = line.LineItems.First(n => n.FullText.Contains("常用提示词"));
+        line.TogglePinByPath(pinTarget.FilePath);
+        line.PickDefault();
+
+        var panel = new LinePanel(
+            line,
+            onPasteNotes: (_, _, _) => true,
+            onCopyNotes: _ => true,
+            onVisibilityChanged: () => { },
+            onRequestChangeShortcut: () => { });
+
         try
         {
             panel.SetConflictNotice(Localization.Format("Shortcut {0} is in use by another app.", Shortcut.Standard.Display));
-            var root = panel.Content as UIElement ?? throw new InvalidOperationException("TracerPanel root content is missing");
-            root.Measure(new Size(680, 440));
-            root.Arrange(new Rect(0, 0, 680, 440));
-            root.UpdateLayout();
 
-            var bitmap = new RenderTargetBitmap(680, 440, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(root);
+            // 1. 浅色顶部绳子 + 5 种纸 + 绳结 + 篮子把手渲染 + 穿透性验证（height 344 容纳冲突横幅 + 提示条）
+            panel.RenderOffscreen(1280, 344, darkOverride: false);
+            var root = (FrameworkElement)panel.Content;
+            var lightBmp = RenderVisualToBitmap(root, 1280, 344);
 
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(bitmap));
-            using var ms = new MemoryStream();
-            encoder.Save(ms);
-            Check(bitmap.PixelWidth == 680 && bitmap.PixelHeight == 440, "Offscreen XAML render matches requested dimensions");
-            Check(ms.Length > 1000, $"Offscreen XAML render produced non-trivial PNG ({ms.Length} bytes)");
+            byte[] blankCardBandPx = SampleBgra(lightBmp, 20, 110);
+            byte[] blankSearchSidePx = SampleBgra(lightBmp, 150, 245);
+            byte[] searchBoxPx = SampleBgra(lightBmp, 640, 232);
+            Check(blankCardBandPx[3] == 0 && VisualTreeHelper.HitTest(root, new Point(20, 110)) is null,
+                $"Blank area around rope cards must be transparent click-through (alpha={blankCardBandPx[3]})");
+            Check(blankSearchSidePx[3] == 0 && VisualTreeHelper.HitTest(root, new Point(150, 245)) is null,
+                $"Blank area beside SearchShell must be transparent click-through (alpha={blankSearchSidePx[3]})");
+            Check(searchBoxPx[3] > 200 && VisualTreeHelper.HitTest(root, new Point(640, 232)) is not null,
+                $"Interactive SearchShell must be opaque and hit-testable (alpha={searchBoxPx[3]})");
 
-            if (!string.IsNullOrWhiteSpace(previewPath))
+            if (!string.IsNullOrWhiteSpace(previewDir))
             {
-                var dir = Path.GetDirectoryName(Path.GetFullPath(previewPath));
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                File.WriteAllBytes(previewPath, ms.ToArray());
+                SavePng(lightBmp, Path.Combine(previewDir, "00-offscreen-line-light.png"));
+            }
+
+            // 2. 深色模式下展开篮子列表（验证纸面保持浅色、外框与列表随深色切换）
+            line.OpenBasket();
+            panel.RenderOffscreen(1280, 680, darkOverride: true);
+            var darkBmp = RenderVisualToBitmap(root, 1280, 680);
+            if (!string.IsNullOrWhiteSpace(previewDir))
+            {
+                SavePng(darkBmp, Path.Combine(previewDir, "00-offscreen-basket-dark.png"));
+            }
+
+            // 3. 快捷键录制窗口离屏渲染
+            var recorder = new ShortcutRecorderWindow(Shortcut.Standard, _ => true, _ => { });
+            try
+            {
+                var recRoot = (FrameworkElement)recorder.Content;
+                recRoot.Measure(new Size(390, 240));
+                recRoot.Arrange(new Rect(0, 0, 390, Math.Max(140, recRoot.DesiredSize.Height)));
+                recRoot.UpdateLayout();
+                var recBmp = RenderVisualToBitmap(recRoot, 390, (int)Math.Ceiling(recRoot.ActualHeight));
+                if (!string.IsNullOrWhiteSpace(previewDir))
+                {
+                    SavePng(recBmp, Path.Combine(previewDir, "00-offscreen-shortcut-recorder.png"));
+                }
+            }
+            finally
+            {
+                recorder.CloseSilently();
             }
         }
         finally
         {
             panel.Close();
         }
+    }
+
+    private static void TestInstallScriptIsolated()
+    {
+        var repoRoot = FindRepoRoot();
+        var installScript = Path.Combine(repoRoot, "windows", "scripts", "install.ps1");
+        Check(File.Exists(installScript), $"install.ps1 exists at {installScript}");
+
+        var targetDir = Path.Combine(DataFolder.Root, "Programs", "EnCopy");
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell",
+            Arguments = $"-ExecutionPolicy Bypass -File \"{installScript}\" -TargetDir \"{targetDir}\" -NoLaunch",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start powershell for install.ps1 check");
+        var stdout = proc.StandardOutput.ReadToEnd();
+        var stderr = proc.StandardError.ReadToEnd();
+        proc.WaitForExit();
+        Check(proc.ExitCode == 0, $"install.ps1 exited with {proc.ExitCode}: {stderr}\n{stdout}");
+        Check(File.Exists(Path.Combine(targetDir, "EnCopy.exe")), "Daily EnCopy.exe installed into isolated target dir");
+        Check(!Directory.Exists(Path.Combine(repoRoot, "windows", "build", "EnCopy")),
+            "install.ps1 cleans temporary windows/build/EnCopy after copying");
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "windows", "scripts", "install.ps1")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException("Could not locate repository root from check test base directory.");
+    }
+
+    private static RenderTargetBitmap RenderVisualToBitmap(UIElement root, int width, int height)
+    {
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(root);
+        return bitmap;
+    }
+
+    private static byte[] SampleBgra(BitmapSource bmp, int x, int y)
+    {
+        var px = new byte[4];
+        bmp.CopyPixels(new Int32Rect(x, y, 1, 1), px, 4, 0);
+        return px;
+    }
+
+    private static void SavePng(BitmapSource bmp, string path)
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bmp));
+        using var fs = File.Create(path);
+        encoder.Save(fs);
+    }
+
+    private static void WriteSamplePng(string path, int width, int height)
+    {
+        int stride = width * 4;
+        var pixels = new byte[height * stride];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int idx = y * stride + x * 4;
+                pixels[idx + 0] = (byte)(80 + x * 120 / width);
+                pixels[idx + 1] = (byte)(120 + y * 100 / height);
+                pixels[idx + 2] = 210;
+                pixels[idx + 3] = 255;
+            }
+        }
+        var bmp = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+        SavePng(bmp, path);
+    }
+
+    private static string? PreviewDirArg(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--render-preview-dir", StringComparison.OrdinalIgnoreCase))
+            {
+                return args[i + 1];
+            }
+        }
+        return null;
     }
 
     private sealed class FakeClipboardBackend : IClipboardBackend
@@ -578,12 +1151,10 @@ public static class Program
         public string? LastPlainText { get; private set; }
         public byte[]? LastRtfBytes { get; private set; }
 
-        public bool WriteClipboard(Note note, bool plain)
+        public bool WriteClipboardText(string text, byte[]? rtfBytes)
         {
-            LastPlainText = note.FullText;
-            LastRtfBytes = !plain && File.Exists(note.FilePath) && Path.GetExtension(note.FilePath).Equals(".rtf", StringComparison.OrdinalIgnoreCase)
-                ? File.ReadAllBytes(note.FilePath)
-                : null;
+            LastPlainText = text;
+            LastRtfBytes = rtfBytes;
             return true;
         }
 
