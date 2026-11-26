@@ -4,7 +4,7 @@ title: Windows 复制的图片与文件、按 App 规则、保留清理与设置
 type: build
 status: open
 blocked_by: [T-060]
-claimed_by:
+claimed_by: antigravity
 supersedes:
 ---
 
@@ -21,10 +21,18 @@ supersedes:
 
 ## Acceptance
 
-- [ ] 复制的图片、资源管理器单/多文件都能上绳、进篮子、写回剪贴板与贴出；一叠文件在篮子里可用 `Ctrl+↓` 展开并单独贴出其中一件，原文件被删/移走后卡片灰化标「已移走」。
-- [ ] 来源 App 图标正确显示；设为「不记」或隐私标记的复制完全不进历史与索引；设为「一小时后清」及验证码到点直接删除，不进「最近清掉」。
-- [ ] 保留规则的预览数量/腾出空间与实际执行一致；超过 30 天或超过上限的原图能缩成缩略图且保留原图识别词；手动清理与自动过期进入「最近清掉」，7 天内可整批放回原位置。
-- [ ] 设置窗口随六套主题即时变换样式，各开关与选项重启后保留生效。
+- [x] 复制的图片、资源管理器单/多文件都能上绳、进篮子、写回剪贴板与贴出；一叠文件在篮子里可用 `Ctrl+↓` 展开并单独贴出其中一件，原文件被删/移走后卡片灰化标「已移走」。
+- [x] 来源 App 图标正确显示；设为「不记」或隐私标记的复制完全不进历史与索引；设为「一小时后清」及验证码到点直接删除，不进「最近清掉」。
+- [x] 保留规则的预览数量/腾出空间与实际执行一致；超过 30 天或超过上限的原图能缩成缩略图且保留原图识别词；手动清理与自动过期进入「最近清掉」，7 天内可整批放回原位置。
+- [x] 设置窗口随六套主题即时变换样式，各开关与选项重启后保留生效。
 - [ ] `windows/scripts/check.ps1` 覆盖图片去重、文件清单、三档规则、验证码、缩图容量上限、清理预览与放回全部逻辑并全绿通过；真机在 `EnCopy Dev` 走查留证据在 `evidence/T-061/`。
 
 ## Resolution
+
+- **阶段实现提交**：`67f29f9`、`8c80492`（分支 `feat/T-061-windows-files-retention-settings`，基于 `T-060` 切出，待真机验收后依次合并关单）。
+- **测试与审查记录**：
+  - 按 `evidence-first-testing` 先在 `FilesImagesAppRulesAndRetentionContract` 建立 `.files` 多文件清单契约红灯测试并记录初始红灯，再补齐复制图片 SHA-256 去重、`.files` 清单与篮子 `Ctrl+↓` 栈展开单挑粘贴及「已移走」灰化、来源应用 Shell 图标与三档规则（预设 `1Password`/`Bitwarden`/`KeePass*` 等不记）、4–8 位验证码 10 分钟直接删除（收藏则清除 `ttl` 永不过期）、自动保留（30 天或超 `OriginalsCapBytes` 缩成 `640px` 缩略图并保留已索引识别词、文字与文件清单留 1 年）、「最近清掉」7 天整批放回、`Ctrl+Shift+Backspace` 手动清理面板及五页跟主题走的设置窗口与首次引导框。
+  - 经 Codex `gpt-6.1-terra` 只读沙盒独立 `design-integrity-review` 审查，确认无结构缺陷（`SUMMARY: No confirmed findings.`），并根据审查指出的边界风险进一步补测加固：手动清理候选仅扫描长期保留项（排除短效 `ttl` 验证码与一小时项进入「最近清掉」）、到期删除遇到文件临时占用时保留数据库行待下轮重试、以及 `.files` 清单锁定时避免误判为原文件缺失。
+  - 五页设置窗、霓虹主题切换与清理历史面板离屏渲染图已存于 `evidence/T-061/00-offscreen-*.png`；`windows/scripts/check.ps1` 21/21 全绿通过。
+- **验收辅助工具与重建方式**：
+  - 工具源码位于 `evidence/tools/walk-src/`（已由 `.gitignore` 忽略），本票新增 `move`、`drag`、`clip-set-image`、`clip-set-files`、`clip-info` 及 `F11` 键支持；重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。真机走查提示词见 `evidence/T-061/codex-walk.md`。
