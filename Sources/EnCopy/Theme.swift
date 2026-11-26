@@ -436,12 +436,14 @@ struct ThemeFileCard: View {
     let size: CGSize
 
     var body: some View {
+        // A list copied in Finder names its files, not itself (T-073).
+        let card = FileList.card(url)
         VStack(spacing: 6) {
-            Image(nsImage: FileIcons.icon(for: url))
+            Image(nsImage: FileIcons.icon(for: card.icon))
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 34, height: 34)
-            Text(FileManager.default.displayName(atPath: url.path))
+            Text(card.title)
                 .font(theme.font(theme == .pixel ? 8 : 9, bold: true))
                 .foregroundStyle(theme.ink(.file))
                 .lineSpacing(2)
@@ -449,7 +451,7 @@ struct ThemeFileCard: View {
                 .lineLimit(theme == .pixel ? 1 : 2)
                 .minimumScaleFactor(0.7)
                 .multilineTextAlignment(.center)
-            Text(url.deletingLastPathComponent().lastPathComponent)
+            Text(card.footer)
                 .font(theme.font(7))
                 .foregroundStyle(theme.soft(.file))
                 .lineLimit(1)

@@ -1933,6 +1933,23 @@ enum FileList {
     }
 
     private static let cache = NSCache<NSString, NSArray>()
+
+    /// What a file's card says, in every theme (T-073): one file, its name
+    /// and its folder; several, how many and the first names. Those still in
+    /// place, when some were moved; all of them when none are. The icon is
+    /// the first file still there. A file that is not a list speaks for itself.
+    static func card(_ url: URL) -> (title: String, footer: String, icon: URL) {
+        var files = [url]
+        if isFileList(url) {
+            let present = present(url)
+            files = present.isEmpty ? paths(url) : present
+        }
+        let icon = files.first { FileManager.default.fileExists(atPath: $0.path) } ?? url
+        if files.count == 1, let file = files.first {
+            return (file.lastPathComponent, file.deletingLastPathComponent().lastPathComponent, icon)
+        }
+        return (String(format: L("%d files"), files.count), files.prefix(3).map(\.lastPathComponent).joined(separator: ", "), icon)
+    }
 }
 
 /// A list of files copied in Finder, in EnCopy's own folder.
@@ -2067,33 +2084,22 @@ private struct FileCard: View {
     let width: CGFloat
 
     /// A list of files copied in Finder shows its first file, or how many
-    /// there are and the first names (T-049, T-050).
-    private var files: [URL] {
-        guard isFileList(url) else { return [url] }
-        let present = FileList.present(url)
-        return present.isEmpty ? FileList.paths(url) : present
-    }
-    private var title: String {
-        files.count == 1 ? (files.first?.lastPathComponent ?? "") : String(format: L("%d files"), files.count)
-    }
-    private var footer: String {
-        files.count == 1 ? (files.first?.deletingLastPathComponent().lastPathComponent ?? "")
-                         : files.prefix(3).map(\.lastPathComponent).joined(separator: ", ")
-    }
+    /// there are and the first names (T-049, T-050, T-073).
+    private var card: (title: String, footer: String, icon: URL) { FileList.card(url) }
 
     var body: some View {
         let u = width / 136
         VStack(alignment: .leading, spacing: 4 * u) {
             HStack(alignment: .top, spacing: 6 * u) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: (files.first { FileManager.default.fileExists(atPath: $0.path) } ?? url).path))
+                Image(nsImage: NSWorkspace.shared.icon(forFile: card.icon.path))
                     .resizable().frame(width: 30 * u, height: 30 * u)
-                Text(title)
+                Text(card.title)
                     .font(.system(size: 10.5 * u, weight: .semibold))
                     .foregroundStyle(Color(red: 0.25, green: 0.2, blue: 0.1))
                     .lineLimit(3)
             }
             Spacer(minLength: 0)
-            Text(footer)
+            Text(card.footer)
                 .font(.system(size: 8 * u, design: .monospaced))
                 .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.19))
                 .lineLimit(1)
