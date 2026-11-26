@@ -14,7 +14,7 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
-- 最新发布 0.4.3（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.3)，2026-11-25）：#107–#109 的修复和设置「外观」页。0.4.2 是第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
+- 最新发布 0.4.4（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.4)，2026-11-26）：圣诞季主题、更新后弹「新东西」小窗、每小时检查更新、纸以外主题的文件卡片修复。0.4.2 是第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。
 - Windows 版边界：全部源码与脚本放在 `windows/`（脚本在 `windows/scripts/`），Mac 版 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 一律不动；Windows 包 `EnCopy-windows-x64.zip` 绝不单独占 GitHub `releases/latest`，以免破坏 Mac 版对 `EnCopy.dmg` 的自动更新。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
@@ -52,7 +52,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 ## Not yet specified
 
 - 真机：两次走查见各工单。没确认的：⏎ 飞向指针、菜单栏小夹子晃一下（截帧没抓到）、拖出、真的清掉一批再放回。
-- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.3。
+- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.4。
 
 ## Out of scope
 
