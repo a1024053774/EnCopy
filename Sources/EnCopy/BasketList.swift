@@ -269,7 +269,7 @@ private struct PaperStrip: View {
             }
             .shadow(color: .black.opacity(0.14), radius: 2, y: 1)
         } else {
-            ThemeCardBackground(theme: theme, card: card)
+            ThemeCardBackground(theme: theme, card: card, decorated: false)
                 .shadow(color: theme.shadow(hovering: false).0.opacity(0.6), radius: 2, y: 1)
         }
     }

@@ -159,6 +159,9 @@ enum Theme: String, CaseIterable, Identifiable {
 struct ThemeCardBackground: View {
     let theme: Theme
     let card: Theme.Card
+    /// A card's own trimmings (the Christmas rules). Off for the
+    /// Settings window's tabs and sheets, where they crowd the controls.
+    var decorated = true
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.corner, style: .continuous)
@@ -183,20 +186,16 @@ struct ThemeCardBackground: View {
                         y += 9
                     }
                 }
-            case .christmas:
-                // A greeting card: a red rule and a green one inside the edge,
-                // and a sprig of holly in the lower corner.
+            case .christmas where decorated:
+                // A greeting card: a red rule and a green one inside the edge.
+                // No sprig of holly: every corner already holds the kind tag,
+                // the text or the source app's icon.
                 RoundedRectangle(cornerRadius: max(1, theme.corner - 3), style: .continuous)
                     .strokeBorder(Theme.christmasRed.opacity(0.85), lineWidth: 1.6)
                     .padding(3)
                 RoundedRectangle(cornerRadius: max(1, theme.corner - 5), style: .continuous)
                     .strokeBorder(Theme.christmasGreen.opacity(0.7), lineWidth: 0.8)
                     .padding(6)
-                Holly()
-                    .frame(width: 16, height: 12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .padding(.trailing, 8).padding(.bottom, 8)
-                    .opacity(card == .image ? 0 : 1)
             case .pixel:
                 // A light band along the top edge, as on an old game's window.
                 VStack(spacing: 0) {
@@ -276,32 +275,6 @@ struct ThemePeg: View {
                 .frame(width: 40, height: 13)
                 .rotationEffect(.degrees(-6))
                 .frame(width: 44, height: 22, alignment: .bottom)
-        }
-    }
-}
-
-/// Two holly leaves and three berries.
-private struct Holly: View {
-    var body: some View {
-        Canvas { context, size in
-            let w = size.width, h = size.height
-            func leaf(_ from: CGPoint, _ to: CGPoint) -> Path {
-                var p = Path()
-                let mid = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
-                let dx = to.x - from.x, dy = to.y - from.y
-                let n = CGPoint(x: -dy * 0.32, y: dx * 0.32)
-                p.move(to: from)
-                p.addQuadCurve(to: to, control: CGPoint(x: mid.x + n.x, y: mid.y + n.y))
-                p.addQuadCurve(to: from, control: CGPoint(x: mid.x - n.x, y: mid.y - n.y))
-                return p
-            }
-            let green = GraphicsContext.Shading.color(Theme.christmasGreen)
-            context.fill(leaf(CGPoint(x: w * 0.5, y: h * 0.62), CGPoint(x: 0, y: h * 0.3)), with: green)
-            context.fill(leaf(CGPoint(x: w * 0.5, y: h * 0.62), CGPoint(x: w, y: h * 0.3)), with: green)
-            for (x, y) in [(0.42, 0.62), (0.58, 0.62), (0.5, 0.82)] {
-                context.fill(Path(ellipseIn: CGRect(x: w * x - 2, y: h * y - 2, width: 4, height: 4)),
-                             with: .color(Theme.christmasRed))
-            }
         }
     }
 }
