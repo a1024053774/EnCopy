@@ -1041,6 +1041,18 @@ struct CheckFailed: Error { let message: String }
         try check(files.items.count == 1 && isFileList(list) && samePaths(FileList.paths(list), [pdf]) && files.kind(of: list) == .file,
                   "A file copied in Finder hangs as the list EnCopy keeps of it, a file")
         try check(files.items.first.map { $0.thumb.size.width > 0 } == true, "It has a card to show")
+        // T-073: every theme's card names the file, never EnCopy's own list.
+        let one = FileList.card(list)
+        try check(one.title == "Budget plan 2027.pdf" && one.footer == "Quarterly Docs" && samePaths([one.icon], [pdf]),
+                  "The card shows the file's name, its folder and its icon, not the list's")
+        let more = [pdf, docs.appendingPathComponent("Minutes.txt"), docs.appendingPathComponent("Seating.numbers")]
+        for extra in more.dropFirst() { try Data("x".utf8).write(to: extra) }
+        if let three = FileList.make(more) {
+            let card = FileList.card(three)
+            try check(card.title == "3 files" && card.footer == "Budget plan 2027.pdf, Minutes.txt, Seating.numbers",
+                      "Three files copied at once: how many, and their names")
+        } else { throw CheckFailed(message: "Could not make a list of three files") }
+        try check(FileList.card(pdf).title == "Budget plan 2027.pdf", "A file that is not a list shows its own name")
         files.search.update([list])
         for _ in 0..<40 where !files.search.matches(list, SearchIndex.words("budget")) { pump(0.05) }
         try check(files.search.matches(list, SearchIndex.words("budget 2027")) && files.search.matches(list, SearchIndex.words("quarterly")),
