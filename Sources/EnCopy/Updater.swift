@@ -81,10 +81,14 @@ final class Updater {
 
     private var timer: Timer?
 
-    /// A look shortly after launch, then every hour whether a day has passed.
+    /// How often EnCopy asks GitHub on its own: every hour (the user, 2026-11-26;
+    /// it was once a day).
+    static let checkEvery: TimeInterval = 3600
+
+    /// A look shortly after launch, then one every hour.
     func start() {
         guard Self.isOffered, timer == nil else { return }
-        let timer = Timer(timeInterval: 3600, repeats: true) { _ in
+        let timer = Timer(timeInterval: Self.checkEvery, repeats: true) { _ in
             MainActor.assumeIsolated { Updater.shared.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -97,12 +101,14 @@ final class Updater {
             install(release, manual: false)
             return
         }
+        // Not again right after a look asked for in Settings; a minute's slack
+        // so the timer's own drift never skips an hour.
         let last = UserDefaults.standard.double(forKey: Self.lastCheckKey)
-        if Date().timeIntervalSince1970 - last >= 86400 { check(manual: false) }
+        if Date().timeIntervalSince1970 - last >= Self.checkEvery - 60 { check(manual: false) }
     }
 
     /// `manual`: asked for in Settings, so a failure is said; a look of its
-    /// own fails quietly and tries again tomorrow.
+    /// own fails quietly and tries again in an hour.
     func check(manual: Bool) {
         guard Self.isOffered, state != .checking, state != .installing else { return }
         let before = state
@@ -305,5 +311,40 @@ final class Updater {
         guard (try? process.run()) != nil else { return false }
         process.waitUntilExit()
         return process.terminationStatus == 0
+    }
+}
+
+/// What a version brings, told once on the first launch after an update
+/// (T-074), in a small window with a picture. Written into the app for each
+/// release that has something to show, so it needs no network; a version
+/// without an entry shows nothing.
+enum WhatsNew {
+    struct Entry: Equatable {
+        /// One line each, the app's own words.
+        let points: [String]
+        /// A theme to show in the picture and offer to put on.
+        let theme: Theme?
+    }
+
+    static var entries: [String: Entry] {
+        ["0.4.4": Entry(points: [L("New seasonal theme, Christmas: a holly garland with fairy lights, candy-cane pegs and greeting cards. It is in Settings → Appearance."),
+                                 L("With any theme but Paper, a file copied in Finder now shows its name, not “Copied ….files”.")],
+                        theme: .christmas)]
+    }
+
+    static let seenKey = "whatsNewSeenVersion"
+
+    /// Called once on launch, before anything marks this Mac as welcomed:
+    /// remembers `current` and returns its entry when this launch follows an
+    /// update to it. A first install is not an update; neither is a launch of
+    /// the same or an older version. Versions before 0.4.4 kept no record,
+    /// so someone already welcomed counts as updating.
+    static func onLaunch(current: String, defaults: UserDefaults = .standard) -> Entry? {
+        let seen = defaults.string(forKey: seenKey)
+        let returning = seen != nil || defaults.bool(forKey: "welcomed")
+        defaults.set(current, forKey: seenKey)
+        guard returning, let entry = entries[current] else { return nil }
+        if let seen, !Updater.isNewer(current, than: seen) { return nil }
+        return entry
     }
 }

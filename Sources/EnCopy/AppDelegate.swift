@@ -205,16 +205,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // Before "welcomed" is set below: a first install is not an update (T-074).
+        let news = WhatsNew.onLaunch(current: Updater.currentVersion)
+        // After whichever question this launch asks: those are modal.
+        let tellNews = { [weak self] in if let news { self?.showWhatsNew(news) } }
         if !Inbox.wasOffered {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
                 self?.offerInbox()
                 self?.explainRecording()
+                tellNews()
             }
         } else if !Self.recordingExplained {
             // Updated from a version that asked before keeping text: shown once.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.explainRecording() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.explainRecording(); tellNews() }
         } else if Self.shouldOfferLogin {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { Self.offerLogin() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { Self.offerLogin(); tellNews() }
+        } else if news != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { tellNews() }
         }
 
         if !UserDefaults.standard.bool(forKey: "welcomed") {
@@ -229,6 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.wanted = false
                 self.refresh()
             }
+        }
+    }
+
+    private func showWhatsNew(_ entry: WhatsNew.Entry) {
+        WhatsNewWindow.shared.show(entry, version: Updater.currentVersion, current: line.theme) { [weak self] theme in
+            self?.line.theme = theme
         }
     }
 
@@ -857,10 +870,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// The card under the pointer opens larger below the line. Not while
-    /// dragging, in a card's menu, or while one of our windows is in front,
-    /// like Quick Look.
+    /// dragging, in a card's menu, or while another of our windows is in
+    /// front, like Quick Look or Settings. The search field that ⌥C brings
+    /// does not count: it holds the keyboard the whole time the line is
+    /// summoned (T-069). The basket list under it does, since the larger
+    /// copy would cover the list.
     private func updateZoom(_ mouse: NSPoint) {
-        guard Zoom.isEnabled, !GrabView.isDragging, !GrabView.isShowingMenu, NSApp.keyWindow == nil,
+        let key = NSApp.keyWindow
+        let inFront = key != nil && !(searchBar?.owns(key) == true && !line.basketOpen)
+        guard Zoom.isEnabled, !GrabView.isDragging, !GrabView.isShowingMenu, !inFront,
               let screen = panel.screen else {
             zoom.hide()
             return
@@ -958,7 +976,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The shortcut is off while recording, so pressing it records it
     /// instead of summoning the line.
-    private func changeShortcut() {
+    private func changeShortcut(then done: @escaping () -> Void) {
         hotKey = nil
         ShortcutRecorder.shared.record { [weak self] result in
             guard let self else { return }
@@ -973,6 +991,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
             registerShortcut()
+            done()
         }
     }
 
@@ -1115,7 +1134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setSize: { [weak self] in self?.setSize($0) },
             hideZoom: { [weak self] in self?.zoom.hide() },
             refresh: { [weak self] in self?.refresh() },
-            changeShortcut: { [weak self] in self?.changeShortcut() },
+            changeShortcut: { [weak self] done in self?.changeShortcut(then: done) },
             toggleLaunchAtLogin: { AppDelegate.toggleLaunchAtLogin() },
             soundOn: { [weak self] in self?.line.soundOn ?? false },
             setSoundOn: { [weak self] in self?.line.soundOn = $0 },

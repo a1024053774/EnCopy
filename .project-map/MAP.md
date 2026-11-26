@@ -14,7 +14,7 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 - 改 bug 和测试用 `evidence-first-testing`；加兜底、兼容分支的改动在收尾时过一遍 `design-integrity-review`。
 - 词汇以 [CONTEXT.md](../CONTEXT.md) 为准。
 - Git 流程和清缓存的约定在 [AGENTS.md](../AGENTS.md)。
-- 最新发布 0.4.2（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.2)，2026-11-24），第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。产品页 `docs/index.html`，GitHub Pages 发布到 <https://a1024053774.github.io/EnCopy/>。
+- 最新发布 0.4.4（[发布页](https://github.com/a1024053774/EnCopy/releases/tag/v0.4.4)，2026-11-26）：圣诞季主题、更新后弹「新东西」小窗、每小时检查更新、纸以外主题的文件卡片修复。0.4.2 是第一个带应用内更新的版本（[T-053](tickets/T-053-in-app-update.md)）。
 - Windows 版边界：全部源码与脚本放在 `windows/`（脚本在 `windows/scripts/`），Mac 版 `Sources/`、`Package.swift`、`scripts/` 和 `docs/index.html` 一律不动；Windows 包 `EnCopy-windows-x64.zip` 绝不单独占 GitHub `releases/latest`，以免破坏 Mac 版对 `EnCopy.dmg` 的自动更新。
 - 上游每个文件怎么处理、在哪一步动：[改造清单](specs/tendedero-fork-map.md)（2026-11-22 记录）。
 
@@ -41,10 +41,18 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 - [T-056 Windows 版的截图、系统能力替代与发布红线](tickets/T-056-windows-platform-and-release.md): 截图复制进 `EnCopy\Screenshots\` 原件不动；`Windows.Media.Ocr`；内置预览/标记/裁剪；绝不单发占 `releases/latest` 的包
 - [T-057 补齐 AGENTS.md 的 Windows 检查、构建、真机验收与发布约定](tickets/T-057-windows-agents-doc.md): 保留 Mac 原文，补齐 Windows 脚本、双版本隔离、发布护栏与 `evidence/` 验收工具约定
 
+## GitHub issues
+
+GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，这里一个 issue 一行，指到它的工单；状态只看工单。还没落成工单的 issue 不列。
+
+- [#107 更改快捷键后，设置里显示的还是旧快捷键](https://github.com/a1024053774/EnCopy/issues/107) → [T-068](tickets/T-068-shortcut-display.md)
+- [#108 悬停放大只出现一次，绳子收回再叫出来后不再放大](https://github.com/a1024053774/EnCopy/issues/108) → [T-069](tickets/T-069-zoom-while-summoned.md)
+- [#109 搜索框里 ← → 不能移动光标](https://github.com/a1024053774/EnCopy/issues/109) → [T-070](tickets/T-070-search-caret.md)
+
 ## Not yet specified
 
 - 真机：两次走查见各工单。没确认的：⏎ 飞向指针、菜单栏小夹子晃一下（截帧没抓到）、拖出、真的清掉一批再放回。
-- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.2。
+- 产品页 `docs/index.html` 跟发布走，现在写的是 0.4.4。
 
 ## Out of scope
 
@@ -58,8 +66,8 @@ Windows 版：在独立目录 `windows/` 下用 C# / .NET 10 + WPF 构建行为�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | 44749f4 |
-| [README.md](../README.md) | `scripts/**`, `Package.swift` | 72f5ce1 |
-| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 72f5ce1 |
-| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | 44749f4 |
-| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 72f5ce1 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | dfcef08 |
+| [README.md](../README.md) | `scripts/**`, `Package.swift` | 57a429e |
+| [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 57a429e |
+| [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | dfcef08 |
+| [docs/index.html](../docs/index.html) | `Sources/**`, `scripts/build-app.sh` | 57a429e |

@@ -10,7 +10,9 @@ It is a modified version of Alejandro Buján's [Tendedero](https://github.com/al
 
 ## Download
 
-The latest version is [0.4.2](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+The latest version is [0.4.4](https://github.com/a1024053774/EnCopy/releases/latest). Download [EnCopy.dmg](https://github.com/a1024053774/EnCopy/releases/latest/download/EnCopy.dmg) and drag EnCopy into Applications. Requires macOS 14 or later; runs on Apple silicon and Intel.
+
+From 0.4.2 on, EnCopy updates itself from inside the app. Versions 0.4.1 and earlier (see the menu bar icon → About EnCopy) never tell you about updates: download the DMG once more and install it over the old one, and you won't need to again.
 
 This version is not notarized by Apple, so macOS blocks it the first time you open it: go to System Settings → Privacy & Security and click Open Anyway. Or run this line in Terminal to remove the quarantine flag the browser added when it downloaded the app; after that it opens with a double-click:
 
@@ -52,9 +54,9 @@ When the line is full, the oldest item falls into the basket instead of the Tras
 - Pictures are found by the text read from them; pictures and videos from Finder by their file names.
 - After ⌥C, a basket handle hangs at the lower right of the line: "Basket N ↓". Press ↓ or click it and the basket opens as a list, newest first all the way back, grouped by today, yesterday, this week, then by month; each row is a strip of its own paper, in the theme; chips above the list, "All / Text / Links / Images" with counts, narrow it by kind. ↑↓ go row by row, ← → jump a group, typing and Tab narrow the list, ⏎ pastes, ⌘P pins it back on the line.
 
-### Six themes
+### Seven themes
 
-Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope change together; pick one in Settings → The line.
+Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal, plus a seasonal one, Christmas. Papers, pegs and the rope change together; pick one from the cards in Settings → Appearance.
 
 | Paper | Pixel |
 | --- | --- |
@@ -63,6 +65,8 @@ Paper, Pixel, Skeuomorphic, Minimal, Neon and Journal. Papers, pegs and the rope
 | <img src="docs/themes/en/skeuo.png" alt="Skeuomorphic theme"> | <img src="docs/themes/en/minimal.png" alt="Minimal theme"> |
 | **Neon** | **Journal** |
 | <img src="docs/themes/en/neon.png" alt="Neon theme"> | <img src="docs/themes/en/washi.png" alt="Journal theme"> |
+| **Christmas (seasonal)** | |
+| <img src="docs/themes/en/christmas.png" alt="Christmas theme: fairy lights on a holly garland, candy canes holding greeting cards"> | |
 
 ### What it keeps, and for how long
 
