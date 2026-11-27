@@ -296,19 +296,13 @@ public static class SourceApp
             if ((appId.Contains(Path.DirectorySeparatorChar) || appId.Contains(Path.AltDirectorySeparatorChar)) && File.Exists(appId))
             {
                 var info = FileVersionInfo.GetVersionInfo(appId);
-                if (!string.IsNullOrWhiteSpace(info.FileDescription) &&
-                    !info.FileDescription.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                if (CleanExecutableTitle(info.FileDescription) is { } cleanDesc)
                 {
-                    return info.FileDescription.Trim();
+                    return cleanDesc;
                 }
-                if (!string.IsNullOrWhiteSpace(info.ProductName) &&
-                    !info.ProductName.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                if (CleanExecutableTitle(info.ProductName) is { } cleanProd)
                 {
-                    return info.ProductName.Trim();
-                }
-                if (!string.IsNullOrWhiteSpace(info.FileDescription))
-                {
-                    return Path.GetFileNameWithoutExtension(info.FileDescription.Trim());
+                    return cleanProd;
                 }
                 return Path.GetFileNameWithoutExtension(appId);
             }
@@ -327,6 +321,17 @@ public static class SourceApp
         {
         }
         return appId;
+    }
+
+    private static string? CleanExecutableTitle(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var trimmed = raw.Trim();
+        if (trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4].Trim();
+        }
+        return trimmed.Length > 0 ? trimmed : null;
     }
 
     private static BitmapSource? ExtractShellIcon(string path, bool large, bool useFileAttributes, bool isDirectoryHint = false)

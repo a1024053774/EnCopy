@@ -1589,6 +1589,23 @@ public static class Program
                 $"Store Notepad exe path under zh-Hans must display '记事本', got '{SourceApp.GetDisplayName(storeNotepadPath)}'");
             Check(SourceApp.GetDisplayName(@"C:\Windows\System32\notepad.exe") == "记事本",
                 $"Sys32 Notepad exe path under zh-Hans must display '记事本', got '{SourceApp.GetDisplayName(@"C:\Windows\System32\notepad.exe")}'");
+            try
+            {
+                Localization.SetLanguageOverride("en");
+                Check(SourceApp.GetDisplayName(storeNotepadPath) == "Notepad",
+                    $"Store Notepad exe path under en must display 'Notepad', got '{SourceApp.GetDisplayName(storeNotepadPath)}'");
+            }
+            finally
+            {
+                Localization.SetLanguageOverride(null);
+            }
+            const string certUtilPath = @"C:\Windows\System32\certutil.exe";
+            if (File.Exists(certUtilPath))
+            {
+                var certName = SourceApp.GetDisplayName(certUtilPath);
+                Check(string.Equals(certName, "CertUtil", StringComparison.OrdinalIgnoreCase),
+                    $"Exe-suffixed FileDescription must strip '.exe' before falling back to OS ProductName, got '{certName}'");
+            }
 
             var fgTracker = new ForegroundAppTracker();
             fgTracker.RecordObservation("Notepad", storeNotepadPath, pid: 1001, selfPid: 9999);
@@ -1606,6 +1623,10 @@ public static class Program
             Check(string.Equals(explorerTracker.LastExternalApp, @"C:\Windows\explorer.exe", StringComparison.OrdinalIgnoreCase) &&
                   SourceApp.GetDisplayName(explorerTracker.LastExternalApp) == "文件资源管理器",
                 "Real File Explorer folder window (CabinetWClass) is tracked as foreground app");
+            var exploreClassicTracker = new ForegroundAppTracker();
+            exploreClassicTracker.RecordObservation("ExploreWClass", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
+            Check(string.Equals(exploreClassicTracker.LastExternalApp, @"C:\Windows\explorer.exe", StringComparison.OrdinalIgnoreCase),
+                "Classic File Explorer tree window (ExploreWClass) is tracked as foreground app");
 
             var listedWithFront = SourceApp.ListRuleApps(settings, historyApps: [], frontApp: fgTracker.LastExternalApp);
             Check(listedWithFront.Count > 0 &&
