@@ -160,5 +160,9 @@
   "OK": "好",
   "Text in image": "图中文字",
   "Chinese text recognition pack is not installed": "未安装简体中文图片识字语言包",
-  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "当前已回退使用已安装语言识别英文与数字；在「系统设置 → 时间和语言 → 语言和区域」中为「简体中文」安装光学字符识别功能后即可按中文找图。"
+  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "当前已回退使用已安装语言识别英文与数字；在「系统设置 → 时间和语言 → 语言和区域」中为「简体中文」安装光学字符识别功能后即可按中文找图。",
+  "Also watch folders": "同时监视文件夹",
+  "Add Folder…": "添加文件夹…",
+  "Stop watching": "停止监视",
+  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "保存到这些文件夹的新图片也会自动挂上绳（最多添加 3 个）；从绳上取下时绝不删除原文件。"
 }

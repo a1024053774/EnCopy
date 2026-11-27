@@ -160,5 +160,9 @@
   "OK": "OK",
   "Text in image": "Text in image",
   "Chinese text recognition pack is not installed": "Chinese text recognition pack is not installed",
-  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too."
+  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.",
+  "Also watch folders": "Also watch folders",
+  "Add Folder…": "Add Folder…",
+  "Stop watching": "Stop watching",
+  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file."
 }

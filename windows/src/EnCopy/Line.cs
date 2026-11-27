@@ -58,6 +58,7 @@ public sealed class Line : INotifyPropertyChanged
     private LineTheme _theme = LineTheme.Paper;
     private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _matchedImageTextPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _desktopSavedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     public LineTheme Theme
     {
@@ -197,11 +198,15 @@ public sealed class Line : INotifyPropertyChanged
                 if (!File.Exists(src)) continue;
                 var dest = NextFreePath(Path.Combine(desktop, Path.GetFileName(src)));
                 File.Copy(src, dest, overwrite: false);
+                _desktopSavedPaths.Add(Path.GetFullPath(dest));
                 written.Add(dest);
             }
         }
         return written;
     }
+
+    public bool IsSavedToDesktopPath(string path) =>
+        !string.IsNullOrWhiteSpace(path) && _desktopSavedPaths.Contains(Path.GetFullPath(path));
 
     private static string NextFreePath(string candidate)
     {

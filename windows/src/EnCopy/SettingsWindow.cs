@@ -359,6 +359,83 @@ public sealed class SettingsWindow : Window
         rows.Children.Add(BuildSettingRow(null, null, openFolderBtn, ink, soft, font, isLast: true));
 
         host.Children.Add(CleanupWindow.WrapThemedSheet(null, rows, theme, ink, font));
+
+        var watchRows = new StackPanel();
+        watchRows.Children.Add(BuildSettingRow(
+            null,
+            Localization.L("New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file."),
+            null,
+            ink, soft, font));
+
+        var watchedFolders = _settings.NormalizedWatchedFolders;
+        foreach (var folder in watchedFolders)
+        {
+            var capturedFolder = folder;
+            var folderName = System.IO.Path.GetFileName(capturedFolder.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrEmpty(folderName)) folderName = capturedFolder;
+
+            var btnGroup = new StackPanel { Orientation = Orientation.Horizontal };
+            var showBtn = new Button
+            {
+                Content = Localization.L("Show in Explorer"),
+                Padding = new Thickness(10, 4, 10, 4),
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+            showBtn.Click += (_, _) =>
+            {
+                if (Directory.Exists(capturedFolder))
+                {
+                    Process.Start(new ProcessStartInfo { FileName = capturedFolder, UseShellExecute = true });
+                }
+            };
+
+            var stopBtn = new Button
+            {
+                Content = Localization.L("Stop watching"),
+                Padding = new Thickness(10, 4, 10, 4)
+            };
+            stopBtn.Click += (_, _) =>
+            {
+                if (_settings.RemoveWatchedFolder(capturedFolder))
+                {
+                    _callbacks.SaveAndApplySettings();
+                    Rebuild();
+                }
+            };
+            btnGroup.Children.Add(showBtn);
+            btnGroup.Children.Add(stopBtn);
+
+            watchRows.Children.Add(BuildSettingRow(
+                folderName,
+                capturedFolder,
+                btnGroup,
+                ink, soft, font));
+        }
+
+        var addFolderBtn = new Button
+        {
+            Content = Localization.L("Add Folder…"),
+            Padding = new Thickness(12, 5, 12, 5),
+            IsEnabled = watchedFolders.Count < AppSettings.MaxExtraWatchedFolders
+        };
+        addFolderBtn.Click += (_, _) =>
+        {
+            var dlg = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = Localization.L("Also watch folders"),
+                Multiselect = false
+            };
+            if (dlg.ShowDialog(this) == true && _settings.TryAddWatchedFolder(dlg.FolderName))
+            {
+                _callbacks.SaveAndApplySettings();
+                Rebuild();
+            }
+        };
+        watchRows.Children.Add(BuildSettingRow(null, null, addFolderBtn, ink, soft, font, isLast: true));
+
+        var watchSheet = CleanupWindow.WrapThemedSheet(Localization.L("Also watch folders"), watchRows, theme, ink, font);
+        watchSheet.Margin = new Thickness(0, 14, 0, 0);
+        host.Children.Add(watchSheet);
     }
 
     private void BuildLineTab(StackPanel host, LineTheme theme, Brush ink, Brush soft, FontFamily font)
@@ -833,12 +910,14 @@ public sealed class SettingsWindow : Window
 /// </summary>
 public sealed class OnboardingWindow : Window
 {
+    private readonly CheckBox _handleScreenshotsCheck;
     private readonly CheckBox _openAtLoginCheck;
 
     public bool PausedChosen { get; private set; }
+    public bool HandleScreenshotsChosen => _handleScreenshotsCheck.IsChecked == true;
     public bool OpenAtLoginChosen => _openAtLoginCheck.IsChecked == true;
 
-    public OnboardingWindow(LineTheme theme, Action<bool, bool> onCompleted)
+    public OnboardingWindow(LineTheme theme, Action<bool, bool> onCompleted, Action<bool>? onScreenshotsChosen = null)
     {
         Title = Localization.L("EnCopy keeps what you copy");
         Width = 460;
@@ -885,6 +964,17 @@ public sealed class OnboardingWindow : Window
             Margin = new Thickness(0, 0, 0, 12)
         });
 
+        _handleScreenshotsCheck = new CheckBox
+        {
+            Content = Localization.L("Handle screenshots"),
+            IsChecked = true,
+            FontSize = 12,
+            FontFamily = font,
+            Foreground = ink,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        body.Children.Add(_handleScreenshotsCheck);
+
         _openAtLoginCheck = new CheckBox
         {
             Content = Localization.L("Open at login"),
@@ -910,6 +1000,7 @@ public sealed class OnboardingWindow : Window
         pauseBtn.Click += (_, _) =>
         {
             PausedChosen = true;
+            onScreenshotsChosen?.Invoke(HandleScreenshotsChosen);
             onCompleted(true, OpenAtLoginChosen);
             Close();
         };
@@ -924,6 +1015,7 @@ public sealed class OnboardingWindow : Window
         okBtn.Click += (_, _) =>
         {
             PausedChosen = false;
+            onScreenshotsChosen?.Invoke(HandleScreenshotsChosen);
             onCompleted(false, OpenAtLoginChosen);
             Close();
         };

@@ -112,6 +112,44 @@ public sealed class History : IDisposable
 
     public static byte[] PictureHash(byte[] pngBytes)
     {
+        // 解码为规范 BGRA32 像素计算 SHA-256，确保 Win+Shift+S 剪贴板（WPF 重编码）与系统截图文件夹（WIC 编码）同一张图哈希完全一致
+        try
+        {
+            using var ms = new MemoryStream(pngBytes, writable: false);
+            var dec = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                ms,
+                System.Windows.Media.Imaging.BitmapCreateOptions.IgnoreColorProfile,
+                System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+            if (dec.Frames.Count > 0)
+            {
+                var frame = dec.Frames[0];
+                int w = frame.PixelWidth;
+                int h = frame.PixelHeight;
+                if (w > 0 && h > 0 && (long)w * h <= 64_000_000L)
+                {
+                    System.Windows.Media.Imaging.BitmapSource bgra = frame.Format == System.Windows.Media.PixelFormats.Bgra32
+                        ? frame
+                        : new System.Windows.Media.Imaging.FormatConvertedBitmap(frame, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+                    int stride = w * 4;
+                    var pixels = new byte[stride * h];
+                    bgra.CopyPixels(pixels, stride, 0);
+
+                    using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                    sha.AppendData("picture-px:"u8);
+                    Span<byte> dims = stackalloc byte[8];
+                    BitConverter.TryWriteBytes(dims[..4], w);
+                    BitConverter.TryWriteBytes(dims[4..], h);
+                    sha.AppendData(dims);
+                    sha.AppendData(pixels);
+                    return sha.GetHashAndReset();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // 非位图格式回退按原始字节哈希
+        }
+
         var prefix = "picture:"u8;
         var buf = new byte[prefix.Length + pngBytes.Length];
         prefix.CopyTo(buf);
@@ -599,6 +637,22 @@ public sealed class History : IDisposable
             cmd.Parameters.AddWithValue("@path", key);
             var raw = cmd.ExecuteScalar();
             return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        }
+    }
+
+    public DateTime? LastUsedUtcOf(string fullPath)
+    {
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT used FROM item WHERE path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            if (raw is null or DBNull) return null;
+            double sec = Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+            return DateTimeOffset.FromUnixTimeMilliseconds((long)(sec * 1000.0)).UtcDateTime;
         }
     }
 
