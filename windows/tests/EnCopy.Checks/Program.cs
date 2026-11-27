@@ -1597,7 +1597,7 @@ public static class Program
             }
             finally
             {
-                Localization.SetLanguageOverride(null);
+                Localization.SetLanguageOverride("zh-Hans");
             }
             const string certUtilPath = @"C:\Windows\System32\certutil.exe";
             if (File.Exists(certUtilPath))
@@ -1673,6 +1673,7 @@ public static class Program
         }
         finally
         {
+            Localization.SetLanguageOverride(null);
             Directory.Delete(extDir, recursive: true);
         }
     }
