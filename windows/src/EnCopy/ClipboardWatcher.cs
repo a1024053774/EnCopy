@@ -152,6 +152,7 @@ public sealed class ClipboardWatcher : IDisposable
 
     public void CheckNow()
     {
+        bool blocked = _settings.RecordingPaused || (_isOnboardingPending?.Invoke() == true) || !IsEnabled;
         bool processedAnyQueued = false;
         while (_backend.TryDequeueSnapshot(out var queued))
         {
@@ -159,7 +160,7 @@ public sealed class ClipboardWatcher : IDisposable
             if (queued is null) continue;
             if (queued.SequenceNumber == _lastSequence) continue;
             _lastSequence = queued.SequenceNumber;
-            if (!_settings.RecordingPaused && IsEnabled)
+            if (!blocked)
             {
                 ProcessSnapshot(queued);
             }
@@ -169,7 +170,7 @@ public sealed class ClipboardWatcher : IDisposable
             return;
         }
 
-        if (_settings.RecordingPaused || !IsEnabled)
+        if (blocked)
         {
             _lastSequence = _backend.SequenceNumber;
             return;
@@ -266,11 +267,11 @@ public sealed class ClipboardWatcher : IDisposable
 
         if (snap.PngBytes is { Length: > 0 and <= MaxImageBytes } pngBytes)
         {
+            if (_isOnboardingPending?.Invoke() == true) return;
             bool isSysShot = IsSystemScreenshotSource(appId);
-            bool allowScreenshotTakeover = _settings.ScreenshotsEnabled && (_isOnboardingPending?.Invoke() != true);
-            if (_settings.ImagesEnabled || (allowScreenshotTakeover && isSysShot))
+            if ((isSysShot && _settings.ScreenshotsEnabled) || _settings.ImagesEnabled)
             {
-                SaveCopiedImage(pngBytes, appId, baseTtl, isScreenshotCapture: isSysShot);
+                SaveCopiedImage(pngBytes, appId, baseTtl, isScreenshotCapture: isSysShot && _settings.ScreenshotsEnabled);
             }
         }
     }

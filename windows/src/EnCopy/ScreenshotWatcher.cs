@@ -76,6 +76,7 @@ public sealed class ScreenshotWatcher : IDisposable
     private readonly object _sync = new();
     private readonly Dictionary<string, long> _unfinishedSizes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTime> _firstSeenUtc = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _inFlightPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private HashSet<string>? _knownPaths;
     private FileSystemWatcher? _fsw;
@@ -251,6 +252,7 @@ public sealed class ScreenshotWatcher : IDisposable
             _stopped = true;
             _unfinishedSizes.Clear();
             _firstSeenUtc.Clear();
+            _inFlightPaths.Clear();
             _debounceTimer?.Dispose();
             _debounceTimer = null;
             _unfinishedTimer?.Dispose();
@@ -354,7 +356,7 @@ public sealed class ScreenshotWatcher : IDisposable
 
             foreach (var path in paths)
             {
-                if (_knownPaths.Contains(path)) continue;
+                if (_knownPaths.Contains(path) || _inFlightPaths.Contains(path)) continue;
                 if (!File.Exists(path))
                 {
                     _unfinishedSizes.Remove(path);
@@ -370,6 +372,7 @@ public sealed class ScreenshotWatcher : IDisposable
 
                 if (IsWholeFile(path, size, prev))
                 {
+                    _inFlightPaths.Add(path);
                     wholeCandidates.Add((path, size, since));
                 }
                 else if ((nowUtc - since).TotalSeconds < 600.0)
@@ -401,7 +404,8 @@ public sealed class ScreenshotWatcher : IDisposable
 
             lock (_sync)
             {
-                if (_stopped || _disposed) return;
+                _inFlightPaths.Remove(path);
+                if (_stopped || _disposed) continue;
                 _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (consumed)
                 {
@@ -541,6 +545,7 @@ public sealed class ScreenshotCoordinator : IDisposable
 
     public void RefreshWatchers()
     {
+        bool hasPending = false;
         lock (_gate)
         {
             if (_disposed) return;
@@ -564,6 +569,14 @@ public sealed class ScreenshotCoordinator : IDisposable
             {
                 RegisterOrDeferDirUnlocked(customDir, acceptRecordings: false, copyToPrivateFolder: false);
             }
+
+            hasPending = _pendingDirs.Count > 0;
+        }
+
+        // 在父目录监测器 EnableRaisingEvents 开启后立即复检一次，闭合检查与挂载之间的目录新建时间窗
+        if (hasPending)
+        {
+            PromotePendingDirectories();
         }
     }
 
@@ -713,14 +726,14 @@ public sealed class ScreenshotCoordinator : IDisposable
 
             if (!copyToPrivateFolder)
             {
-                // 自定义监视文件夹：先确认文件可非独占打开读取，原位引用挂上绳，取下时不删原文件
-                if (!CanOpenForSharedRead(sourcePath, out var extBytes))
+                // 自定义监视文件夹：先确认文件可非独占打开读取，原位引用挂上绳（不占私有像素去重槽），取下时不删原文件
+                if (!CanOpenForSharedRead(sourcePath, out _))
                 {
                     return false;
                 }
                 var stamp = NextMonotonicUtc();
                 bool alreadyKnown = _history.Contains(sourcePath);
-                _history.RecordImage(sourcePath, ocrWords: null, pngBytesForHash: extBytes, usedAt: stamp, appName: null, ttlSeconds: null);
+                _history.RecordImage(sourcePath, ocrWords: null, pngBytesForHash: null, usedAt: stamp, appName: null, ttlSeconds: null);
                 MarshalToSta(() =>
                 {
                     if (alreadyKnown) _onRepeatedItem(sourcePath, stamp);

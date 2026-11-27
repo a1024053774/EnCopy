@@ -274,19 +274,25 @@ public sealed class History : IDisposable
             foreach (var (id, rel, rowHash) in rows)
             {
                 var abs = AbsolutePath(rel);
-                if (File.Exists(abs))
+                if (!File.Exists(abs))
                 {
-                    if (!rowHash.AsSpan().SequenceEqual(pxHash))
-                    {
-                        using var up = _db.CreateCommand();
-                        up.CommandText = "UPDATE item SET hash = @px WHERE id = @id";
-                        up.Parameters.AddWithValue("@px", pxHash);
-                        up.Parameters.AddWithValue("@id", id);
-                        up.ExecuteNonQuery();
-                    }
-                    return abs;
+                    RemoveByRelativePath(rel);
+                    continue;
                 }
-                RemoveByRelativePath(rel);
+                // 私有图片查重只命中本数据目录内的私有副本，绝不把系统截图复用指向外部监视目录文件
+                if (RelativePath(abs) is null)
+                {
+                    continue;
+                }
+                if (!rowHash.AsSpan().SequenceEqual(pxHash))
+                {
+                    using var up = _db.CreateCommand();
+                    up.CommandText = "UPDATE item SET hash = @px WHERE id = @id";
+                    up.Parameters.AddWithValue("@px", pxHash);
+                    up.Parameters.AddWithValue("@id", id);
+                    up.ExecuteNonQuery();
+                }
+                return abs;
             }
             return null;
         }
@@ -1102,6 +1108,7 @@ public sealed class History : IDisposable
             }
         }
 
+        bool allMigrated = true;
         using var tx = _db.BeginTransaction();
         foreach (var (id, rel) in rows)
         {
@@ -1109,8 +1116,16 @@ public sealed class History : IDisposable
             if (!SearchIndex.IsRecognizableImagePath(abs) || !File.Exists(abs)) continue;
             try
             {
-                var bytes = File.ReadAllBytes(abs);
-                var pxHash = PictureHash(bytes);
+                using var fs = new FileStream(abs, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var bytes = new byte[fs.Length];
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int r = fs.Read(bytes, offset, bytes.Length - offset);
+                    if (r <= 0) break;
+                    offset += r;
+                }
+                var pxHash = PictureHash(offset == bytes.Length ? bytes : bytes[..offset]);
                 using var up = _db.CreateCommand();
                 up.Transaction = tx;
                 up.CommandText = "UPDATE item SET hash = @h WHERE id = @id";
@@ -1118,12 +1133,21 @@ public sealed class History : IDisposable
                 up.Parameters.AddWithValue("@id", id);
                 up.ExecuteNonQuery();
             }
+            catch (IOException)
+            {
+                if (File.Exists(abs)) allMigrated = false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                if (File.Exists(abs)) allMigrated = false;
+            }
             catch (Exception)
             {
             }
         }
-        using (var setVer = _db.CreateCommand())
+        if (allMigrated)
         {
+            using var setVer = _db.CreateCommand();
             setVer.Transaction = tx;
             setVer.CommandText = "PRAGMA user_version = 2";
             setVer.ExecuteNonQuery();

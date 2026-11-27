@@ -459,11 +459,12 @@ public partial class App : Application
             screenshotsEnabled => _settings.ScreenshotsEnabled = screenshotsEnabled);
         _onboardingWindow.Closed += (_, _) =>
         {
+            var closedWin = _onboardingWindow;
             _onboardingWindow = null;
-            if (_onboardingPending)
+            if (_onboardingPending && closedWin is not { ConfirmedByButton: true })
             {
                 _onboardingPending = false;
-                _settings.RecordingExplained = true;
+                OnboardingWindow.ApplyDismissedWithoutAnswer(_settings, LaunchAtLogin.SetEnabled);
                 SaveAndApplySettings();
             }
         };

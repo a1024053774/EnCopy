@@ -913,9 +913,17 @@ public sealed class OnboardingWindow : Window
     private readonly CheckBox _handleScreenshotsCheck;
     private readonly CheckBox _openAtLoginCheck;
 
+    public bool ConfirmedByButton { get; private set; }
     public bool PausedChosen { get; private set; }
     public bool HandleScreenshotsChosen => _handleScreenshotsCheck.IsChecked == true;
     public bool OpenAtLoginChosen => _openAtLoginCheck.IsChecked == true;
+
+    public static void ApplyDismissedWithoutAnswer(AppSettings settings, Action<bool> setOpenAtLogin)
+    {
+        settings.RecordingExplained = true;
+        settings.ScreenshotsEnabled = false;
+        setOpenAtLogin(false);
+    }
 
     public OnboardingWindow(LineTheme theme, Action<bool, bool> onCompleted, Action<bool>? onScreenshotsChosen = null)
     {
@@ -999,6 +1007,7 @@ public sealed class OnboardingWindow : Window
         };
         pauseBtn.Click += (_, _) =>
         {
+            ConfirmedByButton = true;
             PausedChosen = true;
             onScreenshotsChosen?.Invoke(HandleScreenshotsChosen);
             onCompleted(true, OpenAtLoginChosen);
@@ -1014,6 +1023,7 @@ public sealed class OnboardingWindow : Window
         };
         okBtn.Click += (_, _) =>
         {
+            ConfirmedByButton = true;
             PausedChosen = false;
             onScreenshotsChosen?.Invoke(HandleScreenshotsChosen);
             onCompleted(false, OpenAtLoginChosen);
