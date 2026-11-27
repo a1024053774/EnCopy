@@ -2,7 +2,7 @@
 id: T-061
 title: Windows 复制的图片与文件、按 App 规则、保留清理与设置窗口
 type: build
-status: open
+status: closed
 blocked_by: [T-060]
 claimed_by: antigravity
 supersedes:
@@ -25,16 +25,16 @@ supersedes:
 - [x] 来源 App 图标正确显示；设为「不记」或隐私标记的复制完全不进历史与索引；设为「一小时后清」及验证码到点直接删除，不进「最近清掉」。
 - [x] 保留规则的预览数量/腾出空间与实际执行一致；超过 30 天或超过上限的原图能缩成缩略图且保留原图识别词；手动清理与自动过期进入「最近清掉」，7 天内可整批放回原位置。
 - [x] 设置窗口随六套主题即时变换样式，各开关与选项重启后保留生效。
-- [ ] `windows/scripts/check.ps1` 覆盖图片去重、文件清单、三档规则、验证码、缩图容量上限、清理预览与放回全部逻辑并全绿通过；真机在 `EnCopy Dev` 走查留证据在 `evidence/T-061/`。
+- [x] `windows/scripts/check.ps1` 覆盖图片去重、文件清单、三档规则、验证码、缩图容量上限、清理预览与放回全部逻辑并全绿通过；真机在 `EnCopy Dev` 走查留证据在 `evidence/T-061/`。
 
 ## Resolution
 
-- **阶段实现与复验修复提交**：`67f29f9`、`8c80492`、合并 `main`（`e0dbda4`）、`ce522bb`、`3af5f23`、`2aa2b68`（分支 `feat/T-061-windows-files-retention-settings`，待两项复验全绿后合并关单）。
-- **测试、初验与修复记录**：
+- **实现与修复提交**：`67f29f9`、`8c80492`、合并 `main`（`e0dbda4`）、`ce522bb`、`3af5f23`、`2aa2b68`、`c8465a7`。
+- **测试、初验与复验记录**：
   - 按 `evidence-first-testing` 先在 `FilesImagesAppRulesAndRetentionContract` 建立 `.files` 多文件清单契约红灯测试并记录初始红灯，再补齐复制图片 SHA-256 去重、`.files` 清单与篮子 `Ctrl+↓` 栈展开单挑粘贴及「已移走」灰化、来源应用 Shell 图标与三档规则（预设 `1Password`/`Bitwarden`/`KeePass*` 等不记）、4–8 位验证码 10 分钟直接删除（收藏则清除 `ttl` 永不过期）、自动保留（30 天或超 `OriginalsCapBytes` 缩成 `640px` 缩略图并保留已索引识别词、文字与文件清单留 1 年）、「最近清掉」7 天整批放回、`Ctrl+Shift+Backspace` 手动清理面板及五页跟主题走的设置窗口与首次引导框。
-  - 首轮真机走查报告 `evidence/T-061/walk-report.md` 共 14 项：**12 PASS、2 FAIL、0 SKIPPED**（截图 `01-first-launch-onboarding.png` 至 `14-cleanup-put-back-restored.png` 已完整保留）。两项失败均已先补红灯断言再修复转绿：
-    1. **打开设置前的前台应用未排「按 App 记录」首行**：右键托盘或顶栏菜单时焦点已切到系统任务栏/外壳或 Dock 进程（`Shell_TrayWnd`、`TopLevelWindowForXamlIsland`、`Dock_64.exe` 等）或 `EnCopy` 自身，现由 `ForegroundAppTracker`（`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` + 顶边轮询双通道）忽略外壳窗口与自身进程、持续保留最近一次外部正常应用，打开设置时稳定置于首行并标「打开设置前正在使用的应用」。
-    2. **Windows 11 商店版记事本显示 `Notepad.exe` 而非中文「记事本」**：商店版 `Notepad.exe` 的 PE `FileDescription` 为 `"Notepad.exe"`，此前早于预设本地化名称返回；现改为优先返回 `presetTitle`（中文「记事本」/英文 `"Notepad"`），并对非预设可执行文件的 `FileDescription` 先剥离 `.exe` 后缀再回退 `ProductName`（经 Codex `gpt-6.1-terra` 定向复审确认修复）。
-  - 五页设置窗、霓虹主题切换与清理历史面板离屏渲染图已存于 `evidence/T-061/00-offscreen-*.png`；`windows/scripts/check.ps1` 21/21 全绿通过。
+  - 首轮真机走查报告 `evidence/T-061/walk-report.md` 共 14 项：**12 PASS、2 FAIL、0 SKIPPED**（截图 `01-first-launch-onboarding.png`、`02-settings-general.png`、`03-settings-recording.png`、`04-settings-screenshots.png`、`05-settings-line-neon.png`、`06-settings-keeping.png`、`07-copied-image-dedup.png`、`08-files-stack-on-line.png`、`09-basket-stack-expanded.png`、`10-files-moved-away.png`、`11-app-rule-skip.png`、`12-cleanup-preview.png`、`13-cleanup-recently-cleared.png`、`14-cleanup-put-back-restored.png` 已完整保留）。两项失败先补红灯再修复转绿并经 Codex `gpt-6.1-terra` 复审：
+    1. **打开设置前的前台应用未排「按 App 记录」首行**：由 `ForegroundAppTracker` 持续保留最近一次外部正常应用，打开设置时稳定置于首行并标「打开设置前正在使用的应用」（窗口特征通用化重构见 `T-063` 批次）。
+    2. **Windows 11 商店版记事本显示 `Notepad.exe` 而非中文「记事本」**：优先返回本地化 `presetTitle`（中文「记事本」/英文 `"Notepad"`），并对非预设可执行文件的 `FileDescription` 先剥离 `.exe` 后缀再回退 `ProductName`。
+  - 定向复验报告 `evidence/T-061/walk-recheck.md` 共 5 项：**5 PASS、0 FAIL、0 SKIPPED**（附复验截图 `recheck-01-by-app-notepad-first.png`、`recheck-02-card-source-notepad-zh.png`、`recheck-03-app-rule-skip-zh.png`，另存离屏渲染图 `00-offscreen-settings-tab0.png`..`tab4.png`、`00-offscreen-settings-neon.png`、`00-offscreen-cleanup.png`）；`windows/scripts/check.ps1` 21/21 全绿通过。
 - **验收辅助工具与重建方式**：
-  - 工具源码位于 `evidence/tools/walk-src/`（已由 `.gitignore` 忽略），本票新增 `move`、`drag`、`clip-set-image`、`clip-set-files`、`clip-info` 及 `F11` 键支持；重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。定向复验提示词见 `evidence/T-061/codex-walk.md`（输出至 `evidence/T-061/walk-recheck.md`）。
+  - 工具源码位于 `evidence/tools/walk-src/`（已由 `.gitignore` 忽略），本票新增 `move`、`drag`、`clip-set-image`、`clip-set-files`、`clip-info` 及 `F11` 键支持；重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。
