@@ -1,9 +1,12 @@
 using System.Collections.Concurrent;
+using System.Collections.Specialized;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace EnCopy;
@@ -14,7 +17,10 @@ public sealed record ClipboardSnapshot(
     bool ContainsFiles,
     bool IsPrivacyBlocked,
     string? Text,
-    byte[]? RtfBytes);
+    byte[]? RtfBytes,
+    IReadOnlyList<string>? CopiedPaths = null,
+    byte[]? PngBytes = null,
+    string? SourceAppId = null);
 
 public interface IClipboardBackend : IDisposable
 {
@@ -24,6 +30,8 @@ public interface IClipboardBackend : IDisposable
     bool TryDequeueSnapshot(out ClipboardSnapshot? snapshot);
     ClipboardSnapshot? TryRead();
     bool TryWrite(string text, byte[]? rtfBytes);
+    bool TryWriteFiles(IReadOnlyList<string> paths);
+    bool TryWriteImage(string imagePath);
 }
 
 /// <summary>
@@ -39,9 +47,25 @@ public sealed class ClipboardWatcher : IDisposable
         "Clipboard Viewer Ignore"
     ];
     public const string CanIncludeFormat = "CanIncludeInClipboardHistory";
+    public const double HourlyLifeSeconds = 3600.0;
+    public const double VerificationCodeLifeSeconds = 600.0;
 
     private const int MaxChars = 100_000;
+    private const int MaxImageBytes = 64 * 1024 * 1024;
+    private const long MaxImagePixels = 80_000_000;
     private static readonly UTF8Encoding Utf8NoBom = new(false);
+
+    private static readonly Regex DigitsOnlyCodeRegex = new(@"^[0-9]{4,8}$", RegexOptions.Compiled);
+    private static readonly Regex NotACodeRegex = new(
+        @"\b(status|postal|zip|area|country|error|exit|return|dead|source|promo|discount|bar|qr)\s+code\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex NearCodeRegex = new(
+        @"(验证码|校验码|动态码|\bcode\b)[^0-9]{0,12}(?<![0-9A-Za-z-])[0-9]{4,8}(?![0-9])|(?<![0-9A-Za-z-])[0-9]{4,8}(?![0-9])[^0-9]{0,24}(验证码|校验码|动态码|\bcode\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly HashSet<string> MailAndSmsBaseNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "hxoutlook", "olk", "outlook", "thunderbird", "phoneexperiencehost"
+    };
 
     private readonly IClipboardBackend _backend;
     private readonly History _history;
@@ -68,7 +92,31 @@ public sealed class ClipboardWatcher : IDisposable
         _lastSequence = backend.SequenceNumber;
     }
 
-    public bool IsEnabled => !_settings.RecordingPaused && (_settings.TextEnabled || _settings.LinksEnabled);
+    public bool IsEnabled =>
+        !_settings.RecordingPaused &&
+        (_settings.TextEnabled || _settings.LinksEnabled || _settings.ImagesEnabled || _settings.FilesEnabled);
+
+    /// <summary>
+    /// 识别 4–8 位验证码（对齐 ClipboardWatcher.swift:107-118）：
+    /// 邮件/短信客户端单独复制的 4–8 位数字，或短文本（<=160 字）中紧挨「验证码 / 校验码 / 动态码 / code」的 4–8 位数字；
+    /// 排除状态码、邮编、错误码与 T-1024 / v2024 等标识符。
+    /// </summary>
+    public static bool IsVerificationCode(string text, string? appId)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        if (DigitsOnlyCodeRegex.IsMatch(trimmed) && !string.IsNullOrWhiteSpace(appId))
+        {
+            var baseKey = SourceApp.NormalizeRuleKey(appId);
+            if (MailAndSmsBaseNames.Contains(baseKey))
+            {
+                return true;
+            }
+        }
+        if (trimmed.Length > 160) return false;
+        if (NotACodeRegex.IsMatch(trimmed)) return false;
+        return NearCodeRegex.IsMatch(trimmed);
+    }
 
     public void Start()
     {
@@ -126,30 +174,98 @@ public sealed class ClipboardWatcher : IDisposable
 
     private void ProcessSnapshot(ClipboardSnapshot snap)
     {
-        if (snap.ContainsSelfCopy || snap.IsPrivacyBlocked || snap.ContainsFiles) return;
-        if (string.IsNullOrWhiteSpace(snap.Text) || snap.Text.Length > MaxChars) return;
+        if (snap.ContainsSelfCopy || snap.IsPrivacyBlocked) return;
 
-        var trimmed = snap.Text.Trim();
-        if (Note.WebAddress(trimmed) is not null)
+        var appId = snap.SourceAppId;
+        var rule = SourceApp.GetRule(_settings, appId);
+        if (rule == AppRule.Skip)
         {
-            if (_settings.LinksEnabled)
-            {
-                Save(trimmed, rtfBytes: null, isLink: true);
-            }
+            return;
         }
-        else if (_settings.TextEnabled)
+        double? baseTtl = rule == AppRule.Hourly ? HourlyLifeSeconds : null;
+
+        if (snap.ContainsFiles)
         {
-            Save(snap.Text, snap.RtfBytes, isLink: false);
+            if ((!_settings.FilesEnabled && !_settings.ImagesEnabled) || snap.CopiedPaths is not { Count: > 0 } rawPaths)
+            {
+                return;
+            }
+
+            var existingPaths = FileList.NormalizePaths(rawPaths)
+                .Where(p => File.Exists(p) || Directory.Exists(p))
+                .ToArray();
+            if (existingPaths.Length == 0) return;
+
+            var nonMediaFiles = _settings.FilesEnabled
+                ? existingPaths.Where(p => !FileList.IsMediaFile(p)).ToArray()
+                : [];
+            var mediaFiles = _settings.ImagesEnabled
+                ? existingPaths.Where(FileList.IsMediaFile).Take(20).ToArray()
+                : [];
+
+            foreach (var mediaPath in mediaFiles)
+            {
+                var stamp = NextMonotonicUtc();
+                bool alreadyKnown = _history.Contains(mediaPath);
+                _history.RecordImage(mediaPath, ocrWords: null, pngBytesForHash: null, usedAt: stamp, appName: appId, ttlSeconds: baseTtl);
+                _history.SetApp(mediaPath, appId);
+                _history.RenewTtl(mediaPath, baseTtl);
+                if (alreadyKnown) _onAgain(mediaPath, stamp);
+                else _onNew(mediaPath);
+            }
+
+            if (nonMediaFiles.Length > 0)
+            {
+                var stamp = NextMonotonicUtc();
+                if (_history.FindFileListHolding(nonMediaFiles) is { } existingManifest)
+                {
+                    _history.SetApp(existingManifest, appId);
+                    _history.RenewTtl(existingManifest, baseTtl);
+                    _onAgain(existingManifest, stamp);
+                }
+                else if (FileList.Make(nonMediaFiles) is { } newManifest)
+                {
+                    _history.RecordFileList(newManifest, appName: appId, ttlSeconds: baseTtl, usedAt: stamp);
+                    _onNew(newManifest);
+                }
+            }
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snap.Text))
+        {
+            if (snap.Text.Length > MaxChars) return;
+            double? textTtl = IsVerificationCode(snap.Text, appId) ? VerificationCodeLifeSeconds : baseTtl;
+            var trimmed = snap.Text.Trim();
+            if (Note.WebAddress(trimmed) is not null)
+            {
+                if (_settings.LinksEnabled)
+                {
+                    SaveText(trimmed, rtfBytes: null, isLink: true, appId: appId, ttlSeconds: textTtl);
+                }
+            }
+            else if (_settings.TextEnabled)
+            {
+                SaveText(snap.Text, snap.RtfBytes, isLink: false, appId: appId, ttlSeconds: textTtl);
+            }
+            return;
+        }
+
+        if (_settings.ImagesEnabled && snap.PngBytes is { Length: > 0 and <= MaxImageBytes } pngBytes)
+        {
+            SaveCopiedImage(pngBytes, appId, baseTtl);
         }
     }
 
     private void OnBackendChanged(object? sender, EventArgs e) => CheckNow();
 
-    private void Save(string text, byte[]? rtfBytes, bool isLink)
+    private void SaveText(string text, byte[]? rtfBytes, bool isLink, string? appId, double? ttlSeconds)
     {
         if (_history.NoteHolding(text) is { } existingPath)
         {
             var stamp = NextMonotonicUtc();
+            _history.SetApp(existingPath, appId);
+            _history.RenewTtl(existingPath, ttlSeconds);
             _onAgain(existingPath, stamp);
             return;
         }
@@ -182,7 +298,41 @@ public sealed class ClipboardWatcher : IDisposable
         File.Move(tmp, path, overwrite: false);
 
         var monotonicUtc = NextMonotonicUtc();
-        _history.Record(path, text, monotonicUtc);
+        _history.Record(path, text, monotonicUtc, appName: appId, ttlSeconds: ttlSeconds);
+        _onNew(path);
+    }
+
+    private void SaveCopiedImage(byte[] pngBytes, string? appId, double? ttlSeconds)
+    {
+        if (!Win32ClipboardBackend.IsSanePngImage(pngBytes)) return;
+
+        if (_history.FindPictureHolding(pngBytes) is { } existingImg)
+        {
+            var stamp = NextMonotonicUtc();
+            _history.SetApp(existingImg, appId);
+            _history.RenewTtl(existingImg, ttlSeconds);
+            _onAgain(existingImg, stamp);
+            return;
+        }
+
+        var folder = DataFolder.ScreenshotsFolder;
+        Directory.CreateDirectory(folder);
+
+        var stampName = DateTime.Now.ToString("yyyy-MM-dd 'at' HH.mm.ss", System.Globalization.CultureInfo.InvariantCulture);
+        var path = Path.Combine(folder, $"Clipboard {stampName}.png");
+        int n = 2;
+        while (File.Exists(path))
+        {
+            path = Path.Combine(folder, $"Clipboard {stampName} {n}.png");
+            n++;
+        }
+
+        var tmp = path + ".tmp";
+        File.WriteAllBytes(tmp, pngBytes);
+        File.Move(tmp, path, overwrite: false);
+
+        var monotonicUtc = NextMonotonicUtc();
+        _history.RecordImage(path, ocrWords: null, pngBytesForHash: pngBytes, usedAt: monotonicUtc, appName: appId, ttlSeconds: ttlSeconds);
         _onNew(path);
     }
 
@@ -205,15 +355,19 @@ public sealed class ClipboardWatcher : IDisposable
 public sealed class Win32ClipboardBackend : IClipboardBackend
 {
     private const int WmClipboardUpdate = 0x031D;
+    private const uint CfDib = 8;
     private const uint CfUnicodeText = 13;
     private const uint CfHDrop = 15;
     private const int MaxUnicodeReadChars = 100_005;
     private const int MaxRtfBytes = 5_000_000;
+    private const int MaxPngBytes = 64 * 1024 * 1024;
+    private const long MaxBitmapPixels = 80_000_000;
     private const int MaxRetryAttempts = 10;
     private static readonly IntPtr HwndMessage = new(-3);
 
     private static readonly uint CfSelfCopy = RegisterClipboardFormat(ClipboardWatcher.SelfCopyFormat);
     private static readonly uint CfRtf = RegisterClipboardFormat("Rich Text Format");
+    private static readonly uint CfPng = RegisterClipboardFormat("PNG");
     private static readonly uint CfExcludeMonitor = RegisterClipboardFormat(ClipboardWatcher.PrivacyFormats[0]);
     private static readonly uint CfViewerIgnore = RegisterClipboardFormat(ClipboardWatcher.PrivacyFormats[1]);
     private static readonly uint CfCanInclude = RegisterClipboardFormat(ClipboardWatcher.CanIncludeFormat);
@@ -291,6 +445,69 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
             Clipboard.SetDataObject(obj, copy: true);
             return true;
         }, fallback: false);
+    }
+
+    public bool TryWriteFiles(IReadOnlyList<string> paths)
+    {
+        var present = paths.Where(p => File.Exists(p) || Directory.Exists(p)).Select(Path.GetFullPath).ToArray();
+        if (present.Length == 0) return false;
+        return RetryClipboard(() =>
+        {
+            var obj = new DataObject();
+            var drop = new StringCollection();
+            drop.AddRange(present);
+            obj.SetFileDropList(drop);
+            obj.SetData(ClipboardWatcher.SelfCopyFormat, new byte[] { 1 });
+            Clipboard.SetDataObject(obj, copy: true);
+            return true;
+        }, fallback: false);
+    }
+
+    public bool TryWriteImage(string imagePath)
+    {
+        if (!File.Exists(imagePath)) return false;
+        var full = Path.GetFullPath(imagePath);
+        return RetryClipboard(() =>
+        {
+            var bytes = File.ReadAllBytes(full);
+            using var ms = new MemoryStream(bytes);
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+
+            var obj = new DataObject();
+            obj.SetImage(bmp);
+            if (string.Equals(Path.GetExtension(full), ".png", StringComparison.OrdinalIgnoreCase))
+            {
+                obj.SetData("PNG", new MemoryStream(bytes));
+            }
+            var drop = new StringCollection { full };
+            obj.SetFileDropList(drop);
+            obj.SetData(ClipboardWatcher.SelfCopyFormat, new byte[] { 1 });
+            Clipboard.SetDataObject(obj, copy: true);
+            return true;
+        }, fallback: false);
+    }
+
+    public static bool IsSanePngImage(byte[] pngBytes)
+    {
+        if (pngBytes.Length < 24 || pngBytes.Length > MaxPngBytes) return false;
+        try
+        {
+            using var ms = new MemoryStream(pngBytes);
+            var decoder = BitmapDecoder.Create(ms, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
+            if (decoder.Frames.Count == 0) return false;
+            var frame = decoder.Frames[0];
+            return frame.PixelWidth > 0 && frame.PixelHeight > 0 &&
+                   (long)frame.PixelWidth * frame.PixelHeight <= MaxBitmapPixels;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -547,6 +764,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
         try
         {
             uint seq = GetClipboardSequenceNumber();
+            string? sourceAppId = SourceApp.ResolveClipboardSourceApp();
             bool selfCopy = CfSelfCopy != 0 && IsClipboardFormatAvailable(CfSelfCopy);
             bool containsFiles = IsClipboardFormatAvailable(CfHDrop);
             bool privacyBlocked =
@@ -561,9 +779,21 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
                 }
             }
 
-            if (selfCopy || containsFiles || privacyBlocked)
+            if (selfCopy || privacyBlocked)
             {
-                snapshot = new ClipboardSnapshot(seq, selfCopy, containsFiles, privacyBlocked, null, null);
+                snapshot = new ClipboardSnapshot(seq, selfCopy, containsFiles, privacyBlocked, null, null, null, null, sourceAppId);
+                return true;
+            }
+
+            if (containsFiles)
+            {
+                var paths = ReadHDropPaths(GetClipboardData(CfHDrop));
+                if (paths is null)
+                {
+                    openFailed = true;
+                    return false;
+                }
+                snapshot = new ClipboardSnapshot(seq, false, true, false, null, null, paths, null, sourceAppId);
                 return true;
             }
 
@@ -576,16 +806,139 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
                 return false;
             }
 
-            byte[]? rtfBytes = CfRtf != 0 && IsClipboardFormatAvailable(CfRtf)
-                ? ReadRtfFromGlobal(GetClipboardData(CfRtf))
-                : null;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                byte[]? rtfBytes = CfRtf != 0 && IsClipboardFormatAvailable(CfRtf)
+                    ? ReadRtfFromGlobal(GetClipboardData(CfRtf))
+                    : null;
 
-            snapshot = new ClipboardSnapshot(seq, false, false, false, text, rtfBytes);
+                snapshot = new ClipboardSnapshot(seq, false, false, false, text, rtfBytes, null, null, sourceAppId);
+                return true;
+            }
+
+            byte[]? pngBytes = null;
+            if (CfPng != 0 && IsClipboardFormatAvailable(CfPng))
+            {
+                pngBytes = ReadRawPngFromGlobal(GetClipboardData(CfPng));
+            }
+            if (pngBytes is null && IsClipboardFormatAvailable(CfDib))
+            {
+                pngBytes = ReadDibAsPngFromGlobal(GetClipboardData(CfDib));
+            }
+
+            snapshot = new ClipboardSnapshot(seq, false, false, false, text, null, null, pngBytes, sourceAppId);
             return true;
         }
         finally
         {
             CloseClipboard();
+        }
+    }
+
+    private static IReadOnlyList<string>? ReadHDropPaths(IntPtr hDrop)
+    {
+        if (hDrop == IntPtr.Zero) return null;
+        uint count = DragQueryFileW(hDrop, 0xFFFFFFFFu, null, 0);
+        if (count == 0) return [];
+        var list = new List<string>((int)Math.Min(count, 2000));
+        var sb = new StringBuilder(1024);
+        for (uint i = 0; i < count && i < 2000; i++)
+        {
+            uint needed = DragQueryFileW(hDrop, i, null, 0);
+            if (needed == 0) continue;
+            if (sb.Capacity < (int)needed + 2)
+            {
+                sb.EnsureCapacity((int)needed + 2);
+            }
+            uint copied = DragQueryFileW(hDrop, i, sb, (uint)sb.Capacity);
+            if (copied > 0)
+            {
+                list.Add(sb.ToString(0, (int)copied));
+            }
+        }
+        return list;
+    }
+
+    private static byte[]? ReadRawPngFromGlobal(IntPtr hMem)
+    {
+        if (hMem == IntPtr.Zero) return null;
+        nuint rawSize = GlobalSize(hMem);
+        if (rawSize < 24 || rawSize > (nuint)MaxPngBytes) return null;
+        IntPtr ptr = GlobalLock(hMem);
+        if (ptr == IntPtr.Zero) return null;
+        try
+        {
+            var bytes = new byte[(int)rawSize];
+            Marshal.Copy(ptr, bytes, 0, bytes.Length);
+            return IsSanePngImage(bytes) ? bytes : null;
+        }
+        finally
+        {
+            GlobalUnlock(hMem);
+        }
+    }
+
+    private static byte[]? ReadDibAsPngFromGlobal(IntPtr hMem)
+    {
+        if (hMem == IntPtr.Zero) return null;
+        nuint rawSize = GlobalSize(hMem);
+        if (rawSize < 40 || rawSize > (nuint)MaxPngBytes) return null;
+        IntPtr ptr = GlobalLock(hMem);
+        if (ptr == IntPtr.Zero) return null;
+        byte[] dibBytes;
+        try
+        {
+            dibBytes = new byte[(int)rawSize];
+            Marshal.Copy(ptr, dibBytes, 0, dibBytes.Length);
+        }
+        finally
+        {
+            GlobalUnlock(hMem);
+        }
+
+        try
+        {
+            int biSize = BitConverter.ToInt32(dibBytes, 0);
+            int width = Math.Abs(BitConverter.ToInt32(dibBytes, 4));
+            int height = Math.Abs(BitConverter.ToInt32(dibBytes, 8));
+            ushort bpp = BitConverter.ToUInt16(dibBytes, 14);
+            int compression = BitConverter.ToInt32(dibBytes, 16);
+            uint clrUsed = BitConverter.ToUInt32(dibBytes, 32);
+            if (biSize < 40 || width <= 0 || height <= 0 || (long)width * height > MaxBitmapPixels)
+            {
+                return null;
+            }
+
+            uint paletteBytes = clrUsed > 0
+                ? clrUsed * 4u
+                : (bpp <= 8 ? (1u << bpp) * 4u : (compression == 3 && biSize == 40 ? 12u : 0u));
+            uint bfOffBits = 14u + (uint)biSize + paletteBytes;
+            uint fileSize = 14u + (uint)dibBytes.Length;
+
+            using var bmpStream = new MemoryStream((int)fileSize);
+            using (var bw = new BinaryWriter(bmpStream, Encoding.ASCII, leaveOpen: true))
+            {
+                bw.Write((byte)'B');
+                bw.Write((byte)'M');
+                bw.Write(fileSize);
+                bw.Write(0u);
+                bw.Write(bfOffBits);
+                bw.Write(dibBytes);
+            }
+            bmpStream.Position = 0;
+
+            var decoder = BitmapDecoder.Create(bmpStream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            if (decoder.Frames.Count == 0) return null;
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(decoder.Frames[0]));
+            using var outPng = new MemoryStream();
+            encoder.Save(outPng);
+            var png = outPng.ToArray();
+            return png.Length <= MaxPngBytes ? png : null;
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 
@@ -638,4 +991,7 @@ public sealed class Win32ClipboardBackend : IClipboardBackend
 
     [DllImport("kernel32.dll")]
     private static extern nuint GlobalSize(IntPtr hMem);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint DragQueryFileW(IntPtr hDrop, uint iFile, StringBuilder? lpszFile, uint cch);
 }

@@ -34,11 +34,18 @@ public static class LineKeyRouter
         Action dismiss,
         Action clearQuery,
         bool? canUndoQuery = null,
-        bool caretAtEnd = true)
+        bool caretAtEnd = true,
+        Action? openCleanup = null)
     {
         if (isImeComposing || key == Key.ImeProcessed || key == Key.DeadCharProcessed)
         {
             return false;
+        }
+
+        if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.Back && openCleanup is not null)
+        {
+            openCleanup();
+            return true;
         }
 
         if (key == Key.Escape && modifiers == ModifierKeys.None)
@@ -110,6 +117,10 @@ public static class LineKeyRouter
 
         if (line.BasketOpen)
         {
+            if (modifiers == ModifierKeys.Control && key == Key.Down)
+            {
+                return line.ToggleBasketStack();
+            }
             if (modifiers == ModifierKeys.None)
             {
                 switch (key)
@@ -172,6 +183,7 @@ public partial class LinePanel : Window
     private readonly Func<IReadOnlyList<Note>, bool> _onCopyNotes;
     private readonly Action _onVisibilityChanged;
     private readonly Action _onRequestChangeShortcut;
+    private readonly Action? _onRequestOpenCleanup;
     private readonly HeldWindowManager? _heldManager;
     private readonly WindowsShareService? _shareService;
     private readonly Func<bool>? _getZoomOnHover;
@@ -238,7 +250,8 @@ public partial class LinePanel : Window
         Action onRequestChangeShortcut,
         HeldWindowManager? heldManager = null,
         WindowsShareService? shareService = null,
-        Func<bool>? getZoomOnHover = null)
+        Func<bool>? getZoomOnHover = null,
+        Action? onRequestOpenCleanup = null)
     {
         InitializeComponent();
         _line = line;
@@ -246,6 +259,7 @@ public partial class LinePanel : Window
         _onCopyNotes = onCopyNotes;
         _onVisibilityChanged = onVisibilityChanged;
         _onRequestChangeShortcut = onRequestChangeShortcut;
+        _onRequestOpenCleanup = onRequestOpenCleanup;
         _heldManager = heldManager;
         _shareService = shareService;
         _getZoomOnHover = getZoomOnHover;
@@ -1086,31 +1100,82 @@ public partial class LinePanel : Window
 
             foreach (var row in group.Rows)
             {
-                bool picked = _line.BasketPicked is not null &&
+                bool rowPicked = _line.BasketPicked is not null &&
+                    _line.BasketSubPickedFile is null &&
                     string.Equals(_line.BasketPicked.FilePath, row.Note.FilePath, StringComparison.OrdinalIgnoreCase);
+                var stackFiles = _line.GetStackFiles(row.Note.FilePath);
+                bool stackExpanded = _line.BasketExpandedPath is not null &&
+                    string.Equals(Path.GetFullPath(_line.BasketExpandedPath), Path.GetFullPath(row.Note.FilePath), StringComparison.OrdinalIgnoreCase);
+
                 var rowUi = PaperCardView.BuildBasketRow(
                     row,
                     _line.Theme,
-                    picked,
+                    rowPicked,
                     isDark,
                     onSelect: r =>
                     {
                         _scrollBasketToPicked = false;
-                        _line.BasketPicked = r.Note;
+                        _line.SelectBasketRow(r.Note);
                         QueryBox.Focus();
                     },
                     onActivate: r =>
                     {
-                        _line.BasketPicked = r.Note;
+                        if (r.Note.IsMovedAway) return;
+                        _line.SelectBasketRow(r.Note);
                         _onPasteNotes([r.Note], _previousForegroundHwnd, false);
+                    },
+                    showSourceApp: _line.ShowsSourceApp,
+                    stackFiles: stackFiles,
+                    isStackExpanded: stackExpanded,
+                    onToggleStack: () =>
+                    {
+                        _scrollBasketToPicked = false;
+                        _line.ToggleBasketStack(row.Note.FilePath);
+                        QueryBox.Focus();
                     });
 
                 var wrapper = new Border { Child = rowUi };
-                if (picked)
+                if (rowPicked)
                 {
                     _pickedBasketRowBorder = wrapper;
                 }
                 BasketGroupsHost.Children.Add(wrapper);
+
+                if (stackExpanded && stackFiles is { Count: > 1 })
+                {
+                    foreach (var subFile in stackFiles)
+                    {
+                        var capturedStack = row.Note.FilePath;
+                        var capturedFile = subFile;
+                        bool subPicked = _line.BasketSubPickedFile is not null &&
+                            string.Equals(_line.BasketSubPickedFile, capturedFile, StringComparison.OrdinalIgnoreCase);
+                        var subUi = PaperCardView.BuildStackFileRow(
+                            capturedFile,
+                            _line.Theme,
+                            subPicked,
+                            isDark,
+                            onSelect: () =>
+                            {
+                                _scrollBasketToPicked = false;
+                                _line.PickBasketSubFile(capturedStack, capturedFile);
+                                QueryBox.Focus();
+                            },
+                            onActivate: () =>
+                            {
+                                if (_line.PickBasketSubFile(capturedStack, capturedFile) &&
+                                    _line.ResolveActiveBasketNote() is { } singleNote)
+                                {
+                                    _onPasteNotes([singleNote], _previousForegroundHwnd, false);
+                                }
+                            });
+                        var subWrap = new Border { Child = subUi };
+                        if (subPicked)
+                        {
+                            _pickedBasketRowBorder = subWrap;
+                        }
+                        BasketGroupsHost.Children.Add(subWrap);
+                    }
+                }
             }
         }
 
@@ -1262,7 +1327,14 @@ public partial class LinePanel : Window
                 _line.Query = string.Empty;
             },
             canUndoQuery: !string.IsNullOrEmpty(QueryBox.Text) && QueryBox.CanUndo,
-            caretAtEnd: caretAtEnd);
+            caretAtEnd: caretAtEnd,
+            openCleanup: _onRequestOpenCleanup is not null
+                ? () =>
+                {
+                    Dismiss(restoreForeground: false);
+                    _onRequestOpenCleanup();
+                }
+                : null);
 
         if (handled)
         {
@@ -1299,7 +1371,7 @@ public partial class LinePanel : Window
             var stamp = DateTime.UtcNow;
             for (int i = selected.Count - 1; i >= 0; i--)
             {
-                _line.Use(selected[i].FilePath, stamp.AddMilliseconds(groupOffset: selected.Count - 1 - i));
+                _line.Use(selected[i].FilePath, stamp.AddMilliseconds(selected.Count - 1 - i));
             }
             _motion.TriggerHop(selected[0].FilePath);
             FlashCopiedFeedback(selected[0].FilePath);

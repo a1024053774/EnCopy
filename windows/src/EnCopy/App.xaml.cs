@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -27,8 +28,24 @@ public partial class App : Application
     private HotKey? _hotKey;
     private TrayIcon? _trayIcon;
     private ShortcutRecorderWindow? _recorder;
+    private SettingsWindow? _settingsWindow;
+    private CleanupWindow? _cleanupWindow;
+    private OnboardingWindow? _onboardingWindow;
     private DispatcherTimer? _topHoverTimer;
+    private DispatcherTimer? _expiryTimer;
     private readonly TopEdgeHoverTracker _hoverTracker = new();
+    private readonly ForegroundAppTracker _foregroundTracker = new();
+    private WinEventDelegate? _winEventDelegate;
+    private IntPtr _foregroundHook;
+
+    private delegate void WinEventDelegate(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -49,12 +66,16 @@ public partial class App : Application
         _history = new History();
         _line = new Line(_history, keepOnLine: _settings.NormalizedKeepOnLine)
         {
-            Theme = _settings.GetActiveTheme()
+            Theme = _settings.GetActiveTheme(),
+            ShowsSourceApp = _settings.ShowsSourceApp
         };
 
         var (cx, cy) = ScreenPlacement.CurrentCursorPhysical();
         var initialStrip = ScreenPlacement.TopLineStrip(cx, cy, ScreenPlacement.EnumerateMonitors(), 300.0);
         _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(initialStrip.Width));
+
+        _line.ClearExpired();
+        RunRetentionIfDue();
 
         _heldManager = new HeldWindowManager();
         _shareService = new WindowsShareService();
@@ -84,10 +105,11 @@ public partial class App : Application
             onPasteNotes: (notes, targetHwnd, plain) => _paster.PasteNotes(notes, targetHwnd, plain),
             onCopyNotes: notes => _paster.WriteMultipleToClipboard(notes, plain: false),
             onVisibilityChanged: RefreshTrayState,
-            onRequestChangeShortcut: OpenShortcutRecorder,
+            onRequestChangeShortcut: () => OpenShortcutRecorder(),
             heldManager: _heldManager,
             shareService: _shareService,
-            getZoomOnHover: () => _settings.ZoomOnHover);
+            getZoomOnHover: () => _settings.ZoomOnHover,
+            onRequestOpenCleanup: OpenCleanupWindow);
 
         _line.PropertyChanged += (_, args) =>
         {
@@ -122,19 +144,23 @@ public partial class App : Application
                 _settings.SetActiveTheme(theme);
                 _settingsStore.Save(_settings);
                 _line.Theme = theme;
+                _settingsWindow?.Rebuild();
             },
             getTheme: () => _line.Theme,
             onSetZoomOnHover: zoom =>
             {
                 _settings.ZoomOnHover = zoom;
                 _settingsStore.Save(_settings);
+                _settingsWindow?.Rebuild();
             },
             getZoomOnHover: () => _settings.ZoomOnHover,
             onHangAllBack: () => _heldManager.HangAllBack(),
             hasHeldItems: () => _heldManager.HasOpenWindows,
-            onOpenShortcutRecorder: OpenShortcutRecorder,
+            onOpenShortcutRecorder: () => OpenShortcutRecorder(),
             getActiveShortcut: () => _settings.GetActiveShortcut(),
-            onQuit: () => Shutdown());
+            onQuit: () => Shutdown(),
+            onOpenCleanup: OpenCleanupWindow,
+            onOpenSettings: OpenSettingsWindow);
 
         var activeShortcut = _settings.GetActiveShortcut();
         if (activeShortcut is { } s && !ApplyHotKey(s))
@@ -145,6 +171,31 @@ public partial class App : Application
         _topHoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(35) };
         _topHoverTimer.Tick += (_, _) => PollTopEdgeHover();
         _topHoverTimer.Start();
+
+        _foregroundTracker.ObserveLiveForeground();
+        _winEventDelegate = (_, _, hwnd, _, _, _, _) => _foregroundTracker.ObserveWindow(hwnd);
+        _foregroundHook = SetWinEventHook(0x0003u, 0x0003u, IntPtr.Zero, _winEventDelegate, 0, 0, 0x0000u | 0x0002u);
+
+        _expiryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+        _expiryTimer.Tick += (_, _) =>
+        {
+            // 用户正在面板中挑选时暂不抽走脚下的卡片（对齐 AppDelegate.swift:100）
+            if (_panel is { IsSummoned: true }) return;
+            _line?.ClearExpired();
+            RunRetentionIfDue();
+        };
+        _expiryTimer.Start();
+
+        if (!_settings.RecordingExplained && !IsInChecksRunner())
+        {
+            var welcomeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
+            welcomeTimer.Tick += (_, _) =>
+            {
+                welcomeTimer.Stop();
+                ShowFirstLaunchOnboarding();
+            };
+            welcomeTimer.Start();
+        }
     }
 
     private void HandleNewCopiedItem(string path)
@@ -184,6 +235,7 @@ public partial class App : Application
 
     private void PollTopEdgeHover()
     {
+        _foregroundTracker.ObserveLiveForeground();
         if (_panel is null) return;
         if (!_settings.OpensFromTopEdge && !_panel.IsSummoned)
         {
@@ -251,7 +303,7 @@ public partial class App : Application
         return ok;
     }
 
-    private void OpenShortcutRecorder()
+    private void OpenShortcutRecorder(Action? onFinished = null)
     {
         if (_panel is not null && _panel.IsSummoned)
         {
@@ -276,11 +328,119 @@ public partial class App : Application
                 _settings.SetActiveShortcut(chosen);
                 _settingsStore?.Save(_settings);
                 RefreshTrayState();
+                _settingsWindow?.Rebuild();
             });
-        _recorder.Closed += (_, _) => _recorder = null;
+        _recorder.Closed += (_, _) =>
+        {
+            _recorder = null;
+            onFinished?.Invoke();
+        };
         _recorder.Show();
         _recorder.Activate();
     }
+
+    private void SaveAndApplySettings()
+    {
+        _settingsStore?.Save(_settings);
+        if (_clipboardWatcher is not null)
+        {
+            if (_clipboardWatcher.IsEnabled) _clipboardWatcher.Start();
+            else _clipboardWatcher.Stop();
+        }
+        RefreshTrayState();
+    }
+
+    private void RunRetentionIfDue()
+    {
+        if (_line is null || _settingsStore is null) return;
+        double nowSec = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (nowSec - _settings.RetentionLastRunUnix < 86400.0) return;
+        _settings.RetentionLastRunUnix = nowSec;
+        _settingsStore.Save(_settings);
+        _line.RunRetention(DateTime.UtcNow, _settings.NormalizedOriginalsCapBytes);
+    }
+
+    private void OpenSettingsWindow()
+    {
+        var frontApp = _foregroundTracker.ObserveLiveForeground();
+        if (_panel is { IsSummoned: true })
+        {
+            _panel.Dismiss(restoreForeground: false);
+        }
+
+        if (_settingsWindow is { IsLoaded: true })
+        {
+            _settingsWindow.RefreshWithFrontApp(frontApp);
+            _settingsWindow.Show();
+            _settingsWindow.Activate();
+            return;
+        }
+
+        if (_line is null) return;
+        _settingsWindow = new SettingsWindow(
+            _settings,
+            _line,
+            new SettingsCallbacks(
+                SaveAndApplySettings: SaveAndApplySettings,
+                ChangeShortcut: after => OpenShortcutRecorder(after),
+                OpenCleanup: OpenCleanupWindow,
+                OpenScreenshotsFolder: () => OpenFolderInExplorer(DataFolder.ScreenshotsFolder),
+                OpenDataFolder: () => OpenFolderInExplorer(DataFolder.Root)),
+            frontApp: frontApp);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
+    }
+
+    private void OpenCleanupWindow()
+    {
+        if (_panel is { IsSummoned: true })
+        {
+            _panel.Dismiss(restoreForeground: false);
+        }
+
+        if (_cleanupWindow is { IsLoaded: true })
+        {
+            _cleanupWindow.RefreshPreviewAndBatches();
+            _cleanupWindow.Show();
+            _cleanupWindow.Activate();
+            return;
+        }
+
+        if (_line is null) return;
+        _cleanupWindow = new CleanupWindow(_line);
+        _cleanupWindow.Closed += (_, _) => _cleanupWindow = null;
+        _cleanupWindow.Show();
+        _cleanupWindow.Activate();
+    }
+
+    private void ShowFirstLaunchOnboarding()
+    {
+        if (_onboardingWindow is { IsLoaded: true } || _line is null) return;
+        _onboardingWindow = new OnboardingWindow(_line.Theme, (paused, openAtLogin) =>
+        {
+            _settings.RecordingExplained = true;
+            _settings.RecordingPaused = paused;
+            LaunchAtLogin.SetEnabled(openAtLogin);
+            SaveAndApplySettings();
+        });
+        _onboardingWindow.Closed += (_, _) => _onboardingWindow = null;
+        _onboardingWindow.Show();
+        _onboardingWindow.Activate();
+    }
+
+    private static void OpenFolderInExplorer(string path)
+    {
+        Directory.CreateDirectory(path);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true
+        });
+    }
+
+    private static bool IsInChecksRunner() =>
+        string.Equals(Environment.GetEnvironmentVariable(DataFolder.ChecksRunnerEnv), "1", StringComparison.Ordinal);
 
     private static void CleanupOrphanedDiscarded()
     {
@@ -299,7 +459,17 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _topHoverTimer?.Stop();
+        _expiryTimer?.Stop();
+        if (_foregroundHook != IntPtr.Zero)
+        {
+            UnhookWinEvent(_foregroundHook);
+            _foregroundHook = IntPtr.Zero;
+        }
+        _winEventDelegate = null;
         _recorder?.CloseSilently();
+        _onboardingWindow?.Close();
+        _cleanupWindow?.Close();
+        _settingsWindow?.Close();
         _heldManager?.Dispose();
         _shareService?.Dispose();
         _hotKey?.Dispose();
@@ -321,4 +491,17 @@ public partial class App : Application
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr hmodWinEventProc,
+        WinEventDelegate lpfnWinEventProc,
+        uint idProcess,
+        uint idThread,
+        uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 }

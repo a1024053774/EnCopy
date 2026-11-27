@@ -75,6 +75,9 @@ public sealed class Note
     public bool Pinned { get; }
     public string? AppName { get; }
     public IReadOnlyList<string> FileTargets { get; }
+    public bool IsMovedAway { get; }
+
+    public string? DisplayAppName => SourceApp.GetDisplayName(AppName);
 
     public bool IsCode => Kind == ItemKind.Code;
 
@@ -115,9 +118,9 @@ public sealed class Note
     }
 
     public string Caption =>
-        string.IsNullOrWhiteSpace(AppName)
+        string.IsNullOrWhiteSpace(DisplayAppName)
             ? FormatRelativeStamp(UsedAt)
-            : $"{FormatRelativeStamp(UsedAt)} · {AppName}";
+            : $"{FormatRelativeStamp(UsedAt)} · {DisplayAppName}";
 
     public bool MatchesFilter(KindFilter filter) => filter switch
     {
@@ -141,7 +144,8 @@ public sealed class Note
         bool pinned = false,
         bool isMarkdown = false,
         string? appName = null,
-        IReadOnlyList<string>? fileTargets = null)
+        IReadOnlyList<string>? fileTargets = null,
+        bool isMovedAway = false)
     {
         FilePath = filePath;
         RelativePath = relativePath;
@@ -155,13 +159,14 @@ public sealed class Note
         IsMarkdown = isMarkdown;
         AppName = appName;
         FileTargets = fileTargets ?? [];
+        IsMovedAway = isMovedAway;
     }
 
     public Note WithUsedAt(DateTime usedAt) =>
-        new(FilePath, RelativePath, Title, Body, FullText, Kind, Link, usedAt, Pinned, IsMarkdown, AppName, FileTargets);
+        new(FilePath, RelativePath, Title, Body, FullText, Kind, Link, usedAt, Pinned, IsMarkdown, AppName, FileTargets, IsMovedAway);
 
     public Note WithPinned(bool pinned) =>
-        new(FilePath, RelativePath, Title, Body, FullText, Kind, Link, UsedAt, pinned, IsMarkdown, AppName, FileTargets);
+        new(FilePath, RelativePath, Title, Body, FullText, Kind, Link, UsedAt, pinned, IsMarkdown, AppName, FileTargets, IsMovedAway);
 
     public static Note? Load(
         string filePath,
@@ -192,26 +197,30 @@ public sealed class Note
             return new Note(filePath, relativePath, fileName, string.Empty, filePath, ItemKind.Video, null, usedAt, pinned, false, appName, [filePath]);
         }
 
-        if (string.Equals(ext, ".filelist", StringComparison.OrdinalIgnoreCase))
+        if (FileList.IsManifestPath(filePath))
         {
-            var targets = File.ReadAllLines(filePath, Utf8NoBom)
-                .Select(l => l.Trim())
-                .Where(l => !string.IsNullOrEmpty(l))
-                .ToArray();
-            if (targets.Length == 0)
+            var summary = FileList.Summarize(filePath);
+            if (summary.AllPaths.Count == 0)
             {
                 return new Note(filePath, relativePath, Path.GetFileName(filePath), string.Empty, filePath, ItemKind.File, null, usedAt, pinned, false, appName);
             }
-            if (targets.Length == 1)
-            {
-                var first = targets[0];
-                var singleTitle = Path.GetFileName(first.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                var singleParent = Path.GetFileName(Path.GetDirectoryName(first) ?? string.Empty);
-                return new Note(filePath, relativePath, singleTitle, singleParent, first, ItemKind.File, null, usedAt, pinned, false, appName, targets);
-            }
-            var firstName = Path.GetFileName(targets[0].TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            var countTitle = Localization.Format("{0} files", targets.Length);
-            return new Note(filePath, relativePath, countTitle, firstName, string.Join(Environment.NewLine, targets), ItemKind.File, null, usedAt, pinned, false, appName, targets);
+            var fullText = summary.AllPaths.Count == 1
+                ? summary.AllPaths[0]
+                : string.Join(Environment.NewLine, summary.AllPaths);
+            return new Note(
+                filePath,
+                relativePath,
+                summary.Title,
+                summary.Footer,
+                fullText,
+                ItemKind.File,
+                null,
+                usedAt,
+                pinned,
+                false,
+                appName,
+                summary.AllPaths,
+                isMovedAway: summary.IsMovedAway);
         }
 
         if (!string.Equals(ext, ".txt", StringComparison.OrdinalIgnoreCase) &&

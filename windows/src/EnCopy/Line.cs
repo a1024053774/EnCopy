@@ -26,6 +26,7 @@ public sealed class Line : INotifyPropertyChanged
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     public History History { get; }
+    public Clearing Clearing { get; }
     public ObservableCollection<Note> ShownItems { get; } = [];
     public IReadOnlyList<Note> LineItems => _lineItems;
 
@@ -51,6 +52,9 @@ public sealed class Line : INotifyPropertyChanged
     private int _basketMatchCount;
     private bool _basketOpen;
     private Note? _basketPicked;
+    private string? _basketExpandedPath;
+    private string? _basketSubPickedFile;
+    private bool _showsSourceApp = true;
     private LineTheme _theme = LineTheme.Paper;
     private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
 
@@ -59,6 +63,15 @@ public sealed class Line : INotifyPropertyChanged
         get => _theme;
         set { if (_theme != value) { _theme = value; OnPropertyChanged(); } }
     }
+
+    public bool ShowsSourceApp
+    {
+        get => _showsSourceApp;
+        set { if (_showsSourceApp != value) { _showsSourceApp = value; OnPropertyChanged(); } }
+    }
+
+    public string? BasketExpandedPath => _basketExpandedPath;
+    public string? BasketSubPickedFile => _basketSubPickedFile;
 
     public IReadOnlySet<string> HeldPaths => _heldPaths;
 
@@ -195,9 +208,10 @@ public sealed class Line : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public Line(History history, int? keepOnLine = null, string? lineStatePath = null)
+    public Line(History history, int? keepOnLine = null, string? lineStatePath = null, Clearing? clearing = null)
     {
         History = history;
+        Clearing = clearing ?? new Clearing();
         _keepOnLine = keepOnLine is { } k && AppSettings.KeepChoices.Contains(k) ? k : null;
         _lineStatePath = lineStatePath ?? DataFolder.LineStatePath;
         ReloadFromHistory();
@@ -435,7 +449,7 @@ public sealed class Line : INotifyPropertyChanged
     {
         var rel = History.StoredKeyFor(filePath);
         if (rel is null) return;
-        var note = Note.Load(filePath, rel, DateTime.Now, pinned: false);
+        var note = Note.Load(filePath, rel, DateTime.Now, pinned: false, appName: History.AppOf(filePath));
         if (note is null) return;
 
         var full = Path.GetFullPath(filePath);
@@ -460,11 +474,14 @@ public sealed class Line : INotifyPropertyChanged
         var full = Path.GetFullPath(filePath);
 
         History.Use(filePath, stampUtc);
+        var latestApp = History.AppOf(filePath);
 
         int idx = _lineItems.FindIndex(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
         if (idx >= 0)
         {
-            var updated = _lineItems[idx].WithUsedAt(stampLocal);
+            var cur = _lineItems[idx];
+            var updated = Note.Load(cur.FilePath, cur.RelativePath, stampLocal, pinned: cur.Pinned, appName: latestApp ?? cur.AppName)
+                          ?? cur.WithUsedAt(stampLocal);
             // 收藏的与拿在手上的留在原位（T-019 / CONTEXT.md）
             if (updated.Pinned || _heldPaths.Contains(full))
             {
@@ -479,7 +496,7 @@ public sealed class Line : INotifyPropertyChanged
         else
         {
             var rel = History.StoredKeyFor(filePath);
-            if (rel is not null && Note.Load(filePath, rel, stampLocal, pinned: false) is { } reclaimed)
+            if (rel is not null && Note.Load(filePath, rel, stampLocal, pinned: false, appName: latestApp) is { } reclaimed)
             {
                 _lineItems.Insert(PinnedCount, reclaimed);
                 TrimToCapacity(protectPaths: [full]);
@@ -555,7 +572,7 @@ public sealed class Line : INotifyPropertyChanged
     {
         if (BasketOpen)
         {
-            return BasketPicked is not null ? [BasketPicked] : [];
+            return ResolveActiveBasketNote() is { } bn ? [bn] : [];
         }
         if (_selectedPaths.Count <= 1)
         {
@@ -592,7 +609,7 @@ public sealed class Line : INotifyPropertyChanged
     {
         if (BasketOpen)
         {
-            if (BasketPicked is { } basketNote)
+            if (ResolveActiveBasketNote() is { } basketNote)
             {
                 TogglePinByPath(basketNote.FilePath);
                 LoadBasket();
@@ -614,6 +631,11 @@ public sealed class Line : INotifyPropertyChanged
         {
             var current = _lineItems[lineIdx];
             bool nextPinned = !current.Pinned;
+            if (nextPinned)
+            {
+                // 收藏上绳的验证码或按小时过期项转为长期保留（CONTEXT.md：收藏了就不过期）
+                History.SetTtl(current.FilePath, null);
+            }
             _lineItems.RemoveAt(lineIdx);
             int targetIdx = PinnedCount;
             var updated = current.WithPinned(nextPinned);
@@ -641,6 +663,7 @@ public sealed class Line : INotifyPropertyChanged
         // 从篮子收藏上绳：放到绳结左侧，并在超容量时把最老非收藏挤回篮子
         var rel = History.StoredKeyFor(filePath);
         if (rel is null) return;
+        History.SetTtl(filePath, null);
         var entry = History.AllEntries().FirstOrDefault(e => string.Equals(Path.GetFullPath(e.FullPath), full, StringComparison.OrdinalIgnoreCase));
         var usedLocal = entry is not null
             ? DateTimeOffset.FromUnixTimeMilliseconds((long)(entry.UsedUnix * 1000)).LocalDateTime
@@ -954,11 +977,338 @@ public sealed class Line : INotifyPropertyChanged
         _basketKindCounts.Clear();
         BasketMatchCount = 0;
         BasketPicked = null;
+        _basketExpandedPath = null;
+        _basketSubPickedFile = null;
         RefreshCurrentView();
+    }
+
+    public IReadOnlyList<string>? GetStackFiles(string? manifestPath)
+    {
+        if (!FileList.IsManifestPath(manifestPath)) return null;
+        var present = FileList.PresentPaths(manifestPath!);
+        return present.Count > 1 ? present : null;
+    }
+
+    public bool ToggleBasketStack(string? targetManifestPath = null)
+    {
+        var target = targetManifestPath ?? BasketPicked?.FilePath;
+        if (string.IsNullOrWhiteSpace(target) || GetStackFiles(target) is null)
+        {
+            return false;
+        }
+
+        var full = Path.GetFullPath(target);
+        if (BasketPicked is null || !string.Equals(Path.GetFullPath(BasketPicked.FilePath), full, StringComparison.OrdinalIgnoreCase))
+        {
+            var match = FlattenBasketNotes().FirstOrDefault(n => string.Equals(Path.GetFullPath(n.FilePath), full, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) BasketPicked = match;
+        }
+
+        if (_basketExpandedPath is not null && string.Equals(Path.GetFullPath(_basketExpandedPath), full, StringComparison.OrdinalIgnoreCase))
+        {
+            _basketExpandedPath = null;
+            _basketSubPickedFile = null;
+        }
+        else
+        {
+            _basketExpandedPath = full;
+            _basketSubPickedFile = null;
+        }
+        OnPropertyChanged(nameof(BasketExpandedPath));
+        OnPropertyChanged(nameof(BasketSubPickedFile));
+        OnPropertyChanged(nameof(BasketGroups));
+        return true;
+    }
+
+    public bool PickBasketSubFile(string stackManifestPath, string filePath)
+    {
+        var files = GetStackFiles(stackManifestPath);
+        if (files is null || !files.Any(f => string.Equals(f, filePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+        var stackFull = Path.GetFullPath(stackManifestPath);
+        var match = FlattenBasketNotes().FirstOrDefault(n => string.Equals(Path.GetFullPath(n.FilePath), stackFull, StringComparison.OrdinalIgnoreCase));
+        if (match is not null) BasketPicked = match;
+        _basketExpandedPath = stackFull;
+        _basketSubPickedFile = files.First(f => string.Equals(f, filePath, StringComparison.OrdinalIgnoreCase));
+        OnPropertyChanged(nameof(BasketExpandedPath));
+        OnPropertyChanged(nameof(BasketSubPickedFile));
+        OnPropertyChanged(nameof(BasketGroups));
+        return true;
+    }
+
+    public void SelectBasketRow(Note note)
+    {
+        BasketPicked = note;
+        if (_basketSubPickedFile is not null)
+        {
+            _basketSubPickedFile = null;
+            OnPropertyChanged(nameof(BasketSubPickedFile));
+            OnPropertyChanged(nameof(BasketGroups));
+        }
+    }
+
+    public Note? ResolveActiveBasketNote()
+    {
+        if (BasketPicked is null || BasketPicked.IsMovedAway)
+        {
+            return null;
+        }
+        if (_basketSubPickedFile is { } subFile &&
+            _basketExpandedPath is not null &&
+            string.Equals(Path.GetFullPath(BasketPicked.FilePath), Path.GetFullPath(_basketExpandedPath), StringComparison.OrdinalIgnoreCase) &&
+            (File.Exists(subFile) || Directory.Exists(subFile)))
+        {
+            var singleManifest = History.FindFileListHolding([subFile]) ?? FileList.Make([subFile]);
+            if (singleManifest is not null)
+            {
+                if (!History.Contains(singleManifest))
+                {
+                    History.RecordFileList(singleManifest, appName: BasketPicked.AppName);
+                }
+                var rel = History.StoredKeyFor(singleManifest) ?? singleManifest;
+                return Note.Load(singleManifest, rel, DateTime.Now, pinned: false, appName: BasketPicked.AppName);
+            }
+        }
+        return BasketPicked;
+    }
+
+    // MARK: TTL Expiry, Retention & Manual Cleanup (T-061)
+
+    /// <summary>
+    /// 清理到点的短效条目（10 分钟验证码与「一小时后清」应用）：
+    /// 直接从磁盘、绳子与数据库移除，绝不进「最近清掉」；外部原文件绝不删除，已收藏项不过期。
+    /// </summary>
+    public int ClearExpired(DateTime? nowUtc = null)
+    {
+        var now = (nowUtc ?? DateTime.UtcNow).ToUniversalTime();
+        var expired = History.ExpiredPaths(now);
+        if (expired.Count == 0) return 0;
+
+        int removedCount = 0;
+        bool heldChanged = false;
+        foreach (var raw in expired)
+        {
+            var full = Path.GetFullPath(raw);
+            int lineIdx = _lineItems.FindIndex(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase));
+            if (lineIdx >= 0 && _lineItems[lineIdx].Pinned)
+            {
+                History.SetTtl(full, null);
+                continue;
+            }
+
+            if (DataFolder.Contains(full) && File.Exists(full))
+            {
+                try
+                {
+                    File.Delete(full);
+                }
+                catch (IOException)
+                {
+                    // 文件被临时占用时保留数据库行，待下一轮到期检查重试删除，防止私密文件孤立残留
+                    continue;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
+            }
+
+            if (_heldPaths.Remove(full)) heldChanged = true;
+            if (lineIdx >= 0)
+            {
+                _lineItems.RemoveAt(lineIdx);
+            }
+            History.Remove(full);
+            removedCount++;
+        }
+
+        if (removedCount > 0)
+        {
+            if (heldChanged) OnPropertyChanged(nameof(HeldPaths));
+            SaveLineState();
+            RefreshCurrentView();
+            if (BasketOpen) LoadBasket();
+        }
+        return removedCount;
+    }
+
+    public RetentionStatus GetRetentionStatus(DateTime? nowUtc = null, long capBytes = Retention.DefaultCapBytes) =>
+        Retention.GetStatus(History, OnLinePathSet(), nowUtc, capBytes);
+
+    public RetentionPlan RunRetention(DateTime? nowUtc = null, long capBytes = Retention.DefaultCapBytes)
+    {
+        var plan = Retention.Run(History, Clearing, OnLinePathSet(), nowUtc, capBytes);
+        if (plan.ExpiredPaths.Count > 0 || plan.ShrunkPaths.Count > 0 || plan.MissingPaths.Count > 0)
+        {
+            RefreshCurrentView();
+            if (BasketOpen) LoadBasket();
+        }
+        return plan;
+    }
+
+    public CleanupPreview PreviewCleanup(CleanupFilter filter, DateTime? nowUtc = null)
+    {
+        var now = (nowUtc ?? DateTime.UtcNow).ToUniversalTime();
+        double nowSec = new DateTimeOffset(now).ToUnixTimeMilliseconds() / 1000.0;
+        var onLine = OnLinePathSet();
+
+        var words = SearchText.Words(filter.QueryText);
+        HashSet<string>? matchedQueryPaths = null;
+        if (words.Count > 0)
+        {
+            var search = History.Search(words, [], limit: int.MaxValue);
+            matchedQueryPaths = new HashSet<string>(search.Basket.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        }
+
+        var candidates = new List<string>();
+        var staleToPrune = new List<string>();
+        long estimatedBytes = 0;
+
+        foreach (var item in History.KeptEntries())
+        {
+            var full = Path.GetFullPath(item.FullPath);
+            if (!filter.IncludePinnedAndOnLine && onLine.Contains(full))
+            {
+                continue;
+            }
+            if (filter.OlderThanDays is { } minDays && (nowSec - item.UsedUnix) <= minDays * 86400.0)
+            {
+                continue;
+            }
+            if (!string.IsNullOrWhiteSpace(filter.App))
+            {
+                if (string.IsNullOrWhiteSpace(item.AppName) ||
+                    !string.Equals(SourceApp.NormalizeRuleKey(item.AppName), SourceApp.NormalizeRuleKey(filter.App), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+            }
+            if (matchedQueryPaths is not null && !matchedQueryPaths.Contains(full))
+            {
+                continue;
+            }
+
+            if (!File.Exists(full) && !Directory.Exists(full))
+            {
+                staleToPrune.Add(full);
+                continue;
+            }
+
+            if (filter.Kind != KindFilter.All)
+            {
+                var usedDt = DateTimeOffset.FromUnixTimeMilliseconds((long)(item.UsedUnix * 1000.0)).LocalDateTime;
+                var loaded = Note.Load(full, item.RelativePath, usedDt, pinned: false, appName: item.AppName);
+                if (loaded is null || !loaded.MatchesFilter(filter.Kind))
+                {
+                    continue;
+                }
+            }
+
+            candidates.Add(full);
+            if (DataFolder.Contains(full) && File.Exists(full))
+            {
+                estimatedBytes += Retention.SafeFileLength(full);
+            }
+        }
+
+        foreach (var stale in staleToPrune)
+        {
+            History.Remove(stale);
+        }
+
+        return new CleanupPreview(candidates, estimatedBytes);
+    }
+
+    public ClearedBatch? CleanUp(IReadOnlyList<string> candidatePaths, DateTime? nowUtc = null)
+    {
+        if (candidatePaths.Count == 0) return null;
+        bool lineChanged = false;
+        bool heldChanged = false;
+        foreach (var p in candidatePaths)
+        {
+            var full = Path.GetFullPath(p);
+            if (_heldPaths.Remove(full)) heldChanged = true;
+            if (_lineItems.RemoveAll(x => string.Equals(Path.GetFullPath(x.FilePath), full, StringComparison.OrdinalIgnoreCase)) > 0)
+            {
+                lineChanged = true;
+            }
+        }
+
+        var batch = Clearing.Clear(candidatePaths, reason: "manual", History, nowUtc);
+        if (heldChanged) OnPropertyChanged(nameof(HeldPaths));
+        if (lineChanged) SaveLineState();
+        RefreshCurrentView();
+        if (BasketOpen) LoadBasket();
+        return batch;
+    }
+
+    public IReadOnlyList<string> PutBackClearedBatch(string batchId)
+    {
+        var restored = Clearing.PutBack(batchId, History);
+        if (restored.Count > 0)
+        {
+            RefreshCurrentView();
+            if (BasketOpen) LoadBasket();
+        }
+        return restored;
     }
 
     public bool MoveBasketPick(int step)
     {
+        // 若当前选中的文件叠已展开（Ctrl+↓），↑↓ 先在展开的子文件间逐行行走（对齐 Line.swift:352）
+        if (_basketExpandedPath is { } exp &&
+            BasketPicked is not null &&
+            string.Equals(Path.GetFullPath(BasketPicked.FilePath), Path.GetFullPath(exp), StringComparison.OrdinalIgnoreCase) &&
+            GetStackFiles(exp) is { Count: > 1 } stackFiles)
+        {
+            if (_basketSubPickedFile is { } sub)
+            {
+                int subIdx = -1;
+                for (int i = 0; i < stackFiles.Count; i++)
+                {
+                    if (string.Equals(stackFiles[i], sub, StringComparison.OrdinalIgnoreCase))
+                    {
+                        subIdx = i;
+                        break;
+                    }
+                }
+                if (subIdx >= 0)
+                {
+                    if (subIdx + step < 0)
+                    {
+                        _basketSubPickedFile = null;
+                        OnPropertyChanged(nameof(BasketSubPickedFile));
+                        OnPropertyChanged(nameof(BasketGroups));
+                        return true;
+                    }
+                    if (subIdx + step < stackFiles.Count)
+                    {
+                        _basketSubPickedFile = stackFiles[subIdx + step];
+                        OnPropertyChanged(nameof(BasketSubPickedFile));
+                        OnPropertyChanged(nameof(BasketGroups));
+                        return true;
+                    }
+                    _basketSubPickedFile = null;
+                    OnPropertyChanged(nameof(BasketSubPickedFile));
+                }
+            }
+            else if (step > 0)
+            {
+                _basketSubPickedFile = stackFiles[0];
+                OnPropertyChanged(nameof(BasketSubPickedFile));
+                OnPropertyChanged(nameof(BasketGroups));
+                return true;
+            }
+        }
+
+        if (_basketSubPickedFile is not null)
+        {
+            _basketSubPickedFile = null;
+            OnPropertyChanged(nameof(BasketSubPickedFile));
+        }
+
         var flat = FlattenBasketNotes();
         if (flat.Count == 0)
         {
@@ -987,6 +1337,8 @@ public sealed class Line : INotifyPropertyChanged
     public void MoveBasketGroup(int step)
     {
         if (_basketGroups.Count == 0) return;
+        _basketSubPickedFile = null;
+        OnPropertyChanged(nameof(BasketSubPickedFile));
         int currentGroupIdx = -1;
         if (BasketPicked is not null)
         {

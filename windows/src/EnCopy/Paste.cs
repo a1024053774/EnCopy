@@ -139,6 +139,8 @@ public static class PasteKey
 public interface IPastePlatform
 {
     bool WriteClipboardText(string text, byte[]? rtfBytes);
+    bool WriteClipboardFiles(IReadOnlyList<string> paths);
+    bool WriteClipboardImage(string imagePath);
     void TuckAway(IntPtr restoreTargetWindow);
     bool CanSendInputTo(IntPtr targetWindow);
     bool SendCtrlV();
@@ -163,8 +165,28 @@ public sealed class Paster
 
     public bool WriteToClipboard(Note note, bool plain = false)
     {
-        byte[]? rtf = !plain &&
-            string.Equals(Path.GetExtension(note.FilePath), ".rtf", StringComparison.OrdinalIgnoreCase) &&
+        if (note.IsMovedAway)
+        {
+            return false;
+        }
+
+        if (plain)
+        {
+            return _platform.WriteClipboardText(note.FullText, rtfBytes: null);
+        }
+
+        if (note.Kind == ItemKind.Image)
+        {
+            return File.Exists(note.FilePath) && _platform.WriteClipboardImage(note.FilePath);
+        }
+
+        if (note.Kind is ItemKind.File or ItemKind.Video)
+        {
+            var present = ResolvePresentTargets(note);
+            return present.Count > 0 && _platform.WriteClipboardFiles(present);
+        }
+
+        byte[]? rtf = string.Equals(Path.GetExtension(note.FilePath), ".rtf", StringComparison.OrdinalIgnoreCase) &&
             File.Exists(note.FilePath)
             ? File.ReadAllBytes(note.FilePath)
             : null;
@@ -178,8 +200,33 @@ public sealed class Paster
         {
             return WriteToClipboard(notes[0], plain);
         }
-        var joined = string.Join("\n\n", notes.Select(n => n.FullText));
-        return _platform.WriteClipboardText(joined, rtfBytes: null);
+        if (plain)
+        {
+            var plainJoined = string.Join("\n\n", notes.Where(n => !n.IsMovedAway).Select(n => n.FullText));
+            return !string.IsNullOrEmpty(plainJoined) && _platform.WriteClipboardText(plainJoined, rtfBytes: null);
+        }
+
+        if (notes.All(n => n.Kind is ItemKind.File or ItemKind.Image or ItemKind.Video))
+        {
+            var allFiles = notes.SelectMany(ResolvePresentTargets).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            return allFiles.Length > 0 && _platform.WriteClipboardFiles(allFiles);
+        }
+
+        var joined = string.Join("\n\n", notes.Where(n => !n.IsMovedAway).Select(n => n.FullText));
+        return !string.IsNullOrEmpty(joined) && _platform.WriteClipboardText(joined, rtfBytes: null);
+    }
+
+    private static IReadOnlyList<string> ResolvePresentTargets(Note note)
+    {
+        if (FileList.IsManifestPath(note.FilePath))
+        {
+            return FileList.PresentPaths(note.FilePath);
+        }
+        if (note.FileTargets.Count > 0)
+        {
+            return note.FileTargets.Where(p => File.Exists(p) || Directory.Exists(p)).ToArray();
+        }
+        return File.Exists(note.FilePath) || Directory.Exists(note.FilePath) ? [note.FilePath] : [];
     }
 
     public bool PastePicked(IntPtr targetWindow, bool plain = false)
@@ -234,6 +281,10 @@ public sealed class Win32PastePlatform : IPastePlatform
     }
 
     public bool WriteClipboardText(string text, byte[]? rtfBytes) => _clipboard.TryWrite(text, rtfBytes);
+
+    public bool WriteClipboardFiles(IReadOnlyList<string> paths) => _clipboard.TryWriteFiles(paths);
+
+    public bool WriteClipboardImage(string imagePath) => _clipboard.TryWriteImage(imagePath);
 
     public void TuckAway(IntPtr restoreTargetWindow) => _tuckAndRestore(restoreTargetWindow);
 
