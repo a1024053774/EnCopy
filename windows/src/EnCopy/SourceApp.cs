@@ -224,10 +224,11 @@ public static class SourceApp
     public static string? GetDisplayName(string? appId)
     {
         if (string.IsNullOrWhiteSpace(appId)) return null;
-        if (DisplayNameCache.TryGetValue(appId, out var cached)) return cached;
+        var cacheKey = $"{(Localization.IsChinese ? "zh" : "en")}|{appId}";
+        if (DisplayNameCache.TryGetValue(cacheKey, out var cached)) return cached;
 
         string resolved = ResolveFriendlyNameUncached(appId);
-        DisplayNameCache[appId] = resolved;
+        DisplayNameCache[cacheKey] = resolved;
         return resolved;
     }
 
@@ -275,26 +276,40 @@ public static class SourceApp
             "enpass" => "Enpass",
             "dashlane" => "Dashlane",
             "roboform" => "RoboForm",
-            "explorer" => "Windows Explorer",
             "notepad" => Localization.IsChinese ? "记事本" : "Notepad",
+            "explorer" => Localization.IsChinese ? "文件资源管理器" : "File Explorer",
+            "mspaint" => Localization.IsChinese ? "画图" : "Paint",
+            "snippingtool" or "screenclippinghost" => Localization.IsChinese ? "截图工具" : "Snipping Tool",
+            "cmd" => Localization.IsChinese ? "命令提示符" : "Command Prompt",
             "windowsterminal" => "Windows Terminal",
+            "powershell" or "pwsh" => "PowerShell",
+            "weixin" or "wechat" => Localization.IsChinese ? "微信" : "WeChat",
             _ => null
         };
+        if (presetTitle is not null)
+        {
+            return presetTitle;
+        }
 
         try
         {
             if ((appId.Contains(Path.DirectorySeparatorChar) || appId.Contains(Path.AltDirectorySeparatorChar)) && File.Exists(appId))
             {
                 var info = FileVersionInfo.GetVersionInfo(appId);
-                if (!string.IsNullOrWhiteSpace(info.FileDescription))
+                if (!string.IsNullOrWhiteSpace(info.FileDescription) &&
+                    !info.FileDescription.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 {
                     return info.FileDescription.Trim();
                 }
-                if (!string.IsNullOrWhiteSpace(info.ProductName))
+                if (!string.IsNullOrWhiteSpace(info.ProductName) &&
+                    !info.ProductName.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 {
                     return info.ProductName.Trim();
                 }
-                if (presetTitle is not null) return presetTitle;
+                if (!string.IsNullOrWhiteSpace(info.FileDescription))
+                {
+                    return Path.GetFileNameWithoutExtension(info.FileDescription.Trim());
+                }
                 return Path.GetFileNameWithoutExtension(appId);
             }
         }
@@ -303,7 +318,6 @@ public static class SourceApp
             // 无版本信息表或拒绝访问时退回可读文件名
         }
 
-        if (presetTitle is not null) return presetTitle;
         try
         {
             var stem = Path.GetFileNameWithoutExtension(appId);
@@ -369,6 +383,121 @@ public static class SourceApp
     private static extern IntPtr SHGetFileInfoW(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    public static string? GetWindowClassName(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return null;
+        var sb = new StringBuilder(256);
+        int len = GetClassNameW(hwnd, sb, sb.Capacity);
+        return len > 0 ? sb.ToString(0, len) : null;
+    }
+}
+
+/// <summary>
+/// 持续跟踪「最后一次激活的外部正常应用」：
+/// 右键托盘或打开菜单时，任务栏（Shell_TrayWnd / NotifyIconOverflowWindow / TopLevelWindowForXamlIsland）
+/// 或 EnCopy 自身会抢走前台焦点；忽略这些系统外壳窗口即可在设置「按 App 记录」首行精准列出打开设置前正在使用的应用。
+/// </summary>
+public sealed class ForegroundAppTracker
+{
+    private const uint GaRoot = 2;
+
+    private static readonly HashSet<string> IgnoredShellClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "NotifyIconOverflowWindow",
+        "TopLevelWindowForXamlIsland",
+        "XamlExplorerHostIslandWindow",
+        "Progman",
+        "WorkerW",
+        "#32768",
+        "TrayShowDesktopButtonWClass",
+        "Shell_InputSwitchTopLevelWindow"
+    };
+
+    private static readonly HashSet<string> IgnoredShellProcessBaseNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dock_64",
+        "mydock",
+        "dockmod",
+        "dockmod64",
+        "shellexperiencehost",
+        "searchhost",
+        "startmenuexperiencehost",
+        "textinputhost",
+        "lockapp",
+        "sihost",
+        "dwm"
+    };
+
+    private IntPtr _lastObservedHwnd;
+    private uint _lastObservedPid;
+
+    public string? LastExternalApp { get; private set; }
+
+    public static bool IsIgnoredShellClass(string? className) =>
+        !string.IsNullOrWhiteSpace(className) && IgnoredShellClasses.Contains(className.Trim());
+
+    public static bool IsExplorerFolderWindowClass(string? className) =>
+        string.Equals(className?.Trim(), "CabinetWClass", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(className?.Trim(), "ExploreWClass", StringComparison.OrdinalIgnoreCase);
+
+    public void RecordObservation(string? windowClass, string? exePath, uint pid, uint selfPid)
+    {
+        if (pid == 0 || pid == selfPid || IsIgnoredShellClass(windowClass) || string.IsNullOrWhiteSpace(exePath))
+        {
+            return;
+        }
+
+        var baseKey = SourceApp.NormalizeRuleKey(exePath);
+        if (string.IsNullOrEmpty(baseKey) || IgnoredShellProcessBaseNames.Contains(baseKey))
+        {
+            return;
+        }
+
+        // explorer.exe 同时承载桌面、任务栏、托盘弹窗与文件夹窗口，仅文件夹窗口算正在使用的外部应用
+        if (string.Equals(baseKey, "explorer", StringComparison.OrdinalIgnoreCase) &&
+            !IsExplorerFolderWindowClass(windowClass))
+        {
+            return;
+        }
+
+        LastExternalApp = exePath;
+    }
+
+    public string? ObserveWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return LastExternalApp;
+        IntPtr root = GetAncestor(hwnd, GaRoot);
+        IntPtr target = root != IntPtr.Zero ? root : hwnd;
+        GetWindowThreadProcessId(target, out uint pid);
+        if (target == _lastObservedHwnd && pid == _lastObservedPid)
+        {
+            return LastExternalApp;
+        }
+        _lastObservedHwnd = target;
+        _lastObservedPid = pid;
+
+        uint selfPid = (uint)Environment.ProcessId;
+        if (pid == 0 || pid == selfPid) return LastExternalApp;
+
+        var cls = SourceApp.GetWindowClassName(hwnd);
+        var rootCls = target != hwnd ? SourceApp.GetWindowClassName(target) : cls;
+        if (IsIgnoredShellClass(cls) || IsIgnoredShellClass(rootCls)) return LastExternalApp;
+
+        var exe = SourceApp.ResolveWindowExecutable(target);
+        RecordObservation(rootCls ?? cls, exe, pid, selfPid);
+        return LastExternalApp;
+    }
+
+    public string? ObserveLiveForeground() => ObserveWindow(GetForegroundWindow());
+
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 }
 
 /// <summary>

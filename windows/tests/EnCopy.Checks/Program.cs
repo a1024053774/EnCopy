@@ -1583,7 +1583,36 @@ public static class Program
             Check(history.Search(SearchText.Words("INV998877"), [], limit: 10).Basket.Count == 1,
                 "PutBack restores image OCR words and original metadata");
 
-            // 6. 五页主题化设置窗口持久化与离屏渲染落盘
+            // 6. 五页主题化设置窗口持久化与离屏渲染落盘 + 真机复验回归（中文「记事本」名与托盘点击前前台应用保留）
+            const string storeNotepadPath = @"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2609.11.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe";
+            Check(SourceApp.GetDisplayName(storeNotepadPath) == "记事本",
+                $"Store Notepad exe path under zh-Hans must display '记事本', got '{SourceApp.GetDisplayName(storeNotepadPath)}'");
+            Check(SourceApp.GetDisplayName(@"C:\Windows\System32\notepad.exe") == "记事本",
+                $"Sys32 Notepad exe path under zh-Hans must display '记事本', got '{SourceApp.GetDisplayName(@"C:\Windows\System32\notepad.exe")}'");
+
+            var fgTracker = new ForegroundAppTracker();
+            fgTracker.RecordObservation("Notepad", storeNotepadPath, pid: 1001, selfPid: 9999);
+            fgTracker.RecordObservation("Shell_TrayWnd", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
+            fgTracker.RecordObservation("TrayNotifyWnd", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
+            fgTracker.RecordObservation("TopLevelWindowForXamlIsland", @"C:\Windows\SystemApps\MicrosoftWindows.Client.Core_cw5n1h2txyewy\SearchHost.exe", pid: 2003, selfPid: 9999);
+            fgTracker.RecordObservation("MyDockBar", @"C:\Program Files\MyDockFinder\Dock_64.exe", pid: 2004, selfPid: 9999);
+            fgTracker.RecordObservation("#32768", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
+            fgTracker.RecordObservation("Window", @"D:\EnCopy\EnCopy Dev.exe", pid: 9999, selfPid: 9999);
+            Check(string.Equals(fgTracker.LastExternalApp, storeNotepadPath, StringComparison.OrdinalIgnoreCase),
+                "Tray/taskbar/dock shell windows and EnCopy own process must not overwrite previous foreground app");
+
+            var explorerTracker = new ForegroundAppTracker();
+            explorerTracker.RecordObservation("CabinetWClass", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
+            Check(string.Equals(explorerTracker.LastExternalApp, @"C:\Windows\explorer.exe", StringComparison.OrdinalIgnoreCase) &&
+                  SourceApp.GetDisplayName(explorerTracker.LastExternalApp) == "文件资源管理器",
+                "Real File Explorer folder window (CabinetWClass) is tracked as foreground app");
+
+            var listedWithFront = SourceApp.ListRuleApps(settings, historyApps: [], frontApp: fgTracker.LastExternalApp);
+            Check(listedWithFront.Count > 0 &&
+                  string.Equals(listedWithFront[0], storeNotepadPath, StringComparison.OrdinalIgnoreCase) &&
+                  SourceApp.GetDisplayName(listedWithFront[0]) == "记事本",
+                $"First row under By app must be remembered '记事本', got '{(listedWithFront.Count > 0 ? SourceApp.GetDisplayName(listedWithFront[0]) : "<empty>")}'");
+
             var settingsWin = new SettingsWindow(
                 settings,
                 line,
@@ -1593,7 +1622,7 @@ public static class Program
                     OpenCleanup: () => { },
                     OpenScreenshotsFolder: () => { },
                     OpenDataFolder: () => { }),
-                frontApp: @"C:\Windows\System32\notepad.exe");
+                frontApp: fgTracker.LastExternalApp);
 
             var outDir = previewDir ?? Path.Combine(FindRepoRoot(), "evidence", "T-061");
             Directory.CreateDirectory(outDir);

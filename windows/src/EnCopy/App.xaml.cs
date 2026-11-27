@@ -34,6 +34,18 @@ public partial class App : Application
     private DispatcherTimer? _topHoverTimer;
     private DispatcherTimer? _expiryTimer;
     private readonly TopEdgeHoverTracker _hoverTracker = new();
+    private readonly ForegroundAppTracker _foregroundTracker = new();
+    private WinEventDelegate? _winEventDelegate;
+    private IntPtr _foregroundHook;
+
+    private delegate void WinEventDelegate(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -160,6 +172,10 @@ public partial class App : Application
         _topHoverTimer.Tick += (_, _) => PollTopEdgeHover();
         _topHoverTimer.Start();
 
+        _foregroundTracker.ObserveLiveForeground();
+        _winEventDelegate = (_, _, hwnd, _, _, _, _) => _foregroundTracker.ObserveWindow(hwnd);
+        _foregroundHook = SetWinEventHook(0x0003u, 0x0003u, IntPtr.Zero, _winEventDelegate, 0, 0, 0x0000u | 0x0002u);
+
         _expiryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _expiryTimer.Tick += (_, _) =>
         {
@@ -219,6 +235,7 @@ public partial class App : Application
 
     private void PollTopEdgeHover()
     {
+        _foregroundTracker.ObserveLiveForeground();
         if (_panel is null) return;
         if (!_settings.OpensFromTopEdge && !_panel.IsSummoned)
         {
@@ -345,7 +362,7 @@ public partial class App : Application
 
     private void OpenSettingsWindow()
     {
-        var frontApp = SourceApp.ResolveForegroundApp();
+        var frontApp = _foregroundTracker.ObserveLiveForeground();
         if (_panel is { IsSummoned: true })
         {
             _panel.Dismiss(restoreForeground: false);
@@ -443,6 +460,12 @@ public partial class App : Application
     {
         _topHoverTimer?.Stop();
         _expiryTimer?.Stop();
+        if (_foregroundHook != IntPtr.Zero)
+        {
+            UnhookWinEvent(_foregroundHook);
+            _foregroundHook = IntPtr.Zero;
+        }
+        _winEventDelegate = null;
         _recorder?.CloseSilently();
         _onboardingWindow?.Close();
         _cleanupWindow?.Close();
@@ -468,4 +491,17 @@ public partial class App : Application
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr hmodWinEventProc,
+        WinEventDelegate lpfnWinEventProc,
+        uint idProcess,
+        uint idThread,
+        uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWinEvent(IntPtr hWinEventHook);
 }
