@@ -85,6 +85,7 @@ public sealed class History : IDisposable
             CREATE VIRTUAL TABLE IF NOT EXISTS item_text USING fts5(text, tokenize='trigram');
             """);
         EnsureColumnExists("item", "ocr_text", "TEXT");
+        MigrateLegacyPictureHashesIfNeeded();
     }
 
     public void Dispose()
@@ -150,11 +151,97 @@ public sealed class History : IDisposable
             // 非位图格式回退按原始字节哈希
         }
 
+        return LegacyBytePictureHash(pngBytes);
+    }
+
+    public static byte[] LegacyBytePictureHash(byte[] rawBytes)
+    {
         var prefix = "picture:"u8;
-        var buf = new byte[prefix.Length + pngBytes.Length];
+        var buf = new byte[prefix.Length + rawBytes.Length];
         prefix.CopyTo(buf);
-        Buffer.BlockCopy(pngBytes, 0, buf, prefix.Length, pngBytes.Length);
+        Buffer.BlockCopy(rawBytes, 0, buf, prefix.Length, rawBytes.Length);
         return SHA256.HashData(buf);
+    }
+
+    public sealed record ImageIngestResult(string FullPath, bool IsNewFile, bool MergedWithinTwinWindow);
+
+    /// <summary>
+    /// 在数据库同一把互斥锁内原子完成「像素/旧字节哈希查重 → 合并双通道窗口或落盘新副本 → 写入 item 记录」，
+    /// 彻底消除 Win+Shift+S 剪贴板通道与文件夹监测通道并发写入产生双份副本的竞态（T-063）。
+    /// </summary>
+    public ImageIngestResult? IngestPrivateImage(
+        byte[] rawBytes,
+        string filePrefix,
+        string extension,
+        DateTime recordedUtc,
+        string? appName,
+        double? ttlSeconds,
+        double twinWindowSeconds)
+    {
+        if (rawBytes is not { Length: > 0 }) return null;
+
+        lock (_dbLock)
+        {
+            if (FindPictureHolding(rawBytes) is { } existingPath)
+            {
+                var prevUsed = LastUsedUtcOf(existingPath);
+                bool mergedTwin = twinWindowSeconds > 0 &&
+                                  prevUsed.HasValue &&
+                                  Math.Abs((recordedUtc.ToUniversalTime() - prevUsed.Value).TotalSeconds) <= twinWindowSeconds;
+
+                if (!string.IsNullOrWhiteSpace(appName))
+                {
+                    SetApp(existingPath, appName);
+                }
+                RenewTtl(existingPath, ttlSeconds);
+
+                if (!mergedTwin && StoredKeyFor(existingPath) is { } existingKey)
+                {
+                    double usedSec = new DateTimeOffset(recordedUtc.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
+                    using var touchCmd = _db.CreateCommand();
+                    touchCmd.CommandText = "UPDATE item SET used = @used WHERE path = @path";
+                    touchCmd.Parameters.AddWithValue("@used", usedSec);
+                    touchCmd.Parameters.AddWithValue("@path", existingKey);
+                    touchCmd.ExecuteNonQuery();
+                }
+
+                return new ImageIngestResult(existingPath, IsNewFile: false, MergedWithinTwinWindow: mergedTwin);
+            }
+
+            Directory.CreateDirectory(DataFolder.ScreenshotsFolder);
+            var ext = string.IsNullOrWhiteSpace(extension)
+                ? ".png"
+                : (extension.StartsWith('.') ? extension.ToLowerInvariant() : "." + extension.ToLowerInvariant());
+            var stamp = recordedUtc.ToLocalTime().ToString("yyyy-MM-dd HH.mm.ss.fff", CultureInfo.InvariantCulture);
+            var destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"{filePrefix} {stamp}{ext}");
+            int disambig = 2;
+            while (File.Exists(destPath))
+            {
+                destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"{filePrefix} {stamp} {disambig}{ext}");
+                disambig++;
+            }
+
+            var tmp = $"{destPath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllBytes(tmp, rawBytes);
+                File.Move(tmp, destPath, overwrite: false);
+            }
+            catch (IOException)
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                return null;
+            }
+
+            RecordImage(
+                destPath,
+                ocrWords: null,
+                pngBytesForHash: rawBytes,
+                usedAt: recordedUtc,
+                appName: appName,
+                ttlSeconds: ttlSeconds);
+            return new ImageIngestResult(destPath, IsNewFile: true, MergedWithinTwinWindow: false);
+        }
     }
 
     public static byte[] FileListHash(IReadOnlyList<string> rawPaths)
@@ -169,23 +256,36 @@ public sealed class History : IDisposable
     {
         lock (_dbLock)
         {
-            var hash = PictureHash(pngBytes);
-            var paths = new List<string>();
+            var pxHash = PictureHash(pngBytes);
+            var legHash = LegacyBytePictureHash(pngBytes);
+            var rows = new List<(long Id, string Rel, byte[] Hash)>();
             using (var cmd = _db.CreateCommand())
             {
-                cmd.CommandText = "SELECT path FROM item WHERE hash = @hash AND shrunk = 0";
-                cmd.Parameters.AddWithValue("@hash", hash);
+                cmd.CommandText = "SELECT id, path, hash FROM item WHERE (hash = @px OR hash = @leg) AND shrunk = 0";
+                cmd.Parameters.AddWithValue("@px", pxHash);
+                cmd.Parameters.AddWithValue("@leg", legHash);
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())
                 {
-                    paths.Add(reader.GetString(0));
+                    rows.Add((reader.GetInt64(0), reader.GetString(1), (byte[])reader["hash"]));
                 }
             }
 
-            foreach (var rel in paths)
+            foreach (var (id, rel, rowHash) in rows)
             {
                 var abs = AbsolutePath(rel);
-                if (File.Exists(abs)) return abs;
+                if (File.Exists(abs))
+                {
+                    if (!rowHash.AsSpan().SequenceEqual(pxHash))
+                    {
+                        using var up = _db.CreateCommand();
+                        up.CommandText = "UPDATE item SET hash = @px WHERE id = @id";
+                        up.Parameters.AddWithValue("@px", pxHash);
+                        up.Parameters.AddWithValue("@id", id);
+                        up.ExecuteNonQuery();
+                    }
+                    return abs;
+                }
                 RemoveByRelativePath(rel);
             }
             return null;
@@ -979,5 +1079,55 @@ public sealed class History : IDisposable
         {
             Execute($"ALTER TABLE {table} ADD COLUMN {column} {columnType}");
         }
+    }
+
+    private void MigrateLegacyPictureHashesIfNeeded()
+    {
+        long userVer;
+        using (var verCmd = _db.CreateCommand())
+        {
+            verCmd.CommandText = "PRAGMA user_version";
+            userVer = Convert.ToInt64(verCmd.ExecuteScalar() ?? 0L);
+        }
+        if (userVer >= 2) return;
+
+        var rows = new List<(long Id, string Rel)>();
+        using (var q = _db.CreateCommand())
+        {
+            q.CommandText = "SELECT id, path FROM item WHERE shrunk = 0";
+            using var reader = q.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        using var tx = _db.BeginTransaction();
+        foreach (var (id, rel) in rows)
+        {
+            var abs = AbsolutePath(rel);
+            if (!SearchIndex.IsRecognizableImagePath(abs) || !File.Exists(abs)) continue;
+            try
+            {
+                var bytes = File.ReadAllBytes(abs);
+                var pxHash = PictureHash(bytes);
+                using var up = _db.CreateCommand();
+                up.Transaction = tx;
+                up.CommandText = "UPDATE item SET hash = @h WHERE id = @id";
+                up.Parameters.AddWithValue("@h", pxHash);
+                up.Parameters.AddWithValue("@id", id);
+                up.ExecuteNonQuery();
+            }
+            catch (Exception)
+            {
+            }
+        }
+        using (var setVer = _db.CreateCommand())
+        {
+            setVer.Transaction = tx;
+            setVer.CommandText = "PRAGMA user_version = 2";
+            setVer.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 }

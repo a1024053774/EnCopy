@@ -1940,7 +1940,7 @@ public static class Program
             // 3. 双通道协同（系统截图文件夹 + Win+Shift+S 剪贴板，ImagesEnabled=false 但 ScreenshotsEnabled=true）+ 跨编码像素级去重 + 原文件绝不删除
             using var history = new History();
             var line = new Line(history);
-            var clipBackend = new FakeClipboardBackend();
+            var clipBackend = new FakeClipboardBackend { RequireStaOnWriteImage = true };
             var settings = new AppSettings
             {
                 ImagesEnabled = false, // 默认普通复制图片关闭，验证接管截图独立生效
@@ -1956,6 +1956,8 @@ public static class Program
                 onAgain: (p, ts) => line.Use(p, ts));
             clipWatcher.Start();
 
+            // 模拟系统截图目录在启动时尚未创建（Windows 首次截图时才自动新建 Pictures\Screenshots）
+            var lazyCreatedShotsDir = Path.Combine(rootTemp, "LazyCreatedScreenshots");
             using var coordinator = new ScreenshotCoordinator(
                 settings,
                 history,
@@ -1963,23 +1965,75 @@ public static class Program
                 onNewItem: (p, _) => line.AddNew(p),
                 onRepeatedItem: (p, ts) => line.Use(p, ts),
                 onExternalFolderChanged: () => line.PruneMissingFromLine(),
-                systemScreenshotsOverride: fakeSysShots,
+                systemScreenshotsOverride: lazyCreatedShotsDir,
                 systemCapturesOverride: fakeCaptures);
             coordinator.RefreshWatchers();
 
-            // 半截文件 partialPng 在 fakeSysShots 里不应上绳
-            coordinator.TriggerImmediateScanForTest();
-            Check(line.LineItems.Count == 0, "Half-written screenshot in FOLDERID_Screenshots must wait until whole");
+            // 启动后系统首次创建目录并先写入半截文件
+            Directory.CreateDirectory(lazyCreatedShotsDir);
+            partialPng = Path.Combine(lazyCreatedShotsDir, "Screen 01.png");
+            File.WriteAllBytes(partialPng, fullPngBytes[..^6]);
 
-            // 补齐 partialPng 末尾字节使其成为完整 PNG -> 自动复制进 EnCopy\Screenshots\、上绳且 CopyEachScreenshot 写入剪贴板
-            File.WriteAllBytes(partialPng, fullPngBytes);
+            // 半截文件 partialPng 在 lazyCreatedShotsDir 里不应上绳
             coordinator.TriggerImmediateScanForTest();
-            Check(line.LineItems.Count == 1, $"Whole screenshot must hang once on rope, got {line.LineItems.Count}");
+            Check(line.LineItems.Count == 0, "Half-written screenshot in newly created FOLDERID_Screenshots must wait until whole");
+
+            // 补齐完整字节但模拟截图工具短暂独占锁（FileShare.None）：不得因瞬时读取失败被永久标为已知而丢图
+            File.WriteAllBytes(partialPng, fullPngBytes);
+            using (var exclusiveLock = new FileStream(partialPng, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                coordinator.TriggerImmediateScanForTest();
+                Check(line.LineItems.Count == 0, "Exclusively locked screenshot cannot be copied yet and must remain retryable");
+            }
+
+            // 释放独占锁后，走真实异步 FileSystemWatcher/Timer 线程触发（验证 MTA 不会直接调 STA Clipboard 崩溃）
+            File.SetLastWriteTimeUtc(partialPng, DateTime.UtcNow.AddSeconds(1));
+            var asyncDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (line.LineItems.Count == 0 && DateTime.UtcNow < asyncDeadline)
+            {
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => { }));
+                Thread.Sleep(40);
+            }
+            if (line.LineItems.Count == 0)
+            {
+                coordinator.TriggerImmediateScanForTest();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => { }));
+            }
+            Check(line.LineItems.Count == 1, $"Whole screenshot after transient lock & lazy dir creation must hang once on rope, got {line.LineItems.Count}");
             var privateCopyPath = line.LineItems[0].FilePath;
             Check(DataFolder.Contains(privateCopyPath) && File.Exists(privateCopyPath) && File.Exists(partialPng),
                 "Screenshot must be copied into EnCopy\\Screenshots while keeping original untouched");
             Check(clipBackend.LastWrittenImagePath == privateCopyPath,
-                "CopyEachScreenshot=true must copy new screenshot to clipboard");
+                "CopyEachScreenshot=true must copy new screenshot to clipboard on STA thread");
+
+            // 验证旧版字节级 PictureHash ("picture:" + rawBytes) 升级兼容：旧记录再次复制不产生重复副本
+            var legacyPngPath = Path.Combine(DataFolder.ScreenshotsFolder, "Legacy 2026-11-26.png");
+            var legacySampleSrc = Path.Combine(rootTemp, "legacy-src.png");
+            WritePatternPng(legacySampleSrc, 96, 72);
+            File.Copy(legacySampleSrc, legacyPngPath, overwrite: true);
+            var legacyBytes = File.ReadAllBytes(legacyPngPath);
+            history.RecordImage(legacyPngPath, ocrWords: "LEGACY_IMG", pngBytesForHash: legacyBytes, usedAt: DateTime.UtcNow.AddHours(-2));
+            using (var rawDb = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={DataFolder.HistoryDatabasePath}"))
+            {
+                rawDb.Open();
+                using var cmd = rawDb.CreateCommand();
+                var oldPrefix = "picture:"u8.ToArray();
+                var oldBuf = new byte[oldPrefix.Length + legacyBytes.Length];
+                Buffer.BlockCopy(oldPrefix, 0, oldBuf, 0, oldPrefix.Length);
+                Buffer.BlockCopy(legacyBytes, 0, oldBuf, oldPrefix.Length, legacyBytes.Length);
+                var oldByteHash = System.Security.Cryptography.SHA256.HashData(oldBuf);
+                cmd.CommandText = "UPDATE item SET hash = @h WHERE path LIKE 'Screenshots/Legacy%'";
+                cmd.Parameters.AddWithValue("@h", oldByteHash);
+                cmd.ExecuteNonQuery();
+            }
+            Check(string.Equals(history.FindPictureHolding(legacyBytes), legacyPngPath, StringComparison.OrdinalIgnoreCase),
+                "Legacy byte-hashed image in History.sqlite must still match FindPictureHolding after upgrade");
+            history.Remove(legacyPngPath);
+            File.Delete(legacyPngPath);
 
             // 同一张截图同时经由 Win+Shift+S（ScreenClippingHost.exe）写入剪贴板，即使 PNG 块字节不同（插入额外元数据块），像素一致也必须合并为同一件不挂双份
             var differentlyEncodedSamePixels = InjectPngTextChunk(fullPngBytes, "Software", "SnippingTool");
@@ -2446,8 +2500,14 @@ public static class Program
             return true;
         }
 
+        public bool RequireStaOnWriteImage { get; set; }
+
         public bool TryWriteImage(string imagePath)
         {
+            if (RequireStaOnWriteImage && Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            {
+                throw new ThreadStateException("Clipboard image write invoked on non-STA thread!");
+            }
             SequenceNumber++;
             LastWrittenImagePath = imagePath;
             _current = new ClipboardSnapshot(SequenceNumber, ContainsSelfCopy: true, ContainsFiles: false, IsPrivacyBlocked: false, null, null);

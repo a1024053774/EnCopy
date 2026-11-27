@@ -33,6 +33,7 @@ public partial class App : Application
     private SettingsWindow? _settingsWindow;
     private CleanupWindow? _cleanupWindow;
     private OnboardingWindow? _onboardingWindow;
+    private bool _onboardingPending;
     private DispatcherTimer? _topHoverTimer;
     private DispatcherTimer? _expiryTimer;
     private readonly TopEdgeHoverTracker _hoverTracker = new();
@@ -65,6 +66,7 @@ public partial class App : Application
 
         _settingsStore = new SettingsStore();
         _settings = _settingsStore.Load();
+        _onboardingPending = !_settings.RecordingExplained && !IsInChecksRunner();
         _history = new History();
         _line = new Line(_history, keepOnLine: _settings.NormalizedKeepOnLine)
         {
@@ -95,7 +97,8 @@ public partial class App : Application
             _history,
             _settings,
             onNew: HandleNewCopiedItem,
-            onAgain: HandleRepeatedCopiedItem);
+            onAgain: HandleRepeatedCopiedItem,
+            isOnboardingPending: () => _onboardingPending);
         if (_clipboardWatcher.IsEnabled)
         {
             _clipboardWatcher.Start();
@@ -105,16 +108,11 @@ public partial class App : Application
             _settings,
             _history,
             _clipboardBackend,
-            onNewItem: (path, _) => Dispatcher.BeginInvoke(
-                DispatcherPriority.Normal,
-                new Action(() => HandleNewCopiedItem(path))),
-            onRepeatedItem: (path, stampUtc) => Dispatcher.BeginInvoke(
-                DispatcherPriority.Normal,
-                new Action(() => HandleRepeatedCopiedItem(path, stampUtc))),
-            onExternalFolderChanged: () => Dispatcher.BeginInvoke(
-                DispatcherPriority.Background,
-                new Action(() => _line?.PruneMissingFromLine())),
-            isDesktopSaveGuard: path => _line?.IsSavedToDesktopPath(path) == true);
+            onNewItem: (path, _) => HandleNewCopiedItem(path),
+            onRepeatedItem: (path, stampUtc) => HandleRepeatedCopiedItem(path, stampUtc),
+            onExternalFolderChanged: () => _line?.PruneMissingFromLine(),
+            isDesktopSaveGuard: path => _line?.IsSavedToDesktopPath(path) == true,
+            isOnboardingPending: () => _onboardingPending);
         _screenshotCoordinator.RefreshWatchers();
 
         _pasteHint = new PasteHint();
@@ -452,13 +450,23 @@ public partial class App : Application
             _line.Theme,
             (paused, openAtLogin) =>
             {
+                _onboardingPending = false;
                 _settings.RecordingExplained = true;
                 _settings.RecordingPaused = paused;
                 LaunchAtLogin.SetEnabled(openAtLogin);
                 SaveAndApplySettings();
             },
             screenshotsEnabled => _settings.ScreenshotsEnabled = screenshotsEnabled);
-        _onboardingWindow.Closed += (_, _) => _onboardingWindow = null;
+        _onboardingWindow.Closed += (_, _) =>
+        {
+            _onboardingWindow = null;
+            if (_onboardingPending)
+            {
+                _onboardingPending = false;
+                _settings.RecordingExplained = true;
+                SaveAndApplySettings();
+            }
+        };
         _onboardingWindow.Show();
         _onboardingWindow.Activate();
     }

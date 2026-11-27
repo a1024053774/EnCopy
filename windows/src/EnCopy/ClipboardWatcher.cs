@@ -76,6 +76,7 @@ public sealed class ClipboardWatcher : IDisposable
     private readonly AppSettings _settings;
     private readonly Action<string> _onNew;
     private readonly Action<string, DateTime> _onAgain;
+    private readonly Func<bool>? _isOnboardingPending;
 
     private uint _lastSequence;
     private bool _started;
@@ -86,13 +87,15 @@ public sealed class ClipboardWatcher : IDisposable
         History history,
         AppSettings settings,
         Action<string> onNew,
-        Action<string, DateTime> onAgain)
+        Action<string, DateTime> onAgain,
+        Func<bool>? isOnboardingPending = null)
     {
         _backend = backend;
         _history = history;
         _settings = settings;
         _onNew = onNew;
         _onAgain = onAgain;
+        _isOnboardingPending = isOnboardingPending;
         _lastSequence = backend.SequenceNumber;
     }
 
@@ -264,7 +267,8 @@ public sealed class ClipboardWatcher : IDisposable
         if (snap.PngBytes is { Length: > 0 and <= MaxImageBytes } pngBytes)
         {
             bool isSysShot = IsSystemScreenshotSource(appId);
-            if (_settings.ImagesEnabled || (_settings.ScreenshotsEnabled && isSysShot))
+            bool allowScreenshotTakeover = _settings.ScreenshotsEnabled && (_isOnboardingPending?.Invoke() != true);
+            if (_settings.ImagesEnabled || (allowScreenshotTakeover && isSysShot))
             {
                 SaveCopiedImage(pngBytes, appId, baseTtl, isScreenshotCapture: isSysShot);
             }
@@ -320,44 +324,26 @@ public sealed class ClipboardWatcher : IDisposable
     {
         if (!Win32ClipboardBackend.IsSanePngImage(pngBytes)) return;
 
-        if (_history.FindPictureHolding(pngBytes) is { } existingImg)
-        {
-            var prevUsedUtc = _history.LastUsedUtcOf(existingImg);
-            if (isScreenshotCapture && prevUsedUtc.HasValue &&
-                (DateTime.UtcNow - prevUsedUtc.Value).TotalSeconds <= ScreenshotCoordinator.TwinChannelDedupWindowSeconds)
-            {
-                // 系统截图目录与 Win+Shift+S 剪贴板双通道同时送达同一张截图时合并去重，不重复弹跳
-                _history.SetApp(existingImg, appId);
-                return;
-            }
-
-            var stamp = NextMonotonicUtc();
-            _history.SetApp(existingImg, appId);
-            _history.RenewTtl(existingImg, ttlSeconds);
-            _onAgain(existingImg, stamp);
-            return;
-        }
-
-        var folder = DataFolder.ScreenshotsFolder;
-        Directory.CreateDirectory(folder);
-
-        var filePrefix = isScreenshotCapture ? "Screenshot" : "Clipboard";
-        var stampName = DateTime.Now.ToString("yyyy-MM-dd 'at' HH.mm.ss", System.Globalization.CultureInfo.InvariantCulture);
-        var path = Path.Combine(folder, $"{filePrefix} {stampName}.png");
-        int n = 2;
-        while (File.Exists(path))
-        {
-            path = Path.Combine(folder, $"{filePrefix} {stampName} {n}.png");
-            n++;
-        }
-
-        var tmp = path + ".tmp";
-        File.WriteAllBytes(tmp, pngBytes);
-        File.Move(tmp, path, overwrite: false);
-
         var monotonicUtc = NextMonotonicUtc();
-        _history.RecordImage(path, ocrWords: null, pngBytesForHash: pngBytes, usedAt: monotonicUtc, appName: appId, ttlSeconds: ttlSeconds);
-        _onNew(path);
+        var filePrefix = isScreenshotCapture ? "Screenshot" : "Clipboard";
+        var outcome = _history.IngestPrivateImage(
+            pngBytes,
+            filePrefix,
+            ".png",
+            monotonicUtc,
+            appId,
+            ttlSeconds,
+            isScreenshotCapture ? ScreenshotCoordinator.TwinChannelDedupWindowSeconds : 0.0);
+        if (outcome is null) return;
+
+        if (outcome.IsNewFile)
+        {
+            _onNew(outcome.FullPath);
+        }
+        else if (!outcome.MergedWithinTwinWindow)
+        {
+            _onAgain(outcome.FullPath, monotonicUtc);
+        }
     }
 
     private DateTime NextMonotonicUtc()

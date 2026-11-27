@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Threading;
 
 namespace EnCopy;
 
@@ -53,7 +54,7 @@ public static class ScreenshotFolders
 }
 
 /// <summary>
-/// 监测单个目录中的新图片（及可选录屏），通过格式尾字节完整性检查确保刚写入的大图完全落盘后才触发回调（对齐 Mac 版 ScreenshotWatcher.swift，T-063）。
+/// 监测单个目录中的新图片（及可选录屏），通过格式尾字节完整性检查确保刚写入的大图完全落盘且成功消费后才记为已处理（T-063）。
 /// </summary>
 public sealed class ScreenshotWatcher : IDisposable
 {
@@ -69,7 +70,8 @@ public sealed class ScreenshotWatcher : IDisposable
 
     private readonly string _folderPath;
     private readonly bool _acceptRecordings;
-    private readonly Action<string> _onNewFile;
+    private readonly bool _adoptExistingAsBaseline;
+    private readonly Func<string, bool> _tryConsumeFile;
     private readonly Action? _onFolderChanged;
     private readonly object _sync = new();
     private readonly Dictionary<string, long> _unfinishedSizes = new(StringComparer.OrdinalIgnoreCase);
@@ -87,12 +89,18 @@ public sealed class ScreenshotWatcher : IDisposable
 
     public string FolderPath => _folderPath;
 
-    public ScreenshotWatcher(string folderPath, bool acceptRecordings, Action<string> onNewFile, Action? onFolderChanged = null)
+    public ScreenshotWatcher(
+        string folderPath,
+        bool acceptRecordings,
+        Func<string, bool> tryConsumeFile,
+        Action? onFolderChanged = null,
+        bool adoptExistingAsBaseline = true)
     {
         _folderPath = Path.GetFullPath(folderPath);
         _acceptRecordings = acceptRecordings;
-        _onNewFile = onNewFile;
+        _tryConsumeFile = tryConsumeFile;
         _onFolderChanged = onFolderChanged;
+        _adoptExistingAsBaseline = adoptExistingAsBaseline;
     }
 
     public static bool IsWholeFile(string path, long currentSize, long? previousSize = null)
@@ -171,32 +179,41 @@ public sealed class ScreenshotWatcher : IDisposable
 
     public void Start()
     {
+        bool scanInitialNew = false;
         lock (_sync)
         {
             if (_disposed || _fsw is not null) return;
             _stopped = false;
             if (!Directory.Exists(_folderPath)) return;
 
-            // 启动瞬间仅将已完整落盘的存量文件纳入基线，正在写入中的半截新图留待写完后挂上绳
-            var existing = EnumerateCandidatesSafe(_folderPath, _acceptRecordings);
             _knownPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var nowUtc = DateTime.UtcNow;
-            foreach (var f in existing)
+            if (_adoptExistingAsBaseline)
             {
-                long sz = SafeFileLength(f);
-                if (sz > 0 && IsWholeFile(f, sz, sz))
+                // 启动瞬间仅将已完整落盘的存量文件纳入基线，正在写入中的半截新图留待写完后挂上绳
+                var existing = EnumerateCandidatesSafe(_folderPath, _acceptRecordings);
+                var nowUtc = DateTime.UtcNow;
+                foreach (var f in existing)
                 {
-                    _knownPaths.Add(f);
+                    long sz = SafeFileLength(f);
+                    if (sz > 0 && IsWholeFile(f, sz, sz))
+                    {
+                        _knownPaths.Add(f);
+                    }
+                    else if (sz >= 0)
+                    {
+                        _unfinishedSizes[f] = sz;
+                        _firstSeenUtc[f] = nowUtc;
+                    }
                 }
-                else if (sz >= 0)
+                if (_unfinishedSizes.Count > 0)
                 {
-                    _unfinishedSizes[f] = sz;
-                    _firstSeenUtc[f] = nowUtc;
+                    ScheduleUnfinishedCheck();
                 }
             }
-            if (_unfinishedSizes.Count > 0)
+            else
             {
-                ScheduleUnfinishedCheck();
+                // 运行期间由系统刚新建出的截图目录（如首次截图才创建的 Pictures\Screenshots），目录内首张图属于新截图
+                scanInitialNew = true;
             }
 
             try
@@ -217,6 +234,11 @@ public sealed class ScreenshotWatcher : IDisposable
             {
                 _fsw = null;
             }
+        }
+
+        if (scanInitialNew)
+        {
+            RunScanPass();
         }
     }
 
@@ -283,7 +305,6 @@ public sealed class ScreenshotWatcher : IDisposable
 
             _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            // 若已知文件被外部移走或删除，同步移出基线并通知上层刷新
             int beforeKnown = _knownPaths.Count;
             _knownPaths.IntersectWith(currentSet);
             if (_knownPaths.Count != beforeKnown)
@@ -323,15 +344,17 @@ public sealed class ScreenshotWatcher : IDisposable
 
     private void EvaluateCandidates(IReadOnlyList<string> paths)
     {
-        var ready = new List<string>();
+        var wholeCandidates = new List<(string Path, long Size, DateTime FirstSeen)>();
         var nowUtc = DateTime.UtcNow;
 
         lock (_sync)
         {
             if (_stopped || _disposed) return;
+            _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var path in paths)
             {
+                if (_knownPaths.Contains(path)) continue;
                 if (!File.Exists(path))
                 {
                     _unfinishedSizes.Remove(path);
@@ -339,28 +362,15 @@ public sealed class ScreenshotWatcher : IDisposable
                     continue;
                 }
 
-                long size;
-                try
-                {
-                    size = new FileInfo(path).Length;
-                }
-                catch (IOException)
-                {
-                    continue;
-                }
+                long size = SafeFileLength(path);
+                if (size < 0) continue;
 
                 long? prev = _unfinishedSizes.TryGetValue(path, out var oldSize) ? oldSize : null;
                 var since = _firstSeenUtc.TryGetValue(path, out var first) ? first : nowUtc;
 
                 if (IsWholeFile(path, size, prev))
                 {
-                    _unfinishedSizes.Remove(path);
-                    _firstSeenUtc.Remove(path);
-                    _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    if (_knownPaths.Add(path))
-                    {
-                        ready.Add(path);
-                    }
+                    wholeCandidates.Add((path, size, since));
                 }
                 else if ((nowUtc - since).TotalSeconds < 600.0)
                 {
@@ -371,20 +381,54 @@ public sealed class ScreenshotWatcher : IDisposable
                 {
                     _unfinishedSizes.Remove(path);
                     _firstSeenUtc.Remove(path);
-                    _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     _knownPaths.Add(path);
                 }
             }
+        }
 
+        foreach (var (path, size, since) in wholeCandidates)
+        {
+            // 仅在真正成功读取与入库后才记入 _knownPaths；若遇瞬时文件锁占用返回 false，则留在待重试表等待下轮扫描
+            bool consumed = false;
+            try
+            {
+                consumed = _tryConsumeFile(path);
+            }
+            catch (Exception)
+            {
+                consumed = false;
+            }
+
+            lock (_sync)
+            {
+                if (_stopped || _disposed) return;
+                _knownPaths ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (consumed)
+                {
+                    _unfinishedSizes.Remove(path);
+                    _firstSeenUtc.Remove(path);
+                    _knownPaths.Add(path);
+                }
+                else if ((DateTime.UtcNow - since).TotalSeconds < 600.0)
+                {
+                    _unfinishedSizes[path] = size;
+                    _firstSeenUtc[path] = since;
+                }
+                else
+                {
+                    _unfinishedSizes.Remove(path);
+                    _firstSeenUtc.Remove(path);
+                    _knownPaths.Add(path);
+                }
+            }
+        }
+
+        lock (_sync)
+        {
             if (_unfinishedSizes.Count > 0)
             {
                 ScheduleUnfinishedCheck();
             }
-        }
-
-        foreach (var path in ready)
-        {
-            _onNewFile(path);
         }
     }
 
@@ -441,12 +485,14 @@ public sealed class ScreenshotWatcher : IDisposable
 }
 
 /// <summary>
-/// 统一编排系统截图目录（FOLDERID_Screenshots + FOLDERID_Captures，复制进 EnCopy\Screenshots\ 且原文件不动、按像素哈希去重）
-/// 与最多 3 个自定义监视文件夹（直接挂上绳、取下时不删原文件）。
+/// 统一编排系统截图目录（FOLDERID_Screenshots + FOLDERID_Captures，复制进 EnCopy\Screenshots\ 且原文件不动、按像素哈希原子去重）
+/// 与最多 3 个自定义监视文件夹（直接挂上绳、取下时不删原文件）；支持延迟创建的系统目录自动恢复与 STA 剪贴板编组。
 /// </summary>
 public sealed class ScreenshotCoordinator : IDisposable
 {
     public const double TwinChannelDedupWindowSeconds = 4.0;
+
+    private sealed record PendingDirSpec(string FullDir, bool AcceptRecordings, bool CopyToPrivateFolder);
 
     private readonly AppSettings _settings;
     private readonly History _history;
@@ -455,10 +501,15 @@ public sealed class ScreenshotCoordinator : IDisposable
     private readonly Action<string, DateTime> _onRepeatedItem;
     private readonly Action? _onExternalFolderChanged;
     private readonly Func<string, bool>? _isDesktopSaveGuard;
+    private readonly Func<bool>? _isOnboardingPending;
     private readonly string? _systemScreenshotsOverride;
     private readonly string? _systemCapturesOverride;
+    private readonly Dispatcher? _ownerDispatcher;
     private readonly object _gate = new();
     private readonly List<ScreenshotWatcher> _watchers = [];
+    private readonly List<FileSystemWatcher> _parentWatchers = [];
+    private readonly List<PendingDirSpec> _pendingDirs = [];
+    private readonly HashSet<string> _activeWatchedDirs = new(StringComparer.OrdinalIgnoreCase);
 
     private DateTime _lastMonotonicUtc = DateTime.MinValue;
     private bool _disposed;
@@ -472,7 +523,8 @@ public sealed class ScreenshotCoordinator : IDisposable
         Action? onExternalFolderChanged = null,
         string? systemScreenshotsOverride = null,
         string? systemCapturesOverride = null,
-        Func<string, bool>? isDesktopSaveGuard = null)
+        Func<string, bool>? isDesktopSaveGuard = null,
+        Func<bool>? isOnboardingPending = null)
     {
         _settings = settings;
         _history = history;
@@ -483,6 +535,8 @@ public sealed class ScreenshotCoordinator : IDisposable
         _systemScreenshotsOverride = systemScreenshotsOverride;
         _systemCapturesOverride = systemCapturesOverride;
         _isDesktopSaveGuard = isDesktopSaveGuard;
+        _isOnboardingPending = isOnboardingPending;
+        _ownerDispatcher = Dispatcher.FromThread(Thread.CurrentThread);
     }
 
     public void RefreshWatchers()
@@ -492,28 +546,30 @@ public sealed class ScreenshotCoordinator : IDisposable
             if (_disposed) return;
             StopAllUnlocked();
 
-            if (_settings.RecordingPaused) return;
-
-            var watchedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (_settings.RecordingPaused || _isOnboardingPending?.Invoke() == true)
+            {
+                return;
+            }
 
             if (_settings.ScreenshotsEnabled)
             {
                 var shotsDir = _systemScreenshotsOverride ?? ScreenshotFolders.GetSystemScreenshotsFolder();
-                TryStartOneUnlocked(shotsDir, acceptRecordings: false, copyToPrivateFolder: true, watchedDirs);
+                RegisterOrDeferDirUnlocked(shotsDir, acceptRecordings: false, copyToPrivateFolder: true);
 
                 var capturesDir = _systemCapturesOverride ?? ScreenshotFolders.GetSystemCapturesFolder();
-                TryStartOneUnlocked(capturesDir, acceptRecordings: true, copyToPrivateFolder: true, watchedDirs);
+                RegisterOrDeferDirUnlocked(capturesDir, acceptRecordings: true, copyToPrivateFolder: true);
             }
 
             foreach (var customDir in _settings.NormalizedWatchedFolders)
             {
-                TryStartOneUnlocked(customDir, acceptRecordings: false, copyToPrivateFolder: false, watchedDirs);
+                RegisterOrDeferDirUnlocked(customDir, acceptRecordings: false, copyToPrivateFolder: false);
             }
         }
     }
 
     public void TriggerImmediateScanForTest()
     {
+        PromotePendingDirectories();
         ScreenshotWatcher[] snapshot;
         lock (_gate)
         {
@@ -525,9 +581,9 @@ public sealed class ScreenshotCoordinator : IDisposable
         }
     }
 
-    private void TryStartOneUnlocked(string? rawDir, bool acceptRecordings, bool copyToPrivateFolder, HashSet<string> watchedDirs)
+    private void RegisterOrDeferDirUnlocked(string? rawDir, bool acceptRecordings, bool copyToPrivateFolder)
     {
-        if (string.IsNullOrWhiteSpace(rawDir) || !Directory.Exists(rawDir)) return;
+        if (string.IsNullOrWhiteSpace(rawDir)) return;
         string fullDir;
         try
         {
@@ -538,103 +594,244 @@ public sealed class ScreenshotCoordinator : IDisposable
             return;
         }
 
-        // 绝不监视 EnCopy 自己的私有目录，避免复制副本触发循环
-        if (DataFolder.Contains(fullDir) || !watchedDirs.Add(fullDir))
+        if (DataFolder.Contains(fullDir) || _activeWatchedDirs.Contains(fullDir))
         {
             return;
         }
 
-        var watcher = new ScreenshotWatcher(
-            fullDir,
-            acceptRecordings,
-            onNewFile: path => HandleDetectedFile(path, copyToPrivateFolder),
-            onFolderChanged: _onExternalFolderChanged);
-        watcher.Start();
-        _watchers.Add(watcher);
-    }
-
-    private void HandleDetectedFile(string sourcePath, bool copyToPrivateFolder)
-    {
-        if (_settings.RecordingPaused || !File.Exists(sourcePath)) return;
-        if (_isDesktopSaveGuard is not null && _isDesktopSaveGuard(sourcePath)) return;
-
-        lock (_gate)
+        if (Directory.Exists(fullDir))
         {
-            if (_disposed || !File.Exists(sourcePath)) return;
+            StartWatcherUnlocked(fullDir, acceptRecordings, copyToPrivateFolder, adoptExistingAsBaseline: true);
+            return;
+        }
 
-            if (!copyToPrivateFolder)
-            {
-                // 自定义监视文件夹：原位引用挂上绳，取下时不删原文件
-                byte[]? extBytes = TryReadBytesShared(sourcePath);
-                var stamp = NextMonotonicUtc();
-                bool alreadyKnown = _history.Contains(sourcePath);
-                _history.RecordImage(sourcePath, ocrWords: null, pngBytesForHash: extBytes, usedAt: stamp, appName: null, ttlSeconds: null);
-                if (alreadyKnown) _onRepeatedItem(sourcePath, stamp);
-                else _onNewItem(sourcePath, false);
-                return;
-            }
+        // 目录暂不存在（例如全新系统尚未产生首张截图时的 Pictures\Screenshots）：监听其最近已存在的父目录并在出现时自动挂载
+        if (_pendingDirs.Any(p => string.Equals(p.FullDir, fullDir, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+        _pendingDirs.Add(new PendingDirSpec(fullDir, acceptRecordings, copyToPrivateFolder));
 
-            bool isVideo = ScreenshotWatcher.IsRecordingPath(sourcePath);
-            byte[]? rawBytes = isVideo ? null : TryReadBytesShared(sourcePath);
-            if (!isVideo && rawBytes is null) return;
-
-            if (rawBytes is not null && _history.FindPictureHolding(rawBytes) is { } existingPath)
-            {
-                // 双通道协同去重：若 Win+Shift+S 剪贴板通道刚刚（4 秒内）存入同一像素图片，静默合并为同一件
-                var prevUsedUtc = _history.LastUsedUtcOf(existingPath);
-                if (prevUsedUtc.HasValue && (DateTime.UtcNow - prevUsedUtc.Value).TotalSeconds <= TwinChannelDedupWindowSeconds)
-                {
-                    if (_settings.CopyEachScreenshot && !isVideo)
-                    {
-                        _clipboardBackend.TryWriteImage(existingPath);
-                    }
-                    return;
-                }
-
-                var repeatStamp = NextMonotonicUtc();
-                _onRepeatedItem(existingPath, repeatStamp);
-                return;
-            }
-
-            Directory.CreateDirectory(DataFolder.ScreenshotsFolder);
-            var ext = Path.GetExtension(sourcePath);
-            if (string.IsNullOrEmpty(ext)) ext = ".png";
-            var stampName = DateTime.Now.ToString("yyyy-MM-dd 'at' HH.mm.ss", CultureInfo.InvariantCulture);
-            var destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"Screenshot {stampName}{ext}");
-            int n = 2;
-            while (File.Exists(destPath))
-            {
-                destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"Screenshot {stampName} {n}{ext}");
-                n++;
-            }
-
+        var ancestor = FindExistingAncestor(fullDir);
+        if (!string.IsNullOrEmpty(ancestor))
+        {
             try
             {
-                var tmp = destPath + ".tmp";
-                File.Copy(sourcePath, tmp, overwrite: true);
-                File.Move(tmp, destPath, overwrite: false);
+                var pw = new FileSystemWatcher(ancestor)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.DirectoryName
+                };
+                pw.Created += (_, _) => PromotePendingDirectories();
+                pw.Renamed += (_, _) => PromotePendingDirectories();
+                pw.EnableRaisingEvents = true;
+                _parentWatchers.Add(pw);
             }
-            catch (IOException)
+            catch (Exception)
             {
-                return;
             }
-
-            var recordedUtc = NextMonotonicUtc();
-            _history.RecordImage(destPath, ocrWords: null, pngBytesForHash: rawBytes, usedAt: recordedUtc, appName: null, ttlSeconds: null);
-            if (_settings.CopyEachScreenshot && !isVideo)
-            {
-                _clipboardBackend.TryWriteImage(destPath);
-            }
-            _onNewItem(destPath, true);
         }
     }
 
-    private static byte[]? TryReadBytesShared(string path)
+    private static string? FindExistingAncestor(string path)
     {
+        var cur = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(cur))
+        {
+            if (Directory.Exists(cur)) return cur;
+            cur = Path.GetDirectoryName(cur);
+        }
+        return null;
+    }
+
+    private void PromotePendingDirectories()
+    {
+        List<ScreenshotWatcher> newlyStarted = [];
+        lock (_gate)
+        {
+            if (_disposed || _pendingDirs.Count == 0) return;
+
+            for (int i = _pendingDirs.Count - 1; i >= 0; i--)
+            {
+                var spec = _pendingDirs[i];
+                if (Directory.Exists(spec.FullDir))
+                {
+                    _pendingDirs.RemoveAt(i);
+                    var w = CreateWatcherUnlocked(spec.FullDir, spec.AcceptRecordings, spec.CopyToPrivateFolder, adoptExistingAsBaseline: false);
+                    if (w is not null)
+                    {
+                        newlyStarted.Add(w);
+                    }
+                }
+            }
+        }
+
+        foreach (var w in newlyStarted)
+        {
+            w.Start();
+        }
+    }
+
+    private void StartWatcherUnlocked(string fullDir, bool acceptRecordings, bool copyToPrivateFolder, bool adoptExistingAsBaseline)
+    {
+        var w = CreateWatcherUnlocked(fullDir, acceptRecordings, copyToPrivateFolder, adoptExistingAsBaseline);
+        w?.Start();
+    }
+
+    private ScreenshotWatcher? CreateWatcherUnlocked(string fullDir, bool acceptRecordings, bool copyToPrivateFolder, bool adoptExistingAsBaseline)
+    {
+        if (!_activeWatchedDirs.Add(fullDir)) return null;
+        var watcher = new ScreenshotWatcher(
+            fullDir,
+            acceptRecordings,
+            tryConsumeFile: path => TryConsumeDetectedFile(path, copyToPrivateFolder),
+            onFolderChanged: () => MarshalToSta(() => _onExternalFolderChanged?.Invoke()),
+            adoptExistingAsBaseline: adoptExistingAsBaseline);
+        _watchers.Add(watcher);
+        return watcher;
+    }
+
+    private bool TryConsumeDetectedFile(string sourcePath, bool copyToPrivateFolder)
+    {
+        if (_settings.RecordingPaused || _isOnboardingPending?.Invoke() == true)
+        {
+            return false;
+        }
+        if (!File.Exists(sourcePath))
+        {
+            return true;
+        }
+        if (_isDesktopSaveGuard is not null && _isDesktopSaveGuard(sourcePath))
+        {
+            return true;
+        }
+
+        lock (_gate)
+        {
+            if (_disposed) return false;
+            if (!File.Exists(sourcePath)) return true;
+
+            if (!copyToPrivateFolder)
+            {
+                // 自定义监视文件夹：先确认文件可非独占打开读取，原位引用挂上绳，取下时不删原文件
+                if (!CanOpenForSharedRead(sourcePath, out var extBytes))
+                {
+                    return false;
+                }
+                var stamp = NextMonotonicUtc();
+                bool alreadyKnown = _history.Contains(sourcePath);
+                _history.RecordImage(sourcePath, ocrWords: null, pngBytesForHash: extBytes, usedAt: stamp, appName: null, ttlSeconds: null);
+                MarshalToSta(() =>
+                {
+                    if (alreadyKnown) _onRepeatedItem(sourcePath, stamp);
+                    else _onNewItem(sourcePath, false);
+                });
+                return true;
+            }
+
+            bool isVideo = ScreenshotWatcher.IsRecordingPath(sourcePath);
+            if (isVideo)
+            {
+                Directory.CreateDirectory(DataFolder.ScreenshotsFolder);
+                var ext = Path.GetExtension(sourcePath);
+                if (string.IsNullOrEmpty(ext)) ext = ".mp4";
+                var stampName = DateTime.Now.ToString("yyyy-MM-dd 'at' HH.mm.ss", CultureInfo.InvariantCulture);
+                var destVideo = Path.Combine(DataFolder.ScreenshotsFolder, $"Screenshot {stampName}{ext}");
+                int n = 2;
+                while (File.Exists(destVideo))
+                {
+                    destVideo = Path.Combine(DataFolder.ScreenshotsFolder, $"Screenshot {stampName} {n}{ext}");
+                    n++;
+                }
+                try
+                {
+                    var tmp = destVideo + ".tmp";
+                    File.Copy(sourcePath, tmp, overwrite: true);
+                    File.Move(tmp, destVideo, overwrite: false);
+                }
+                catch (IOException)
+                {
+                    return false;
+                }
+
+                var vidUtc = NextMonotonicUtc();
+                _history.RecordImage(destVideo, ocrWords: null, pngBytesForHash: null, usedAt: vidUtc, appName: null, ttlSeconds: null);
+                MarshalToSta(() => _onNewItem(destVideo, true));
+                return true;
+            }
+
+            if (!CanOpenForSharedRead(sourcePath, out var rawBytes) || rawBytes is null)
+            {
+                return false;
+            }
+
+            var recordedUtc = NextMonotonicUtc();
+            var extImg = Path.GetExtension(sourcePath);
+            var outcome = _history.IngestPrivateImage(
+                rawBytes,
+                "Screenshot",
+                string.IsNullOrEmpty(extImg) ? ".png" : extImg,
+                recordedUtc,
+                appName: null,
+                ttlSeconds: null,
+                TwinChannelDedupWindowSeconds);
+            if (outcome is null)
+            {
+                return false;
+            }
+
+            bool copyClip = _settings.CopyEachScreenshot;
+            MarshalToSta(() =>
+            {
+                if (copyClip)
+                {
+                    _clipboardBackend.TryWriteImage(outcome.FullPath);
+                }
+                if (outcome.IsNewFile)
+                {
+                    _onNewItem(outcome.FullPath, true);
+                }
+                else if (!outcome.MergedWithinTwinWindow)
+                {
+                    _onRepeatedItem(outcome.FullPath, recordedUtc);
+                }
+            });
+            return true;
+        }
+    }
+
+    private void MarshalToSta(Action work)
+    {
+        if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA &&
+            (_ownerDispatcher is null || _ownerDispatcher.CheckAccess()))
+        {
+            work();
+            return;
+        }
+
+        if (_ownerDispatcher is not null && !_ownerDispatcher.HasShutdownStarted && !_ownerDispatcher.HasShutdownFinished)
+        {
+            _ownerDispatcher.BeginInvoke(DispatcherPriority.Normal, work);
+            return;
+        }
+
+        var t = new Thread(() => work()) { IsBackground = true };
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        t.Join();
+    }
+
+    private static bool CanOpenForSharedRead(string path, out byte[]? bytes)
+    {
+        bytes = null;
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (fs.Length <= 0 || fs.Length > 128L * 1024 * 1024) return null;
+            if (fs.Length <= 0) return false;
+            if (fs.Length > 128L * 1024 * 1024)
+            {
+                return true;
+            }
             var buf = new byte[fs.Length];
             int offset = 0;
             while (offset < buf.Length)
@@ -643,11 +840,16 @@ public sealed class ScreenshotCoordinator : IDisposable
                 if (r <= 0) break;
                 offset += r;
             }
-            return offset == buf.Length ? buf : buf[..offset];
+            bytes = offset == buf.Length ? buf : buf[..offset];
+            return true;
         }
-        catch (Exception)
+        catch (IOException)
         {
-            return null;
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
@@ -664,6 +866,15 @@ public sealed class ScreenshotCoordinator : IDisposable
 
     private void StopAllUnlocked()
     {
+        foreach (var pw in _parentWatchers)
+        {
+            try { pw.EnableRaisingEvents = false; } catch { }
+            pw.Dispose();
+        }
+        _parentWatchers.Clear();
+        _pendingDirs.Clear();
+        _activeWatchedDirs.Clear();
+
         foreach (var w in _watchers)
         {
             w.Dispose();
