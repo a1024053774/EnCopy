@@ -76,7 +76,6 @@ public partial class App : Application
         _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(initialStrip.Width));
 
         _line.ClearExpired();
-        RunRetentionIfDue();
 
         _searchIndex = new SearchIndex(
             _history,
@@ -84,6 +83,7 @@ public partial class App : Application
                 DispatcherPriority.Background,
                 new Action(() => _line?.RefreshAfterIndexUpdate())));
         _searchIndex.ScanUnindexedImages();
+        RunRetentionIfDue();
 
         _heldManager = new HeldWindowManager();
         _shareService = new WindowsShareService();
@@ -235,6 +235,7 @@ public partial class App : Application
     private void HandleRepeatedCopiedItem(string path, DateTime stampUtc)
     {
         if (_line is null) return;
+        _searchIndex?.Enqueue(path);
         _line.Use(path, stampUtc);
         if (_panel is not { IsSummoned: true })
         {

@@ -26,7 +26,7 @@ public sealed record OcrLanguageStatus(
 public interface IOcrBackend
 {
     IReadOnlyList<string> GetInstalledLanguageTags();
-    Task<string> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default);
+    Task<string?> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default);
 }
 
 public static class OcrLanguageResolver
@@ -74,6 +74,20 @@ public static class OcrLanguageResolver
         }
     }
 
+    public static string BuildLanguageSignature(IReadOnlyList<string> installedLanguageTags)
+    {
+        var status = Resolve(installedLanguageTags);
+        if (!status.HasAnyEngine || string.IsNullOrWhiteSpace(status.ActiveLanguageTag))
+        {
+            return "none";
+        }
+        bool hasSupplementalEn = status.ActiveLanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase) &&
+            installedLanguageTags.Any(t => t.StartsWith("en", StringComparison.OrdinalIgnoreCase));
+        return hasSupplementalEn
+            ? $"{status.ActiveLanguageTag.ToLowerInvariant()}+en"
+            : status.ActiveLanguageTag.ToLowerInvariant();
+    }
+
     private static bool IsSimplifiedChineseTag(string tag)
     {
         if (string.IsNullOrWhiteSpace(tag)) return false;
@@ -107,35 +121,11 @@ public sealed class WinRtOcrBackend : IOcrBackend
         }
     }
 
-    public async Task<string> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default)
+    public async Task<string?> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
         {
-            return string.Empty;
-        }
-
-        byte[] rawBytes;
-        try
-        {
-            using var fs = new FileStream(imagePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (fs.Length <= 0 || fs.Length > 64L * 1024 * 1024) return string.Empty;
-            rawBytes = new byte[fs.Length];
-            int offset = 0;
-            while (offset < rawBytes.Length)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                int read = await fs.ReadAsync(rawBytes.AsMemory(offset, rawBytes.Length - offset), cancellationToken).ConfigureAwait(false);
-                if (read <= 0) break;
-                offset += read;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception)
-        {
-            return string.Empty;
+            return null;
         }
 
         try
@@ -161,55 +151,72 @@ public sealed class WinRtOcrBackend : IOcrBackend
                     engine = OcrEngine.TryCreateFromLanguage(firstLang);
                 }
             }
-            if (engine is null) return string.Empty;
+            if (engine is null) return null;
 
-            using var mem = new MemoryStream(rawBytes, writable: false);
-            using var winRtStream = mem.AsRandomAccessStream();
-            var decoder = await WinRtBitmapDecoder.CreateAsync(winRtStream).AsTask(cancellationToken).ConfigureAwait(false);
-            uint pw = decoder.PixelWidth;
-            uint ph = decoder.PixelHeight;
-            if (pw == 0 || ph == 0) return string.Empty;
-
-            uint maxDim = Math.Min(MaxDecodePixels, OcrEngine.MaxImageDimension);
-            var transform = new WinRtBitmapTransform();
-            uint longEdge = Math.Max(pw, ph);
-            if (longEdge > maxDim)
+            Windows.Graphics.Imaging.SoftwareBitmap softwareBitmap;
+            using (var fs = new FileStream(imagePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
-                double ratio = (double)maxDim / longEdge;
-                transform.ScaledWidth = Math.Max(1u, (uint)Math.Round(pw * ratio));
-                transform.ScaledHeight = Math.Max(1u, (uint)Math.Round(ph * ratio));
-                transform.InterpolationMode = WinRtBitmapInterpolationMode.Fant;
+                if (fs.Length <= 0) return null;
+                using var winRtStream = fs.AsRandomAccessStream();
+                var decoder = await WinRtBitmapDecoder.CreateAsync(winRtStream).AsTask(cancellationToken).ConfigureAwait(false);
+                uint pw = decoder.PixelWidth;
+                uint ph = decoder.PixelHeight;
+                if (pw == 0 || ph == 0) return null;
+
+                uint maxDim = Math.Min(MaxDecodePixels, OcrEngine.MaxImageDimension);
+                var transform = new WinRtBitmapTransform();
+                uint longEdge = Math.Max(pw, ph);
+                if (longEdge > maxDim)
+                {
+                    double ratio = (double)maxDim / longEdge;
+                    transform.ScaledWidth = Math.Max(1u, (uint)Math.Round(pw * ratio));
+                    transform.ScaledHeight = Math.Max(1u, (uint)Math.Round(ph * ratio));
+                    transform.InterpolationMode = WinRtBitmapInterpolationMode.Fant;
+                }
+
+                softwareBitmap = await decoder.GetSoftwareBitmapAsync(
+                    WinRtBitmapPixelFormat.Bgra8,
+                    WinRtBitmapAlphaMode.Premultiplied,
+                    transform,
+                    WinRtExifOrientationMode.RespectExifOrientation,
+                    WinRtColorManagementMode.DoNotColorManage).AsTask(cancellationToken).ConfigureAwait(false);
             }
 
-            using var softwareBitmap = await decoder.GetSoftwareBitmapAsync(
-                WinRtBitmapPixelFormat.Bgra8,
-                WinRtBitmapAlphaMode.Premultiplied,
-                transform,
-                WinRtExifOrientationMode.RespectExifOrientation,
-                WinRtColorManagementMode.DoNotColorManage).AsTask(cancellationToken).ConfigureAwait(false);
-
-            var primaryResult = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
-            var primaryText = FormatOcrResult(primaryResult);
-
-            // 若主引擎为中文且系统同时装有英文识别包，复用同一内存 SoftwareBitmap 补跑一次英文模型（~4ms，零额外解码 I/O），
-            // 消除中文模型将英文 CO/O/0 误判为全角括号「（0」的固有偏差，对齐 Vision 双语联合识字质量
-            if (!string.IsNullOrWhiteSpace(preferredLanguageTag) &&
-                preferredLanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+            using (softwareBitmap)
             {
-                var enLang = OcrEngine.AvailableRecognizerLanguages
-                    .FirstOrDefault(l => l.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase));
-                if (enLang is not null && OcrEngine.TryCreateFromLanguage(enLang) is { } enEngine)
+                var primaryResult = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
+                var primaryText = FormatOcrResult(primaryResult);
+
+                // 若主引擎为中文且系统同时装有英文识别包，复用同一内存 SoftwareBitmap 补跑一次英文模型（失败不丢弃已有中文结果）
+                if (!string.IsNullOrWhiteSpace(preferredLanguageTag) &&
+                    preferredLanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
                 {
-                    var enResult = await enEngine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
-                    var enText = FormatOcrResult(enResult);
-                    if (!string.IsNullOrWhiteSpace(enText) && !string.Equals(enText, primaryText, StringComparison.Ordinal))
+                    try
                     {
-                        return string.IsNullOrWhiteSpace(primaryText) ? enText : $"{primaryText}\n{enText}";
+                        var enLang = OcrEngine.AvailableRecognizerLanguages
+                            .FirstOrDefault(l => l.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase));
+                        if (enLang is not null && OcrEngine.TryCreateFromLanguage(enLang) is { } enEngine)
+                        {
+                            var enResult = await enEngine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
+                            var enText = FormatOcrResult(enResult);
+                            if (!string.IsNullOrWhiteSpace(enText) && !string.Equals(enText, primaryText, StringComparison.Ordinal))
+                            {
+                                return string.IsNullOrWhiteSpace(primaryText) ? enText : $"{primaryText}\n{enText}";
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        // 补充英文轮次异常时保留已成功的主语言识别文本
                     }
                 }
-            }
 
-            return primaryText;
+                return primaryText;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -217,7 +224,7 @@ public sealed class WinRtOcrBackend : IOcrBackend
         }
         catch (Exception)
         {
-            return string.Empty;
+            return null;
         }
     }
 
@@ -359,6 +366,7 @@ public sealed class SearchIndex : IDisposable
         public int PixelWidth { get; set; }
         public int PixelHeight { get; set; }
         public long LastWriteUtcTicks { get; set; }
+        public string LanguageSignature { get; set; } = string.Empty;
         public string Words { get; set; } = string.Empty;
     }
 
@@ -366,9 +374,12 @@ public sealed class SearchIndex : IDisposable
     private readonly IOcrBackend _backend;
     private readonly Action<string>? _onImageIndexed;
     private readonly string _cachePath;
+    private readonly string _languageSignature;
     private readonly object _stateLock = new();
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _queuedOrRunning = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _queued = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _requeueAfterRun = new(StringComparer.OrdinalIgnoreCase);
+    private string? _runningPath;
     private readonly Channel<string> _channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
     {
         SingleReader = true,
@@ -397,7 +408,9 @@ public sealed class SearchIndex : IDisposable
         _backend = backend ?? new WinRtOcrBackend();
         _onImageIndexed = onImageIndexed;
         _cachePath = cachePath ?? DataFolder.SearchIndexPath;
-        LanguageStatus = OcrLanguageResolver.Resolve(_backend.GetInstalledLanguageTags());
+        var installedTags = _backend.GetInstalledLanguageTags();
+        LanguageStatus = OcrLanguageResolver.Resolve(installedTags);
+        _languageSignature = OcrLanguageResolver.BuildLanguageSignature(installedTags);
 
         LoadCache();
         _workerTask = Task.Factory.StartNew(
@@ -440,7 +453,14 @@ public sealed class SearchIndex : IDisposable
 
         lock (_stateLock)
         {
-            if (_disposed || !_queuedOrRunning.Add(full))
+            if (_disposed) return;
+            if (string.Equals(_runningPath, full, StringComparison.OrdinalIgnoreCase))
+            {
+                // 识别进行中文件再次变更时记下重跑标记，当前轮结束后自动复检最新指纹
+                _requeueAfterRun.Add(full);
+                return;
+            }
+            if (!_queued.Add(full))
             {
                 return;
             }
@@ -453,7 +473,7 @@ public sealed class SearchIndex : IDisposable
 
         if (!_channel.Writer.TryWrite(full))
         {
-            CompleteOne(full);
+            AbandonQueued(full);
         }
     }
 
@@ -490,6 +510,11 @@ public sealed class SearchIndex : IDisposable
             {
                 while (_channel.Reader.TryRead(out var fullPath))
                 {
+                    lock (_stateLock)
+                    {
+                        _queued.Remove(fullPath);
+                        _runningPath = fullPath;
+                    }
                     try
                     {
                         await ProcessOneAsync(fullPath, _cts.Token).ConfigureAwait(false);
@@ -538,7 +563,8 @@ public sealed class SearchIndex : IDisposable
                 existing.FileSize == fileSize &&
                 existing.PixelWidth == pw &&
                 existing.PixelHeight == ph &&
-                existing.LastWriteUtcTicks == writeTicks)
+                existing.LastWriteUtcTicks == writeTicks &&
+                string.Equals(existing.LanguageSignature, _languageSignature, StringComparison.Ordinal))
             {
                 hit = existing;
             }
@@ -564,23 +590,26 @@ public sealed class SearchIndex : IDisposable
         Interlocked.Increment(ref _backendRecognitionCount);
         var recognized = await _backend.RecognizeImageAsync(fullPath, LanguageStatus.ActiveLanguageTag, ct).ConfigureAwait(false);
 
-        // 识别耗时期间若原图已被缩图且原词仍在，UpdateImageOcr 内部也会拒绝覆盖
-        lock (_stateLock)
+        if (recognized is not null)
         {
-            _cache[cacheKey] = new CacheEntry
+            lock (_stateLock)
             {
-                FileSize = fileSize,
-                PixelWidth = pw,
-                PixelHeight = ph,
-                LastWriteUtcTicks = writeTicks,
-                Words = recognized
-            };
-            _cacheDirty = true;
-        }
+                _cache[cacheKey] = new CacheEntry
+                {
+                    FileSize = fileSize,
+                    PixelWidth = pw,
+                    PixelHeight = ph,
+                    LastWriteUtcTicks = writeTicks,
+                    LanguageSignature = _languageSignature,
+                    Words = recognized
+                };
+                _cacheDirty = true;
+            }
 
-        if (_history.UpdateImageOcr(fullPath, recognized))
-        {
-            _onImageIndexed?.Invoke(fullPath);
+            if (_history.UpdateImageOcr(fullPath, recognized))
+            {
+                _onImageIndexed?.Invoke(fullPath);
+            }
         }
     }
 
@@ -610,21 +639,54 @@ public sealed class SearchIndex : IDisposable
         }
     }
 
-    private void CompleteOne(string fullPath)
+    private void AbandonQueued(string fullPath)
     {
         TaskCompletionSource<bool>? toComplete = null;
         lock (_stateLock)
         {
-            _queuedOrRunning.Remove(fullPath);
-            if (_pendingWorkCount > 0)
-            {
-                _pendingWorkCount--;
-            }
+            _queued.Remove(fullPath);
+            if (_pendingWorkCount > 0) _pendingWorkCount--;
             if (_pendingWorkCount == 0 && _idleTcs is not null)
             {
                 toComplete = _idleTcs;
                 _idleTcs = null;
             }
+        }
+        toComplete?.TrySetResult(true);
+    }
+
+    private void CompleteOne(string fullPath)
+    {
+        TaskCompletionSource<bool>? toComplete = null;
+        bool shouldRequeue = false;
+        lock (_stateLock)
+        {
+            if (string.Equals(_runningPath, fullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _runningPath = null;
+            }
+            if (_requeueAfterRun.Remove(fullPath) && !_disposed && _queued.Add(fullPath))
+            {
+                // 保持 _pendingWorkCount 不减，直接重排一次
+                shouldRequeue = true;
+            }
+            else
+            {
+                if (_pendingWorkCount > 0)
+                {
+                    _pendingWorkCount--;
+                }
+                if (_pendingWorkCount == 0 && _idleTcs is not null)
+                {
+                    toComplete = _idleTcs;
+                    _idleTcs = null;
+                }
+            }
+        }
+
+        if (shouldRequeue && !_channel.Writer.TryWrite(fullPath))
+        {
+            AbandonQueued(fullPath);
         }
         toComplete?.TrySetResult(true);
     }

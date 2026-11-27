@@ -1843,6 +1843,41 @@ public static class Program
             Check(!VisualContainsText(winWithZh, "未安装简体中文图片识字语言包"),
                 "Settings Recording tab must NOT display missing-pack prompt when zh-Hans-CN is installed");
             winWithZh.Close();
+
+            // 5. 审查发现回归：暂时性失败不写空缓存、语言包升级后失效重跑、未完成首次识字的原图不提前缩小
+            var retryImgPath = Path.Combine(DataFolder.ScreenshotsFolder, "Clipboard 2026-11-27 at 04.05.00.png");
+            WriteTextBannerPng(retryImgPath, "重试恢复 OK99", "第二行", width: 1400, height: 920);
+            history.RecordImage(retryImgPath, ocrWords: null, pngBytesForHash: File.ReadAllBytes(retryImgPath), usedAt: DateTime.UtcNow.AddMinutes(-10));
+
+            // 未识字（ocr_text IS NULL）的原图在保留任务触发时不应先于识字被缩小
+            line.RunRetention(DateTime.UtcNow, 1024);
+            Check(!history.IsShrunk(retryImgPath), "Unindexed original image (ocr_text IS NULL) must not be shrunk before OCR runs");
+
+            var scriptedBackend = new ScriptedOcrBackend(["en-US"]);
+            scriptedBackend.FailNextCall = true;
+            var cacheFile = Path.Combine(DataFolder.Root, "ScriptedSearchIndex.json");
+            using (var idxEn = new SearchIndex(history, backend: scriptedBackend, cachePath: cacheFile))
+            {
+                idxEn.Enqueue(retryImgPath);
+                idxEn.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) is null, "Transient OCR failure must not write empty ocr_text or cache");
+
+                // 第二次入队恢复成功（回退 en-US）
+                idxEn.Enqueue(retryImgPath);
+                idxEn.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) == "EN_ONLY_WORDS",
+                    $"Expected fallback en-US OCR result after retry, got '{history.OcrWordsOf(retryImgPath)}'");
+            }
+
+            // 用户后续安装 zh-Hans-CN 语言包重启后，即使文件未变也应因语言配置升级重新识字
+            scriptedBackend.SetLanguages(["en-US", "zh-Hans-CN"]);
+            using (var idxZh = new SearchIndex(history, backend: scriptedBackend, cachePath: cacheFile))
+            {
+                idxZh.Enqueue(retryImgPath);
+                idxZh.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) == "ZH_UPGRADED_WORDS",
+                    $"Installing zh-Hans-CN must invalidate en-only cache and re-index original image, got '{history.OcrWordsOf(retryImgPath)}'");
+            }
         }
         finally
         {
@@ -2173,5 +2208,32 @@ public static class Program
         public bool Register(Shortcut shortcut, Action onPressed) => _succeeds;
         public void Unregister() { }
         public void Dispose() { }
+    }
+
+    private sealed class ScriptedOcrBackend : IOcrBackend
+    {
+        private IReadOnlyList<string> _langs;
+        public bool FailNextCall { get; set; }
+
+        public ScriptedOcrBackend(IReadOnlyList<string> langs) => _langs = langs;
+
+        public void SetLanguages(IReadOnlyList<string> langs) => _langs = langs;
+
+        public IReadOnlyList<string> GetInstalledLanguageTags() => _langs;
+
+        public Task<string?> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default)
+        {
+            _ = imagePath;
+            _ = cancellationToken;
+            if (FailNextCall)
+            {
+                FailNextCall = false;
+                return Task.FromResult<string?>(null);
+            }
+            string words = preferredLanguageTag is not null && preferredLanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                ? "ZH_UPGRADED_WORDS"
+                : "EN_ONLY_WORDS";
+            return Task.FromResult<string?>(words);
+        }
     }
 }
