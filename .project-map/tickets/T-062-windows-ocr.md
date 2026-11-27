@@ -4,7 +4,7 @@ title: Windows 按文字找图片（Windows.Media.Ocr）
 type: build
 status: open
 blocked_by: [T-061]
-claimed_by:
+claimed_by: antigravity
 supersedes:
 ---
 
@@ -20,10 +20,15 @@ supersedes:
 
 ## Acceptance
 
-- [ ] 包含简体中文与英文的测试图片进入历史后，后台异步完成 `Windows.Media.Ocr` 识别并写入索引；在 `Alt+C` 搜索框和篮子列表里输入图里的中文词或英文词均可命中该图片并显示「图中文字」标记。
-- [ ] 原图缩成缩略图后，历史索引里仍保留从原图识别出的字，依然能搜中。
-- [ ] 在缺少 `zh-Hans-CN` OCR 语言包的环境下能够平稳回退可用语言，且设置页面正确提示缺失中文识别包（通过单元测试/模拟检查验证）。
-- [ ] `windows/scripts/check.ps1` 跑通真实含字样本图的 `Windows.Media.Ocr` 端到端识别与搜索断言并全绿。
+- [x] 包含简体中文与英文的测试图片进入历史后，后台异步完成 `Windows.Media.Ocr` 识别并写入索引；在 `Alt+C` 搜索框和篮子列表里输入图里的中文词或英文词均可命中该图片并显示「图中文字」标记。
+- [x] 原图缩成缩略图后，历史索引里仍保留从原图识别出的字，依然能搜中。
+- [x] 在缺少 `zh-Hans-CN` OCR 语言包的环境下能够平稳回退可用语言，且设置页面正确提示缺失中文识别包（通过单元测试/模拟检查验证）。
+- [x] `windows/scripts/check.ps1` 跑通真实含字样本图的 `Windows.Media.Ocr` 端到端识别与搜索断言并全绿。
 - [ ] 真机走查：使用 `EnCopy Dev` 复制一张带中英文文字的图片，等识别完成后按图里几个字搜出并贴回前台窗口，留截图在 `evidence/T-062/`。
 
 ## Resolution
+
+- **阶段实现提交**：`10b26a8`（分支 `feat/T-062-windows-ocr`，待真机走查全绿后合并关单）。
+- **测试与审查记录**：
+  - 按 `evidence-first-testing` 先在 `WindowsOcrAndImageTextBadge` 建立契约红灯检查，再实现 `SearchIndex`（低优先级后台队列、基于文件大小/像素尺寸/修改时间的 `SearchIndex.json` 持久化缓存、`WinRtOcrBackend` 超大图 `<= 2400px` 缩放与中英文双模型联合识字及字符字距拼接）与 `History.ocr_text` 索引规则（EnCopy 自有图片仅按图中文字可搜，资源管理器外部图片同时保留文件名可搜；原图缩成缩略图后不覆盖原图识别词；搜索命中图中文字时在拍立得卡右上角与篮子行右侧展示黄底「图中文字」角标；缺少简体中文识别包时平稳回退已安装语言并在设置「挂上复制的内容」页给出友好提示）。
+  - 离屏渲染核验图已存于 `evidence/T-062/00-offscreen-rope-ocr-hit.png`、`00-offscreen-basket-ocr-hit.png`、`00-offscreen-settings-ocr-missing-zh.png`；`windows/scripts/check.ps1` 22/22 全绿通过。
