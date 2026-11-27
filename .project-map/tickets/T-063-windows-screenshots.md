@@ -4,7 +4,7 @@ title: Windows 接管截图、监视文件夹与登录时打开
 type: build
 status: open
 blocked_by: [T-062]
-claimed_by:
+claimed_by: antigravity
 supersedes:
 ---
 
@@ -23,11 +23,19 @@ supersedes:
 
 ## Acceptance
 
-- [ ] 动态读取 `FOLDERID_Screenshots`（在截图目录被重定向的机器上也能正确找到目录），并通过尾部完整性校验确保刚写入的大图写完才上绳。
-- [ ] 开启「接管截图」后，触发 `Win+Shift+S` 或往系统截图目录写入新截图时，文件被复制进 `EnCopy\Screenshots\`、原文件保留在原处不动、绳上只挂出一件（无双份重复）；在 EnCopy 里取下或过期清理只删自己的副本，原文件还在。
-- [ ] 可在设置添加/移除最多 3 个自定义监视文件夹；取下来自自定义文件夹的图片不删除原文件。
-- [ ] 「登录时打开」开关正确读写当前用户 `Run` 注册表项且开发版不覆盖日常版配置。
-- [ ] `windows/scripts/check.ps1` 覆盖截图完整性校验、双通道哈希去重、原文件不删保证、监视文件夹上限与启动项配置逻辑并全绿。
+- [x] 动态读取 `FOLDERID_Screenshots`（在截图目录被重定向的机器上也能正确找到目录），并通过尾部完整性校验确保刚写入的大图写完才上绳。
+- [x] 开启「接管截图」后，触发 `Win+Shift+S` 或往系统截图目录写入新截图时，文件被复制进 `EnCopy\Screenshots\`、原文件保留在原处不动、绳上只挂出一件（无双份重复）；在 EnCopy 里取下或过期清理只删自己的副本，原文件还在。
+- [x] 可在设置添加/移除最多 3 个自定义监视文件夹；取下来自自定义文件夹的图片不删除原文件。
+- [x] 「登录时打开」开关正确读写当前用户 `Run` 注册表项且开发版不覆盖日常版配置。
+- [x] `windows/scripts/check.ps1` 覆盖截图完整性校验、双通道哈希去重、原文件不删保证、监视文件夹上限与启动项配置逻辑并全绿。
 - [ ] 真机走查：使用 `EnCopy Dev`（取消登录项勾选），在启用接管截图后用 `Win+Shift+S` 截屏验证自动上绳、去重、OCR 可搜与原文件完好，留截图与步骤在 `evidence/T-063/`。
 
 ## Resolution
+
+- **阶段实现提交**：分支 `feat/T-063-windows-screenshots`（基于 `feat/T-062-windows-ocr` 切出，待真机走查全绿后依次合并关单）。
+- **测试与审查记录**：
+  - 按 `evidence-first-testing` 先在 `ScreenshotsWatchedFoldersLoginAndWindowTraits` 建立契约红灯测试，再实现 `ScreenshotFolders`（`SHGetKnownFolderPath(FOLDERID_Screenshots / FOLDERID_Captures)` 动态解析系统重定向路径）、`ScreenshotWatcher`（PNG `IEND` 12 字节、JPEG `EOI`、GIF `0x3B`、WebP `RIFF` 与 BMP 长度完整性校验，半截写入文件自动延后复检直至完整才上绳）、`ScreenshotCoordinator` + `ClipboardWatcher` 双通道协同与像素级 `PictureHash`（BGRA32 规范像素 SHA-256，跨 WIC/WPF 不同 PNG 压缩流精准合并去重、原文件留在原处不动、取下或清理仅删 `EnCopy\Screenshots\` 私有副本）、设置「截图 → 同时监视文件夹」最多 3 个目录增删（取下绝不删外部原文件）以及 `LaunchAtLogin`（日常版 `EnCopy` 与开发版 `EnCopyDev` 注册表项严格隔离）。
+  - 同批完成 `ForegroundAppTracker` 通用窗口特征重构：移除对 `Dock_64.exe` 等特定第三方进程名的硬编码排除，改为基于 Win32 窗口特征（`WS_EX_TOOLWINDOW`、`WS_EX_NOACTIVATE`、隐藏 Owner 且无 `WS_EX_APPWINDOW`、无框纯 `WS_POPUP` 条形浮层以及 DWM Cloak 状态）过滤所有不在任务栏显示的通用 Dock/浮层窗口，并用真实 `CreateWindowExW` 句柄覆盖 4 种通用 Dock 形态回归断言。
+  - 设置「截图」页离屏渲染图存于 `evidence/T-063/00-offscreen-settings-screenshots.png`；`windows/scripts/check.ps1` 23/23 全绿通过。
+- **验收辅助工具与重建方式**：
+  - 工具源码位于 `evidence/tools/walk-src/`（已由 `.gitignore` 忽略），本批补充 `known-folder <screenshots|captures>`、`render-text-png` 与 `printscreen` 键支持；重建命令：`dotnet publish evidence/tools/walk-src/walk.csproj -c Release -r win-x64 --self-contained false -o evidence/tools`。
