@@ -28,7 +28,8 @@ supersedes:
 
 ## Resolution
 
-- **阶段实现提交**：`10b26a8`（分支 `feat/T-062-windows-ocr`，待真机走查全绿后合并关单）。
+- **阶段实现提交**：`10b26a8`、`7814471`（分支 `feat/T-062-windows-ocr`，待真机走查全绿后合并关单）。
 - **测试与审查记录**：
-  - 按 `evidence-first-testing` 先在 `WindowsOcrAndImageTextBadge` 建立契约红灯检查，再实现 `SearchIndex`（低优先级后台队列、基于文件大小/像素尺寸/修改时间的 `SearchIndex.json` 持久化缓存、`WinRtOcrBackend` 超大图 `<= 2400px` 缩放与中英文双模型联合识字及字符字距拼接）与 `History.ocr_text` 索引规则（EnCopy 自有图片仅按图中文字可搜，资源管理器外部图片同时保留文件名可搜；原图缩成缩略图后不覆盖原图识别词；搜索命中图中文字时在拍立得卡右上角与篮子行右侧展示黄底「图中文字」角标；缺少简体中文识别包时平稳回退已安装语言并在设置「挂上复制的内容」页给出友好提示）。
+  - 按 `evidence-first-testing` 先在 `WindowsOcrAndImageTextBadge` 建立契约红灯检查，再实现 `SearchIndex`（低优先级后台队列、含识别语言签名的 `SearchIndex.json` 持久化缓存、`WinRtOcrBackend` 流式有界 `<= 2400px` 缩放与中英文双模型联合识字及字符字距拼接）与 `History.ocr_text` 索引规则（EnCopy 自有图片仅按图中文字可搜，资源管理器外部图片同时保留文件名可搜；原图缩成缩略图后不覆盖原图识别词；搜索命中图中文字时在拍立得卡右上角与篮子行右侧展示黄底「图中文字」角标；缺少简体中文识别包时平稳回退已安装语言并在设置「挂上复制的内容」页给出友好提示）。
+  - 针对首轮 Codex `gpt-6.1-terra` 审查指出的 5 项边界缺陷先补红灯断言再修复转绿（`7814471`）：缓存键加入语言组合签名使后续补装中文包自动重跑；失败返回 `null` 与空文本 `""` 严格区分且补充英文轮次异常不丢失主语言结果；改为流式有界解码移除 64 MiB 整块读上限；重复复制（`onAgain`）与识别进行中再次变更均进入指纹复检；保留规则在 `ocr_text IS NULL` 时暂缓缩图，确保先识字再缩图。
   - 离屏渲染核验图已存于 `evidence/T-062/00-offscreen-rope-ocr-hit.png`、`00-offscreen-basket-ocr-hit.png`、`00-offscreen-settings-ocr-missing-zh.png`；`windows/scripts/check.ps1` 22/22 全绿通过。
