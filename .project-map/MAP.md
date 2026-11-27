@@ -66,7 +66,7 @@ GitHub 上的 issue 落成工单后，工单 frontmatter 记 `issue: <号>`，�
 
 | Doc | Covers | Verified |
 | --- | --- | --- |
-| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | e46d0c2 |
+| [CONTEXT.md](../CONTEXT.md) | `Sources/**`, `windows/src/**` | ae1342c |
 | [README.md](../README.md) | `scripts/**`, `Package.swift` | 57a429e |
 | [README.en.md](../README.en.md) | `README.md`, `scripts/**`, `Package.swift` | 57a429e |
 | [AGENTS.md](../AGENTS.md) | `scripts/**`, `windows/scripts/**` | ad92a88 |
