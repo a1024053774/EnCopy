@@ -80,7 +80,7 @@ public sealed class Clearing
 
                 metaByFull.TryGetValue(full, out var info);
                 bool isNoteText = IsTextFile(full);
-                var words = isNoteText ? null : history.WordsOf(full);
+                var words = isNoteText ? null : (history.OcrWordsOf(full) ?? history.WordsOf(full));
 
                 File.Move(full, target, overwrite: true);
                 history.Remove(full);

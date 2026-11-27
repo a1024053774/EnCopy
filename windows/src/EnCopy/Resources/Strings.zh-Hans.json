@@ -157,5 +157,8 @@
   "EnCopy keeps what you copy": "EnCopy 会记下你复制的内容",
   "Copied text, links, and Explorer file paths hang on the line and stay in your local folder:": "复制的文字、链接与文件清单会挂上晾衣绳，只存在本机文件夹中：",
   "Verification codes clear after 10 minutes; password managers are skipped by default.": "验证码保留 10 分钟自动清除，常见密码管理器默认不记录。",
-  "OK": "好"
+  "OK": "好",
+  "Text in image": "图中文字",
+  "Chinese text recognition pack is not installed": "未安装简体中文图片识字语言包",
+  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "当前已回退使用已安装语言识别英文与数字；在「系统设置 → 时间和语言 → 语言和区域」中为「简体中文」安装光学字符识别功能后即可按中文找图。"
 }

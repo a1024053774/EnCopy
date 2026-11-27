@@ -29,18 +29,25 @@ public sealed class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly Line _line;
     private readonly SettingsCallbacks _callbacks;
+    private readonly OcrLanguageStatus _ocrStatus;
 
     private string? _frontApp;
     private int _activeTab;
     private bool _showsStorageDetails;
     private Border _rootBackdrop = null!;
 
-    public SettingsWindow(AppSettings settings, Line line, SettingsCallbacks callbacks, string? frontApp = null)
+    public SettingsWindow(
+        AppSettings settings,
+        Line line,
+        SettingsCallbacks callbacks,
+        string? frontApp = null,
+        OcrLanguageStatus? ocrStatus = null)
     {
         _settings = settings;
         _line = line;
         _callbacks = callbacks;
         _frontApp = frontApp;
+        _ocrStatus = ocrStatus ?? OcrLanguageResolver.DetectSystemStatus();
 
         Title = Localization.L("Settings");
         Width = 610;
@@ -212,6 +219,15 @@ public sealed class SettingsWindow : Window
                 _callbacks.SaveAndApplySettings();
             }),
             ink, soft, font));
+
+        if (_ocrStatus.IsChinesePackMissing)
+        {
+            typesRows.Children.Add(BuildSettingRow(
+                Localization.L("Chinese text recognition pack is not installed"),
+                Localization.L("Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too."),
+                null,
+                ink, soft, font));
+        }
 
         typesRows.Children.Add(BuildSettingRow(
             Localization.L("Text"),

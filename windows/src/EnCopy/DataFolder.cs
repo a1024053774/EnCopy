@@ -45,6 +45,7 @@ public static class DataFolder
     public static string RecentlyClearedFolder => Path.Combine(Root, "Recently Cleared");
     public static string DiscardedFolder => Path.Combine(Root, "Discarded");
     public static string HistoryDatabasePath => Path.Combine(Root, "History.sqlite");
+    public static string SearchIndexPath => Path.Combine(Root, "SearchIndex.json");
     public static string SettingsPath => Path.Combine(Root, "Settings.json");
     public static string LineStatePath => Path.Combine(Root, "LineState.json");
 
