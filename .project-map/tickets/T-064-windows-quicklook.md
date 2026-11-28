@@ -4,7 +4,7 @@ title: Windows 快速查看（Ctrl+Y 内置预览窗）
 type: build
 status: open
 blocked_by: [T-063]
-claimed_by:
+claimed_by: devin
 supersedes:
 ---
 
