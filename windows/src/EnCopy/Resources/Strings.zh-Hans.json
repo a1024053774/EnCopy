@@ -164,5 +164,10 @@
   "Also watch folders": "同时监视文件夹",
   "Add Folder…": "添加文件夹…",
   "Stop watching": "停止监视",
-  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "保存到这些文件夹的新图片也会自动挂上绳（最多添加 3 个）；从绳上取下时绝不删除原文件。"
+  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "保存到这些文件夹的新图片也会自动挂上绳（最多添加 3 个）；从绳上取下时绝不删除原文件。",
+  "Quick Look": "快速查看",
+  "Quick Look keyboard hint": "←/→ 切换 · Ctrl+Y、Esc 或 Enter 关闭",
+  "Folder": "文件夹",
+  "This item is missing": "这个项目已经不在原处",
+  "The file could not be opened": "这个文件暂时打不开"
 }

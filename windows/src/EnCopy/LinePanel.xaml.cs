@@ -35,11 +35,18 @@ public static class LineKeyRouter
         Action clearQuery,
         bool? canUndoQuery = null,
         bool caretAtEnd = true,
-        Action? openCleanup = null)
+        Action? openCleanup = null,
+        Action? openQuickLook = null)
     {
         if (isImeComposing || key == Key.ImeProcessed || key == Key.DeadCharProcessed)
         {
             return false;
+        }
+
+        if (modifiers == ModifierKeys.Control && key == Key.Y && openQuickLook is not null)
+        {
+            openQuickLook();
+            return true;
         }
 
         if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.Back && openCleanup is not null)
@@ -212,12 +219,14 @@ public partial class LinePanel : Window
     private double _maxPanelHeight = 680.0;
     private bool _scrollBasketToPicked = true;
     private Border? _pickedBasketRowBorder;
+    private QuickLookWindow? _quickLookWindow;
 
     public bool IsSummoned => IsVisible && !_isTucking;
     public MotionEngine MotionForTest => _motion;
     public bool IsPinnedBySummon => IsSummoned && _isPinnedBySummon;
     public bool IsPeeking => IsSummoned && _peekTimer.IsEnabled;
-    public bool IsInteractionHoldActive => _isDraggingOut || _openContextMenus > 0 || (_shareService?.IsOpen ?? false);
+    public bool IsQuickLookOpen => _quickLookWindow?.IsVisible == true;
+    public bool IsInteractionHoldActive => _isDraggingOut || _openContextMenus > 0 || (_shareService?.IsOpen ?? false) || IsQuickLookOpen;
     public DisplayMonitor ActiveMonitor => _activeMonitor;
 
     public double PanelContentBottomDip
@@ -523,12 +532,90 @@ public partial class LinePanel : Window
         }
     }
 
+    internal static bool ShouldPromoteForQuickLook(bool isVisible, bool isPinnedBySummon)
+    {
+        return isVisible && !isPinnedBySummon;
+    }
+
+    internal static bool ShouldReturnQuickLookFocus(bool isVisible, bool isPinnedBySummon, bool isDismissing)
+    {
+        return isVisible && isPinnedBySummon && !isDismissing;
+    }
+
+    private DipRect ActiveWorkAreaDip()
+    {
+        double scale = _activeMonitor.DpiScale > 0 ? _activeMonitor.DpiScale : 1.0;
+        var work = _activeMonitor.WorkArea;
+        return new DipRect(work.Left / scale, work.Top / scale, work.Width / scale, work.Height / scale);
+    }
+
+    private void ToggleQuickLook()
+    {
+        if (IsQuickLookOpen)
+        {
+            CloseQuickLook(restoreFocus: true);
+        }
+        else
+        {
+            OpenQuickLook();
+        }
+    }
+
+    private void OpenQuickLook(Note? target = null, bool? useBasket = null)
+    {
+        if (ShouldPromoteForQuickLook(IsVisible, _isPinnedBySummon))
+        {
+            PromoteToInteractiveSummon();
+        }
+
+        var session = QuickLookSession.Open(_line, target, useBasket);
+        if (session is null) return;
+
+        CloseQuickLook(restoreFocus: false);
+        var window = new QuickLookWindow(session, _line.Theme, ActiveWorkAreaDip());
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_quickLookWindow, window))
+            {
+                _quickLookWindow = null;
+            }
+            if (ShouldReturnQuickLookFocus(IsVisible, _isPinnedBySummon, _isDismissing))
+            {
+                Activate();
+                QueryBox.Focus();
+                Keyboard.Focus(QueryBox);
+            }
+        };
+        _quickLookWindow = window;
+        window.Show();
+        window.Activate();
+        window.Focus();
+    }
+
+    private void CloseQuickLook(bool restoreFocus)
+    {
+        var window = _quickLookWindow;
+        if (window is null) return;
+        _quickLookWindow = null;
+        if (window.IsVisible)
+        {
+            window.Close();
+        }
+        if (restoreFocus && ShouldReturnQuickLookFocus(IsVisible, _isPinnedBySummon, _isDismissing))
+        {
+            Activate();
+            QueryBox.Focus();
+            Keyboard.Focus(QueryBox);
+        }
+    }
+
     public void Dismiss(bool restoreForeground, IntPtr? targetOverride = null, bool animateTuck = false)
     {
         if (!IsSummoned || _isDismissing) return;
         _isDismissing = true;
         try
         {
+            CloseQuickLook(restoreFocus: false);
             _peekTimer.Stop();
             _breezeTimer.Stop();
             _hoverZoomPollTimer.Stop();
@@ -900,6 +987,15 @@ public partial class LinePanel : Window
             }
         });
 
+        if (!multi)
+        {
+            AddMenuItem(menu, Localization.L("Quick Look"), () =>
+            {
+                _line.PickCard(note, extendSelection: false);
+                OpenQuickLook(note, useBasket: false);
+            });
+        }
+
         if (!multi && note.Link is { } uri)
         {
             AddMenuItem(menu, Localization.L("Open Link"), () =>
@@ -1135,6 +1231,15 @@ public partial class LinePanel : Window
                     });
 
                 var wrapper = new Border { Child = rowUi };
+                var quickLookMenu = new ContextMenu();
+                quickLookMenu.Opened += (_, _) => _openContextMenus++;
+                quickLookMenu.Closed += (_, _) => _openContextMenus = Math.Max(0, _openContextMenus - 1);
+                AddMenuItem(quickLookMenu, Localization.L("Quick Look"), () =>
+                {
+                    _line.SelectBasketRow(row.Note);
+                    OpenQuickLook(row.Note, useBasket: true);
+                });
+                wrapper.ContextMenu = quickLookMenu;
                 if (rowPicked)
                 {
                     _pickedBasketRowBorder = wrapper;
@@ -1334,7 +1439,8 @@ public partial class LinePanel : Window
                     Dismiss(restoreForeground: false);
                     _onRequestOpenCleanup();
                 }
-                : null);
+                : null,
+            openQuickLook: ToggleQuickLook);
 
         if (handled)
         {

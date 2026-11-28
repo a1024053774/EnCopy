@@ -56,6 +56,7 @@ public static class Program
             ("RopeSlotsPinMoveToHeadAndOverflow", TestRopeSlotsPinMoveToHeadAndOverflow),
             ("TakeDownPutBackAndMultiSelect", TestTakeDownPutBackAndMultiSelect),
             ("BasketGroupsFilterAndNavigation", TestBasketGroupsFilterAndNavigation),
+            ("QuickLookPreviewListAndFocusContract", TestQuickLookPreviewListAndFocusContract),
             ("ShortcutRecorderAndPersistence", TestShortcutRecorderAndPersistence),
             ("LinePanelRenderAndClickThrough", () => TestLinePanelRenderAndClickThrough(previewDir)),
             ("MotionSpringsAndReducedMotion", TestMotionSpringsAndReducedMotion),
@@ -394,6 +395,159 @@ public static class Program
         Check(!LineKeyRouter.HandleKeyDown(Key.Right, ModifierKeys.None, false, "hello", false, line, _ => { }, () => { }, () => { }, () => { }, caretAtEnd: false),
             "Right yields to QueryBox when caret is inside query");
         Check(line.Picked?.FullText == beforeCaretPick, "Picked card unchanged while caret moves inside query");
+    }
+
+    private static void TestQuickLookPreviewListAndFocusContract()
+    {
+        using var history = new History();
+        var notesDir = DataFolder.NotesFolder;
+        Directory.CreateDirectory(notesDir);
+        var baseUtc = DateTime.UtcNow.AddMinutes(-20);
+        string? imagePath = null;
+        for (int i = 0; i < 10; i++)
+        {
+            string path;
+            string text;
+            if (i == 3)
+            {
+                path = Path.Combine(notesDir, $"quicklook-image-{i}.png");
+                WriteSamplePng(path, 120, 90);
+                imagePath = path;
+                text = $"quicklook image {i}";
+            }
+            else
+            {
+                path = Path.Combine(notesDir, $"quicklook-{i}.txt");
+                text = $"quicklook item {i}\nbody {i}";
+                File.WriteAllText(path, text, new UTF8Encoding(false));
+            }
+            history.Record(path, text, baseUtc.AddSeconds(i));
+        }
+
+        var line = new Line(history);
+        Check(line.ShownItems.Count == 8 && line.BasketCount == 2,
+            $"Expected 8 rope items and 2 basket items before quicklook test (rope={line.ShownItems.Count}, basket={line.BasketCount})");
+
+        line.PickCard(line.ShownItems[1]);
+        var session = QuickLookSession.Open(line);
+        Check(session is not null, "Ctrl+Y quicklook session opens for picked rope card");
+        Check(session!.Items.Select(n => n.FilePath).SequenceEqual(line.ShownItems.Select(n => n.FilePath)),
+            "Rope quicklook items follow current screen order exactly");
+        Check(session.Index == 1 && ReferenceEquals(session.Current, line.ShownItems[1]),
+            $"Rope quicklook starts at picked card index 1 (got {session.Index})");
+
+        bool closeRequested;
+        Check(session.HandleKey(Key.Right, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Right arrow is consumed while quicklook is open");
+        Check(session.Index == 2, "Right arrow advances to next rope item");
+        Check(session.HandleKey(Key.Left, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Left arrow is consumed while quicklook is open");
+        Check(session.Index == 1, "Left arrow returns to previous rope item");
+        Check(session.HandleKey(Key.Left, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Left arrow at boundary is still consumed");
+        Check(session.Index == 0, "Left arrow clamps at first rope item");
+        Check(session.HandleKey(Key.Left, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Left arrow before first item is consumed without falling through");
+        Check(session.Index == 0, "Quicklook index remains clamped at boundary");
+        Check(session.HandleKey(Key.Y, ModifierKeys.Control, out closeRequested) && closeRequested && !session.IsOpen,
+            "Ctrl+Y closes an open quicklook session");
+
+        session = QuickLookSession.Open(line);
+        Check(session is not null, "Quicklook can reopen after Ctrl+Y close");
+        Check(session!.HandleKey(Key.Enter, ModifierKeys.None, out closeRequested) && closeRequested && !session.IsOpen,
+            "Enter closes quicklook and is consumed before paste routing");
+        session = QuickLookSession.Open(line);
+        Check(session is not null, "Quicklook can reopen after Enter close");
+        Check(session!.HandleKey(Key.Escape, ModifierKeys.None, out closeRequested) && closeRequested && !session.IsOpen,
+            "Escape closes quicklook and is consumed before line dismissal");
+        Check(!session.HandleKey(Key.Right, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Closed quicklook session no longer borrows or swallows keyboard focus");
+
+        int openQuickLookCalls = 0;
+        int pasteCalls = 0;
+        Check(LineKeyRouter.HandleKeyDown(Key.Y, ModifierKeys.Control, false, "", false, line,
+                _ => pasteCalls++, () => { }, () => { }, () => { }, openQuickLook: () => openQuickLookCalls++),
+            "Ctrl+Y is handled by the line key router");
+        Check(openQuickLookCalls == 1 && pasteCalls == 0,
+            $"Ctrl+Y opens quicklook exactly once without paste (open={openQuickLookCalls}, paste={pasteCalls})");
+
+        line.OpenBasket();
+        var expectedBasket = line.BasketGroups.SelectMany(g => g.Rows.Select(r => r.Note)).ToList();
+        Check(expectedBasket.Count == 2, "Basket fixture exposes the two overflow notes");
+        line.BasketPicked = expectedBasket[1];
+        var basketSession = QuickLookSession.Open(line);
+        Check(basketSession is not null, "Quicklook opens for basket row");
+        Check(basketSession!.Items.Select(n => n.FilePath).SequenceEqual(expectedBasket.Select(n => n.FilePath)),
+            "Basket quicklook items follow flattened visible basket row order");
+        Check(basketSession.Index == 1 && ReferenceEquals(basketSession.Current, expectedBasket[1]),
+            "Basket quicklook starts at picked basket row");
+
+        var ropeTargetWhileBasketOpen = line.ShownItems[0];
+        var ropeSessionWhileBasketOpen = QuickLookSession.Open(line, ropeTargetWhileBasketOpen, useBasket: false);
+        Check(ropeSessionWhileBasketOpen is not null, "Rope card quicklook can open while basket is open");
+        Check(ropeSessionWhileBasketOpen!.Items.Select(n => n.FilePath).SequenceEqual(line.ShownItems.Select(n => n.FilePath)) &&
+              ReferenceEquals(ropeSessionWhileBasketOpen.Current, ropeTargetWhileBasketOpen),
+            "Rope context-menu quicklook keeps rope ownership and order even when basket is open");
+
+        Check(LinePanel.ShouldPromoteForQuickLook(isVisible: true, isPinnedBySummon: false),
+            "Quicklook entry promotes a hover-revealed line before borrowing focus");
+        Check(!LinePanel.ShouldPromoteForQuickLook(isVisible: true, isPinnedBySummon: true) &&
+              !LinePanel.ShouldPromoteForQuickLook(isVisible: false, isPinnedBySummon: false),
+            "Quicklook promotion is only needed for a visible unpinned line");
+        Check(LinePanel.ShouldReturnQuickLookFocus(isVisible: true, isPinnedBySummon: true, isDismissing: false),
+            "Closing quicklook returns keyboard focus to a visible pinned line");
+        Check(!LinePanel.ShouldReturnQuickLookFocus(isVisible: false, isPinnedBySummon: true, isDismissing: false) &&
+              !LinePanel.ShouldReturnQuickLookFocus(isVisible: true, isPinnedBySummon: false, isDismissing: false) &&
+              !LinePanel.ShouldReturnQuickLookFocus(isVisible: true, isPinnedBySummon: true, isDismissing: true),
+            "Quicklook focus return is suppressed when line is hidden, unpinned, or dismissing");
+
+        line.CloseBasket();
+        var lastItemSession = QuickLookSession.Open(line, line.ShownItems[^1]);
+        Check(lastItemSession is not null, "Quicklook opens at last rope item for right-boundary check");
+        Check(lastItemSession!.HandleKey(Key.Right, ModifierKeys.None, out closeRequested) && !closeRequested,
+            "Right arrow at final rope item is consumed");
+        Check(lastItemSession.Index == line.ShownItems.Count - 1,
+            "Right arrow clamps at final rope item");
+
+        var imageNote = line.ShownItems.First(n => string.Equals(n.FilePath, imagePath, StringComparison.OrdinalIgnoreCase));
+        var imageContent = QuickLookContentFactory.For(imageNote);
+        Check(imageContent.Kind == QuickLookContentKind.Image && string.Equals(imageContent.MediaPath, imagePath, StringComparison.OrdinalIgnoreCase),
+            "Image note produces image quicklook content with original media path");
+        var visualSmokeSession = QuickLookSession.Open(line, imageNote);
+        var visualSmoke = new QuickLookWindow(visualSmokeSession!, line.Theme, new DipRect(0, 0, 1920, 1040));
+        visualSmoke.RenderCurrent();
+        Check(visualSmoke.Content is UIElement && !visualSmoke.IsVisible,
+            "Quicklook window constructs image preview offscreen without opening or stealing focus");
+
+        var textNote = line.ShownItems.First(n => n.FilePath.EndsWith("quicklook-7.txt", StringComparison.OrdinalIgnoreCase));
+        var textContent = QuickLookContentFactory.For(textNote);
+        Check(textContent.Kind == QuickLookContentKind.Text && textContent.Text == "quicklook item 7\nbody 7",
+            "Text note produces complete selectable text content without truncation");
+
+        var videoPath = Path.Combine(DataFolder.Root, "quicklook-sample.mp4");
+        File.WriteAllBytes(videoPath, []);
+        var videoNote = Note.Load(videoPath, videoPath, DateTime.Now);
+        var videoContent = QuickLookContentFactory.For(videoNote!);
+        Check(videoContent.Kind == QuickLookContentKind.Video && string.Equals(videoContent.MediaPath, videoPath, StringComparison.OrdinalIgnoreCase),
+            "Video note produces video quicklook content with media path");
+
+        var fileA = Path.Combine(DataFolder.Root, "quicklook-a.bin");
+        var fileB = Path.Combine(DataFolder.Root, "quicklook-b.bin");
+        var fileMissing = Path.Combine(DataFolder.Root, "quicklook-missing.bin");
+        File.WriteAllBytes(fileA, new byte[2048]);
+        File.WriteAllBytes(fileB, new byte[513]);
+        var manifest = FileList.Make([fileA, fileB, fileMissing]);
+        Check(manifest is not null, "Multi-file manifest fixture is created");
+        var fileNote = Note.Load(manifest!, manifest!, DateTime.Now);
+        var filesContent = QuickLookContentFactory.For(fileNote!);
+        Check(filesContent.Kind == QuickLookContentKind.Files && filesContent.Files.Count == 3,
+            $"File manifest produces three file rows (got {filesContent.Files.Count})");
+        Check(filesContent.Files.Select(f => f.Path).SequenceEqual(new[] { fileA, fileB, fileMissing }),
+            "File rows preserve the original manifest path order exactly");
+        Check(filesContent.Files[0].Exists && filesContent.Files[0].SizeBytes == 2048 &&
+              filesContent.Files[1].Exists && filesContent.Files[1].SizeBytes == 513 &&
+              !filesContent.Files[2].Exists && filesContent.Files[2].SizeBytes is null,
+            "File rows expose original path existence, missing state, and byte sizes");
     }
 
     private static void TestPasteKeyAndUipiFallback()

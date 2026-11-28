@@ -164,5 +164,10 @@
   "Also watch folders": "Also watch folders",
   "Add Folder…": "Add Folder…",
   "Stop watching": "Stop watching",
-  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file."
+  "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.": "New images saved to these folders hang on the line (up to 3 folders); taking one down never deletes the original file.",
+  "Quick Look": "Quick Look",
+  "Quick Look keyboard hint": "←/→ switch · Ctrl+Y, Esc or Enter close",
+  "Folder": "Folder",
+  "This item is missing": "This item is missing",
+  "The file could not be opened": "The file could not be opened"
 }
