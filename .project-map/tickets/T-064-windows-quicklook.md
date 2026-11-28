@@ -2,7 +2,7 @@
 id: T-064
 title: Windows 快速查看（Ctrl+Y 内置预览窗）
 type: build
-status: done
+status: closed
 blocked_by: [T-063]
 claimed_by: devin
 supersedes:
