@@ -21,6 +21,7 @@ public partial class App : Application
     private Line? _line;
     private Win32ClipboardBackend? _clipboardBackend;
     private ClipboardWatcher? _clipboardWatcher;
+    private ScreenshotCoordinator? _screenshotCoordinator;
     private HeldWindowManager? _heldManager;
     private WindowsShareService? _shareService;
     private LinePanel? _panel;
@@ -32,6 +33,7 @@ public partial class App : Application
     private SettingsWindow? _settingsWindow;
     private CleanupWindow? _cleanupWindow;
     private OnboardingWindow? _onboardingWindow;
+    private bool _onboardingPending;
     private DispatcherTimer? _topHoverTimer;
     private DispatcherTimer? _expiryTimer;
     private readonly TopEdgeHoverTracker _hoverTracker = new();
@@ -64,6 +66,7 @@ public partial class App : Application
 
         _settingsStore = new SettingsStore();
         _settings = _settingsStore.Load();
+        _onboardingPending = !_settings.RecordingExplained && !IsInChecksRunner();
         _history = new History();
         _line = new Line(_history, keepOnLine: _settings.NormalizedKeepOnLine)
         {
@@ -94,11 +97,23 @@ public partial class App : Application
             _history,
             _settings,
             onNew: HandleNewCopiedItem,
-            onAgain: HandleRepeatedCopiedItem);
+            onAgain: HandleRepeatedCopiedItem,
+            isOnboardingPending: () => _onboardingPending);
         if (_clipboardWatcher.IsEnabled)
         {
             _clipboardWatcher.Start();
         }
+
+        _screenshotCoordinator = new ScreenshotCoordinator(
+            _settings,
+            _history,
+            _clipboardBackend,
+            onNewItem: (path, _) => HandleNewCopiedItem(path),
+            onRepeatedItem: (path, stampUtc) => HandleRepeatedCopiedItem(path, stampUtc),
+            onExternalFolderChanged: () => _line?.PruneMissingFromLine(),
+            isDesktopSaveGuard: path => _line?.IsSavedToDesktopPath(path) == true,
+            isOnboardingPending: () => _onboardingPending);
+        _screenshotCoordinator.RefreshWatchers();
 
         _pasteHint = new PasteHint();
         _paster = new Paster(
@@ -137,6 +152,7 @@ public partial class App : Application
                 _settingsStore.Save(_settings);
                 if (_clipboardWatcher.IsEnabled) _clipboardWatcher.Start();
                 else _clipboardWatcher.Stop();
+                _screenshotCoordinator?.RefreshWatchers();
             },
             isPaused: () => _settings.RecordingPaused,
             getItemCount: () => _line.LineItems.Count,
@@ -190,6 +206,7 @@ public partial class App : Application
             // 用户正在面板中挑选时暂不抽走脚下的卡片（对齐 AppDelegate.swift:100）
             if (_panel is { IsSummoned: true }) return;
             _line?.ClearExpired();
+            _searchIndex?.ScanUnindexedImages();
             RunRetentionIfDue();
         };
         _expiryTimer.Start();
@@ -357,6 +374,7 @@ public partial class App : Application
             if (_clipboardWatcher.IsEnabled) _clipboardWatcher.Start();
             else _clipboardWatcher.Stop();
         }
+        _screenshotCoordinator?.RefreshWatchers();
         RefreshTrayState();
     }
 
@@ -428,14 +446,28 @@ public partial class App : Application
     private void ShowFirstLaunchOnboarding()
     {
         if (_onboardingWindow is { IsLoaded: true } || _line is null) return;
-        _onboardingWindow = new OnboardingWindow(_line.Theme, (paused, openAtLogin) =>
+        _onboardingWindow = new OnboardingWindow(
+            _line.Theme,
+            (paused, openAtLogin) =>
+            {
+                _onboardingPending = false;
+                _settings.RecordingExplained = true;
+                _settings.RecordingPaused = paused;
+                LaunchAtLogin.SetEnabled(openAtLogin);
+                SaveAndApplySettings();
+            },
+            screenshotsEnabled => _settings.ScreenshotsEnabled = screenshotsEnabled);
+        _onboardingWindow.Closed += (_, _) =>
         {
-            _settings.RecordingExplained = true;
-            _settings.RecordingPaused = paused;
-            LaunchAtLogin.SetEnabled(openAtLogin);
-            SaveAndApplySettings();
-        });
-        _onboardingWindow.Closed += (_, _) => _onboardingWindow = null;
+            var closedWin = _onboardingWindow;
+            _onboardingWindow = null;
+            if (_onboardingPending && closedWin is not { ConfirmedByButton: true })
+            {
+                _onboardingPending = false;
+                OnboardingWindow.ApplyDismissedWithoutAnswer(_settings, LaunchAtLogin.SetEnabled);
+                SaveAndApplySettings();
+            }
+        };
         _onboardingWindow.Show();
         _onboardingWindow.Activate();
     }
@@ -484,6 +516,7 @@ public partial class App : Application
         _heldManager?.Dispose();
         _shareService?.Dispose();
         _hotKey?.Dispose();
+        _screenshotCoordinator?.Dispose();
         _clipboardWatcher?.Dispose();
         _clipboardBackend?.Dispose();
         _searchIndex?.Dispose();

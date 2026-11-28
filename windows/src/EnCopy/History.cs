@@ -85,6 +85,7 @@ public sealed class History : IDisposable
             CREATE VIRTUAL TABLE IF NOT EXISTS item_text USING fts5(text, tokenize='trigram');
             """);
         EnsureColumnExists("item", "ocr_text", "TEXT");
+        MigrateLegacyPictureHashesIfNeeded();
     }
 
     public void Dispose()
@@ -112,11 +113,135 @@ public sealed class History : IDisposable
 
     public static byte[] PictureHash(byte[] pngBytes)
     {
+        // 解码为规范 BGRA32 像素计算 SHA-256，确保 Win+Shift+S 剪贴板（WPF 重编码）与系统截图文件夹（WIC 编码）同一张图哈希完全一致
+        try
+        {
+            using var ms = new MemoryStream(pngBytes, writable: false);
+            var dec = System.Windows.Media.Imaging.BitmapDecoder.Create(
+                ms,
+                System.Windows.Media.Imaging.BitmapCreateOptions.IgnoreColorProfile,
+                System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
+            if (dec.Frames.Count > 0)
+            {
+                var frame = dec.Frames[0];
+                int w = frame.PixelWidth;
+                int h = frame.PixelHeight;
+                if (w > 0 && h > 0 && (long)w * h <= 64_000_000L)
+                {
+                    System.Windows.Media.Imaging.BitmapSource bgra = frame.Format == System.Windows.Media.PixelFormats.Bgra32
+                        ? frame
+                        : new System.Windows.Media.Imaging.FormatConvertedBitmap(frame, System.Windows.Media.PixelFormats.Bgra32, null, 0);
+                    int stride = w * 4;
+                    var pixels = new byte[stride * h];
+                    bgra.CopyPixels(pixels, stride, 0);
+
+                    using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                    sha.AppendData("picture-px:"u8);
+                    Span<byte> dims = stackalloc byte[8];
+                    BitConverter.TryWriteBytes(dims[..4], w);
+                    BitConverter.TryWriteBytes(dims[4..], h);
+                    sha.AppendData(dims);
+                    sha.AppendData(pixels);
+                    return sha.GetHashAndReset();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // 非位图格式回退按原始字节哈希
+        }
+
+        return LegacyBytePictureHash(pngBytes);
+    }
+
+    public static byte[] LegacyBytePictureHash(byte[] rawBytes)
+    {
         var prefix = "picture:"u8;
-        var buf = new byte[prefix.Length + pngBytes.Length];
+        var buf = new byte[prefix.Length + rawBytes.Length];
         prefix.CopyTo(buf);
-        Buffer.BlockCopy(pngBytes, 0, buf, prefix.Length, pngBytes.Length);
+        Buffer.BlockCopy(rawBytes, 0, buf, prefix.Length, rawBytes.Length);
         return SHA256.HashData(buf);
+    }
+
+    public sealed record ImageIngestResult(string FullPath, bool IsNewFile, bool MergedWithinTwinWindow);
+
+    /// <summary>
+    /// 在数据库同一把互斥锁内原子完成「像素/旧字节哈希查重 → 合并双通道窗口或落盘新副本 → 写入 item 记录」，
+    /// 彻底消除 Win+Shift+S 剪贴板通道与文件夹监测通道并发写入产生双份副本的竞态（T-063）。
+    /// </summary>
+    public ImageIngestResult? IngestPrivateImage(
+        byte[] rawBytes,
+        string filePrefix,
+        string extension,
+        DateTime recordedUtc,
+        string? appName,
+        double? ttlSeconds,
+        double twinWindowSeconds)
+    {
+        if (rawBytes is not { Length: > 0 }) return null;
+
+        lock (_dbLock)
+        {
+            if (FindPictureHolding(rawBytes) is { } existingPath)
+            {
+                var prevUsed = LastUsedUtcOf(existingPath);
+                bool mergedTwin = twinWindowSeconds > 0 &&
+                                  prevUsed.HasValue &&
+                                  Math.Abs((recordedUtc.ToUniversalTime() - prevUsed.Value).TotalSeconds) <= twinWindowSeconds;
+
+                if (!string.IsNullOrWhiteSpace(appName))
+                {
+                    SetApp(existingPath, appName);
+                }
+                RenewTtl(existingPath, ttlSeconds);
+
+                if (!mergedTwin && StoredKeyFor(existingPath) is { } existingKey)
+                {
+                    double usedSec = new DateTimeOffset(recordedUtc.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
+                    using var touchCmd = _db.CreateCommand();
+                    touchCmd.CommandText = "UPDATE item SET used = @used WHERE path = @path";
+                    touchCmd.Parameters.AddWithValue("@used", usedSec);
+                    touchCmd.Parameters.AddWithValue("@path", existingKey);
+                    touchCmd.ExecuteNonQuery();
+                }
+
+                return new ImageIngestResult(existingPath, IsNewFile: false, MergedWithinTwinWindow: mergedTwin);
+            }
+
+            Directory.CreateDirectory(DataFolder.ScreenshotsFolder);
+            var ext = string.IsNullOrWhiteSpace(extension)
+                ? ".png"
+                : (extension.StartsWith('.') ? extension.ToLowerInvariant() : "." + extension.ToLowerInvariant());
+            var stamp = recordedUtc.ToLocalTime().ToString("yyyy-MM-dd HH.mm.ss.fff", CultureInfo.InvariantCulture);
+            var destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"{filePrefix} {stamp}{ext}");
+            int disambig = 2;
+            while (File.Exists(destPath))
+            {
+                destPath = Path.Combine(DataFolder.ScreenshotsFolder, $"{filePrefix} {stamp} {disambig}{ext}");
+                disambig++;
+            }
+
+            var tmp = $"{destPath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllBytes(tmp, rawBytes);
+                File.Move(tmp, destPath, overwrite: false);
+            }
+            catch (IOException)
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                return null;
+            }
+
+            RecordImage(
+                destPath,
+                ocrWords: null,
+                pngBytesForHash: rawBytes,
+                usedAt: recordedUtc,
+                appName: appName,
+                ttlSeconds: ttlSeconds);
+            return new ImageIngestResult(destPath, IsNewFile: true, MergedWithinTwinWindow: false);
+        }
     }
 
     public static byte[] FileListHash(IReadOnlyList<string> rawPaths)
@@ -131,24 +256,43 @@ public sealed class History : IDisposable
     {
         lock (_dbLock)
         {
-            var hash = PictureHash(pngBytes);
-            var paths = new List<string>();
+            var pxHash = PictureHash(pngBytes);
+            var legHash = LegacyBytePictureHash(pngBytes);
+            var rows = new List<(long Id, string Rel, byte[] Hash)>();
             using (var cmd = _db.CreateCommand())
             {
-                cmd.CommandText = "SELECT path FROM item WHERE hash = @hash AND shrunk = 0";
-                cmd.Parameters.AddWithValue("@hash", hash);
+                cmd.CommandText = "SELECT id, path, hash FROM item WHERE (hash = @px OR hash = @leg) AND shrunk = 0";
+                cmd.Parameters.AddWithValue("@px", pxHash);
+                cmd.Parameters.AddWithValue("@leg", legHash);
                 using var reader = cmd.ExecuteReader();
                 while (reader.Read())
                 {
-                    paths.Add(reader.GetString(0));
+                    rows.Add((reader.GetInt64(0), reader.GetString(1), (byte[])reader["hash"]));
                 }
             }
 
-            foreach (var rel in paths)
+            foreach (var (id, rel, rowHash) in rows)
             {
                 var abs = AbsolutePath(rel);
-                if (File.Exists(abs)) return abs;
-                RemoveByRelativePath(rel);
+                if (!File.Exists(abs))
+                {
+                    RemoveByRelativePath(rel);
+                    continue;
+                }
+                // 私有图片查重只命中本数据目录内的私有副本，绝不把系统截图复用指向外部监视目录文件
+                if (RelativePath(abs) is null)
+                {
+                    continue;
+                }
+                if (!rowHash.AsSpan().SequenceEqual(pxHash))
+                {
+                    using var up = _db.CreateCommand();
+                    up.CommandText = "UPDATE item SET hash = @px WHERE id = @id";
+                    up.Parameters.AddWithValue("@px", pxHash);
+                    up.Parameters.AddWithValue("@id", id);
+                    up.ExecuteNonQuery();
+                }
+                return abs;
             }
             return null;
         }
@@ -602,6 +746,22 @@ public sealed class History : IDisposable
         }
     }
 
+    public DateTime? LastUsedUtcOf(string fullPath)
+    {
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT used FROM item WHERE path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            if (raw is null or DBNull) return null;
+            double sec = Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+            return DateTimeOffset.FromUnixTimeMilliseconds((long)(sec * 1000.0)).UtcDateTime;
+        }
+    }
+
     /// <summary>
     /// 判断搜索词是否凭借「图中文字」命中图片：
     /// 自有图片仅按 OCR 建索引，任意命中词即标「图中文字」；外部图片若存在至少一个搜索词未出现在其文件名但命中 OCR 文字，同样标「图中文字」。
@@ -925,5 +1085,73 @@ public sealed class History : IDisposable
         {
             Execute($"ALTER TABLE {table} ADD COLUMN {column} {columnType}");
         }
+    }
+
+    private void MigrateLegacyPictureHashesIfNeeded()
+    {
+        long userVer;
+        using (var verCmd = _db.CreateCommand())
+        {
+            verCmd.CommandText = "PRAGMA user_version";
+            userVer = Convert.ToInt64(verCmd.ExecuteScalar() ?? 0L);
+        }
+        if (userVer >= 2) return;
+
+        var rows = new List<(long Id, string Rel)>();
+        using (var q = _db.CreateCommand())
+        {
+            q.CommandText = "SELECT id, path FROM item WHERE shrunk = 0";
+            using var reader = q.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        bool allMigrated = true;
+        using var tx = _db.BeginTransaction();
+        foreach (var (id, rel) in rows)
+        {
+            var abs = AbsolutePath(rel);
+            if (!SearchIndex.IsRecognizableImagePath(abs) || !File.Exists(abs)) continue;
+            try
+            {
+                using var fs = new FileStream(abs, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var bytes = new byte[fs.Length];
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int r = fs.Read(bytes, offset, bytes.Length - offset);
+                    if (r <= 0) break;
+                    offset += r;
+                }
+                var pxHash = PictureHash(offset == bytes.Length ? bytes : bytes[..offset]);
+                using var up = _db.CreateCommand();
+                up.Transaction = tx;
+                up.CommandText = "UPDATE item SET hash = @h WHERE id = @id";
+                up.Parameters.AddWithValue("@h", pxHash);
+                up.Parameters.AddWithValue("@id", id);
+                up.ExecuteNonQuery();
+            }
+            catch (IOException)
+            {
+                if (File.Exists(abs)) allMigrated = false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                if (File.Exists(abs)) allMigrated = false;
+            }
+            catch (Exception)
+            {
+            }
+        }
+        if (allMigrated)
+        {
+            using var setVer = _db.CreateCommand();
+            setVer.Transaction = tx;
+            setVer.CommandText = "PRAGMA user_version = 2";
+            setVer.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 }

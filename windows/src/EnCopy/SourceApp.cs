@@ -400,14 +400,36 @@ public static class SourceApp
     }
 }
 
+public readonly record struct WindowTraits(
+    bool IsVisible,
+    bool IsCloaked,
+    uint Style,
+    uint ExStyle,
+    bool HasOwner,
+    string? ClassName);
+
 /// <summary>
 /// 持续跟踪「最后一次激活的外部正常应用」：
-/// 右键托盘或打开菜单时，任务栏（Shell_TrayWnd / NotifyIconOverflowWindow / TopLevelWindowForXamlIsland）
-/// 或 EnCopy 自身会抢走前台焦点；忽略这些系统外壳窗口即可在设置「按 App 记录」首行精准列出打开设置前正在使用的应用。
+/// 按通用窗口特征（排除 tool window、不激活窗口、不在任务栏上显示的隐藏 Owner / 纯无框 Popup 浮层与系统外壳类）过滤，
+/// 不依赖特定第三方 Dock 进程名，确保任意任务栏、托盘或第三方 Dock 软件点击打开设置时仍保留先前正在使用的应用。
 /// </summary>
 public sealed class ForegroundAppTracker
 {
     private const uint GaRoot = 2;
+    private const uint GwOwner = 4;
+    private const int GwlStyle = -16;
+    private const int GwlExStyle = -20;
+    private const int DwmwaCloaked = 14;
+
+    private const uint WsPopup = 0x80000000u;
+    private const uint WsCaption = 0x00C00000u;
+    private const uint WsSysMenu = 0x00080000u;
+    private const uint WsThickFrame = 0x00040000u;
+    private const uint WsMinimizeBox = 0x00020000u;
+
+    private const uint WsExToolWindow = 0x00000080u;
+    private const uint WsExAppWindow = 0x00040000u;
+    private const uint WsExNoActivate = 0x08000000u;
 
     private static readonly HashSet<string> IgnoredShellClasses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -423,21 +445,6 @@ public sealed class ForegroundAppTracker
         "Shell_InputSwitchTopLevelWindow"
     };
 
-    private static readonly HashSet<string> IgnoredShellProcessBaseNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "dock_64",
-        "mydock",
-        "dockmod",
-        "dockmod64",
-        "shellexperiencehost",
-        "searchhost",
-        "startmenuexperiencehost",
-        "textinputhost",
-        "lockapp",
-        "sihost",
-        "dwm"
-    };
-
     private IntPtr _lastObservedHwnd;
     private uint _lastObservedPid;
 
@@ -450,15 +457,54 @@ public sealed class ForegroundAppTracker
         string.Equals(className?.Trim(), "CabinetWClass", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(className?.Trim(), "ExploreWClass", StringComparison.OrdinalIgnoreCase);
 
-    public void RecordObservation(string? windowClass, string? exePath, uint pid, uint selfPid)
+    public static bool IsTaskbarEligibleWindow(WindowTraits traits)
+    {
+        if (!traits.IsVisible || traits.IsCloaked || IsIgnoredShellClass(traits.ClassName))
+        {
+            return false;
+        }
+        if ((traits.ExStyle & WsExToolWindow) != 0 || (traits.ExStyle & WsExNoActivate) != 0)
+        {
+            return false;
+        }
+        if (traits.HasOwner && (traits.ExStyle & WsExAppWindow) == 0)
+        {
+            return false;
+        }
+        bool hasStandardChrome = (traits.Style & (WsCaption | WsThickFrame | WsSysMenu | WsMinimizeBox)) != 0;
+        if ((traits.Style & WsPopup) != 0 && !hasStandardChrome && (traits.ExStyle & WsExAppWindow) == 0)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    public static WindowTraits InspectWindowTraits(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return default;
+        bool visible = IsWindowVisible(hwnd);
+        int cloaked = 0;
+        try { _ = DwmGetWindowAttribute(hwnd, DwmwaCloaked, out cloaked, sizeof(int)); } catch { }
+        uint style = unchecked((uint)GetWindowLongW(hwnd, GwlStyle));
+        uint exStyle = unchecked((uint)GetWindowLongW(hwnd, GwlExStyle));
+        bool hasOwner = GetWindow(hwnd, GwOwner) != IntPtr.Zero;
+        var cls = SourceApp.GetWindowClassName(hwnd);
+        return new WindowTraits(visible, cloaked != 0, style, exStyle, hasOwner, cls);
+    }
+
+    public void RecordObservation(string? windowClass, string? exePath, uint pid, uint selfPid, WindowTraits? traits = null)
     {
         if (pid == 0 || pid == selfPid || IsIgnoredShellClass(windowClass) || string.IsNullOrWhiteSpace(exePath))
         {
             return;
         }
+        if (traits is { } t && !IsTaskbarEligibleWindow(t))
+        {
+            return;
+        }
 
         var baseKey = SourceApp.NormalizeRuleKey(exePath);
-        if (string.IsNullOrEmpty(baseKey) || IgnoredShellProcessBaseNames.Contains(baseKey))
+        if (string.IsNullOrEmpty(baseKey))
         {
             return;
         }
@@ -473,28 +519,39 @@ public sealed class ForegroundAppTracker
         LastExternalApp = exePath;
     }
 
-    public string? ObserveWindow(IntPtr hwnd)
+    public string? ObserveWindow(IntPtr hwnd, string? exePathOverrideForTest = null, uint? pidOverrideForTest = null)
     {
         if (hwnd == IntPtr.Zero) return LastExternalApp;
         IntPtr root = GetAncestor(hwnd, GaRoot);
         IntPtr target = root != IntPtr.Zero ? root : hwnd;
-        GetWindowThreadProcessId(target, out uint pid);
-        if (target == _lastObservedHwnd && pid == _lastObservedPid)
+
+        uint pid;
+        if (pidOverrideForTest is { } forcedPid)
         {
-            return LastExternalApp;
+            pid = forcedPid;
         }
-        _lastObservedHwnd = target;
-        _lastObservedPid = pid;
+        else
+        {
+            GetWindowThreadProcessId(target, out pid);
+            if (target == _lastObservedHwnd && pid == _lastObservedPid)
+            {
+                return LastExternalApp;
+            }
+            _lastObservedHwnd = target;
+            _lastObservedPid = pid;
+        }
 
         uint selfPid = (uint)Environment.ProcessId;
         if (pid == 0 || pid == selfPid) return LastExternalApp;
 
         var cls = SourceApp.GetWindowClassName(hwnd);
-        var rootCls = target != hwnd ? SourceApp.GetWindowClassName(target) : cls;
-        if (IsIgnoredShellClass(cls) || IsIgnoredShellClass(rootCls)) return LastExternalApp;
+        if (IsIgnoredShellClass(cls)) return LastExternalApp;
 
-        var exe = SourceApp.ResolveWindowExecutable(target);
-        RecordObservation(rootCls ?? cls, exe, pid, selfPid);
+        var traits = InspectWindowTraits(target);
+        if (!IsTaskbarEligibleWindow(traits)) return LastExternalApp;
+
+        var exe = exePathOverrideForTest ?? SourceApp.ResolveWindowExecutable(target);
+        RecordObservation(traits.ClassName ?? cls, exe, pid, selfPid, traits);
         return LastExternalApp;
     }
 
@@ -502,30 +559,31 @@ public sealed class ForegroundAppTracker
 
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 }
 
 /// <summary>
 /// Windows「登录时打开」注册表项（HKCU\Software\Microsoft\Windows\CurrentVersion\Run）：
-/// 日常版写 EnCopy，开发版写 EnCopy Dev，互不干扰；隔离测试模式（ENCOPY_CHECKS_RUNNER=1）仅在内存中模拟，绝不触碰真实注册表。
+/// 日常版写 EnCopy，开发版写 EnCopyDev（与 clean-dev.ps1 一致），互不干扰；隔离测试模式（ENCOPY_CHECKS_RUNNER=1）默认在内存中模拟，绝不触碰真实 Run。
 /// </summary>
 public static class LaunchAtLogin
 {
     private const string RunRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private static bool _simulatedInChecks;
 
+    public static string RegistryValueNameForEdition(string editionAppName) =>
+        string.Equals(editionAppName?.Trim(), "EnCopy", StringComparison.OrdinalIgnoreCase)
+            ? "EnCopy"
+            : "EnCopyDev";
+
     public static bool IsEnabled()
     {
         if (IsInChecksRunner()) return _simulatedInChecks;
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunRegistryPath, writable: false);
-            return key?.GetValue(AppIdentity.AppName) is string val && !string.IsNullOrWhiteSpace(val);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
+        return IsEnabledForEdition(RunRegistryPath, AppIdentity.AppName);
     }
 
     public static void SetEnabled(bool enabled)
@@ -535,22 +593,46 @@ public static class LaunchAtLogin
             _simulatedInChecks = enabled;
             return;
         }
+        SetEnabledForEdition(RunRegistryPath, AppIdentity.AppName, Environment.ProcessPath ?? string.Empty, enabled);
+    }
 
+    public static bool IsEnabledForEdition(string registrySubKeyPath, string editionAppName)
+    {
+        if (string.IsNullOrWhiteSpace(registrySubKeyPath)) return false;
         try
         {
-            using var key = Registry.CurrentUser.CreateSubKey(RunRegistryPath, writable: true);
+            using var key = Registry.CurrentUser.OpenSubKey(registrySubKeyPath, writable: false);
+            var valName = RegistryValueNameForEdition(editionAppName);
+            return key?.GetValue(valName) is string val && !string.IsNullOrWhiteSpace(val);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    public static void SetEnabledForEdition(string registrySubKeyPath, string editionAppName, string exePath, bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(registrySubKeyPath)) return;
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(registrySubKeyPath, writable: true);
             if (key is null) return;
+            var valName = RegistryValueNameForEdition(editionAppName);
             if (enabled)
             {
-                var exePath = Environment.ProcessPath;
                 if (!string.IsNullOrWhiteSpace(exePath))
                 {
-                    key.SetValue(AppIdentity.AppName, $"\"{exePath}\"");
+                    key.SetValue(valName, $"\"{exePath}\"");
                 }
             }
             else
             {
-                key.DeleteValue(AppIdentity.AppName, throwOnMissingValue: false);
+                key.DeleteValue(valName, throwOnMissingValue: false);
+                if (!string.Equals(valName, editionAppName, StringComparison.Ordinal))
+                {
+                    key.DeleteValue(editionAppName, throwOnMissingValue: false);
+                }
             }
         }
         catch (Exception)

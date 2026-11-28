@@ -32,6 +32,8 @@ public sealed class AppSettings
         (5L << 30, "5 GB")
     ];
 
+    public const int MaxExtraWatchedFolders = 3;
+
     public bool RecordingPaused { get; set; }
     public bool ImagesEnabled { get; set; }
     public bool TextEnabled { get; set; } = true;
@@ -41,6 +43,7 @@ public sealed class AppSettings
     public bool SoundsEnabled { get; set; } = true;
     public bool ScreenshotsEnabled { get; set; } = true;
     public bool CopyEachScreenshot { get; set; }
+    public List<string> ExtraWatchedFolders { get; set; } = [];
     public int? KeepOnLine { get; set; }
     public string Theme { get; set; } = "paper";
     public bool OpensFromTopEdge { get; set; } = true;
@@ -59,6 +62,91 @@ public sealed class AppSettings
     public double NormalizedPeekSeconds => PeekChoices.Contains(PeekSeconds) ? PeekSeconds : 1.5;
     public long NormalizedOriginalsCapBytes =>
         OriginalsCapChoices.Any(c => c.Bytes == OriginalsCapBytes) ? OriginalsCapBytes : (1L << 30);
+
+    public IReadOnlyList<string> NormalizedWatchedFolders
+    {
+        get
+        {
+            if (ExtraWatchedFolders is not { Count: > 0 }) return [];
+            var result = new List<string>(MaxExtraWatchedFolders);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var raw in ExtraWatchedFolders)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                string full;
+                try
+                {
+                    full = Path.GetFullPath(raw).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+                if (!Directory.Exists(full) || DataFolder.Contains(full)) continue;
+                if (seen.Add(full))
+                {
+                    result.Add(full);
+                    if (result.Count >= MaxExtraWatchedFolders) break;
+                }
+            }
+            return result;
+        }
+    }
+
+    public bool TryAddWatchedFolder(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath)) return false;
+        string full;
+        try
+        {
+            full = Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        if (!Directory.Exists(full) || DataFolder.Contains(full)) return false;
+
+        var current = NormalizedWatchedFolders.ToList();
+        if (current.Any(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+        if (current.Count >= MaxExtraWatchedFolders)
+        {
+            return false;
+        }
+        current.Add(full);
+        ExtraWatchedFolders = current;
+        return true;
+    }
+
+    public bool RemoveWatchedFolder(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath) || ExtraWatchedFolders is not { Count: > 0 }) return false;
+        string full;
+        try
+        {
+            full = Path.GetFullPath(folderPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (ArgumentException)
+        {
+            full = folderPath.Trim();
+        }
+        int removed = ExtraWatchedFolders.RemoveAll(p =>
+        {
+            try
+            {
+                var norm = Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return string.Equals(norm, full, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (ArgumentException)
+            {
+                return string.Equals(p, full, StringComparison.OrdinalIgnoreCase);
+            }
+        });
+        return removed > 0;
+    }
 
     public LineTheme GetActiveTheme() => Theme?.Trim().ToLowerInvariant() switch
     {

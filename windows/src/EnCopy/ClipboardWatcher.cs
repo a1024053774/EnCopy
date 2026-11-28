@@ -66,12 +66,17 @@ public sealed class ClipboardWatcher : IDisposable
     {
         "hxoutlook", "olk", "outlook", "thunderbird", "phoneexperiencehost"
     };
+    private static readonly HashSet<string> ScreenshotToolBaseNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "screenclippinghost", "snippingtool", "snipandsketch", "gamebar", "gamebarftserver"
+    };
 
     private readonly IClipboardBackend _backend;
     private readonly History _history;
     private readonly AppSettings _settings;
     private readonly Action<string> _onNew;
     private readonly Action<string, DateTime> _onAgain;
+    private readonly Func<bool>? _isOnboardingPending;
 
     private uint _lastSequence;
     private bool _started;
@@ -82,19 +87,27 @@ public sealed class ClipboardWatcher : IDisposable
         History history,
         AppSettings settings,
         Action<string> onNew,
-        Action<string, DateTime> onAgain)
+        Action<string, DateTime> onAgain,
+        Func<bool>? isOnboardingPending = null)
     {
         _backend = backend;
         _history = history;
         _settings = settings;
         _onNew = onNew;
         _onAgain = onAgain;
+        _isOnboardingPending = isOnboardingPending;
         _lastSequence = backend.SequenceNumber;
     }
 
     public bool IsEnabled =>
         !_settings.RecordingPaused &&
-        (_settings.TextEnabled || _settings.LinksEnabled || _settings.ImagesEnabled || _settings.FilesEnabled);
+        (_settings.TextEnabled || _settings.LinksEnabled || _settings.ImagesEnabled || _settings.FilesEnabled || _settings.ScreenshotsEnabled);
+
+    public static bool IsSystemScreenshotSource(string? appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId)) return false;
+        return ScreenshotToolBaseNames.Contains(SourceApp.NormalizeRuleKey(appId));
+    }
 
     /// <summary>
     /// 识别 4–8 位验证码（对齐 ClipboardWatcher.swift:107-118）：
@@ -139,6 +152,7 @@ public sealed class ClipboardWatcher : IDisposable
 
     public void CheckNow()
     {
+        bool blocked = _settings.RecordingPaused || (_isOnboardingPending?.Invoke() == true) || !IsEnabled;
         bool processedAnyQueued = false;
         while (_backend.TryDequeueSnapshot(out var queued))
         {
@@ -146,7 +160,7 @@ public sealed class ClipboardWatcher : IDisposable
             if (queued is null) continue;
             if (queued.SequenceNumber == _lastSequence) continue;
             _lastSequence = queued.SequenceNumber;
-            if (!_settings.RecordingPaused && IsEnabled)
+            if (!blocked)
             {
                 ProcessSnapshot(queued);
             }
@@ -156,7 +170,7 @@ public sealed class ClipboardWatcher : IDisposable
             return;
         }
 
-        if (_settings.RecordingPaused || !IsEnabled)
+        if (blocked)
         {
             _lastSequence = _backend.SequenceNumber;
             return;
@@ -251,9 +265,14 @@ public sealed class ClipboardWatcher : IDisposable
             return;
         }
 
-        if (_settings.ImagesEnabled && snap.PngBytes is { Length: > 0 and <= MaxImageBytes } pngBytes)
+        if (snap.PngBytes is { Length: > 0 and <= MaxImageBytes } pngBytes)
         {
-            SaveCopiedImage(pngBytes, appId, baseTtl);
+            if (_isOnboardingPending?.Invoke() == true) return;
+            bool isSysShot = IsSystemScreenshotSource(appId);
+            if ((isSysShot && _settings.ScreenshotsEnabled) || _settings.ImagesEnabled)
+            {
+                SaveCopiedImage(pngBytes, appId, baseTtl, isScreenshotCapture: isSysShot && _settings.ScreenshotsEnabled);
+            }
         }
     }
 
@@ -302,38 +321,30 @@ public sealed class ClipboardWatcher : IDisposable
         _onNew(path);
     }
 
-    private void SaveCopiedImage(byte[] pngBytes, string? appId, double? ttlSeconds)
+    private void SaveCopiedImage(byte[] pngBytes, string? appId, double? ttlSeconds, bool isScreenshotCapture = false)
     {
         if (!Win32ClipboardBackend.IsSanePngImage(pngBytes)) return;
 
-        if (_history.FindPictureHolding(pngBytes) is { } existingImg)
-        {
-            var stamp = NextMonotonicUtc();
-            _history.SetApp(existingImg, appId);
-            _history.RenewTtl(existingImg, ttlSeconds);
-            _onAgain(existingImg, stamp);
-            return;
-        }
-
-        var folder = DataFolder.ScreenshotsFolder;
-        Directory.CreateDirectory(folder);
-
-        var stampName = DateTime.Now.ToString("yyyy-MM-dd 'at' HH.mm.ss", System.Globalization.CultureInfo.InvariantCulture);
-        var path = Path.Combine(folder, $"Clipboard {stampName}.png");
-        int n = 2;
-        while (File.Exists(path))
-        {
-            path = Path.Combine(folder, $"Clipboard {stampName} {n}.png");
-            n++;
-        }
-
-        var tmp = path + ".tmp";
-        File.WriteAllBytes(tmp, pngBytes);
-        File.Move(tmp, path, overwrite: false);
-
         var monotonicUtc = NextMonotonicUtc();
-        _history.RecordImage(path, ocrWords: null, pngBytesForHash: pngBytes, usedAt: monotonicUtc, appName: appId, ttlSeconds: ttlSeconds);
-        _onNew(path);
+        var filePrefix = isScreenshotCapture ? "Screenshot" : "Clipboard";
+        var outcome = _history.IngestPrivateImage(
+            pngBytes,
+            filePrefix,
+            ".png",
+            monotonicUtc,
+            appId,
+            ttlSeconds,
+            isScreenshotCapture ? ScreenshotCoordinator.TwinChannelDedupWindowSeconds : 0.0);
+        if (outcome is null) return;
+
+        if (outcome.IsNewFile)
+        {
+            _onNew(outcome.FullPath);
+        }
+        else if (!outcome.MergedWithinTwinWindow)
+        {
+            _onAgain(outcome.FullPath, monotonicUtc);
+        }
     }
 
     private DateTime NextMonotonicUtc()

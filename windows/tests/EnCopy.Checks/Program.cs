@@ -64,6 +64,7 @@ public static class Program
             ("HeldZoomDragAndTakeDownNeighbours", TestHeldZoomDragAndTakeDownNeighbours),
             ("FilesImagesAppRulesAndRetentionContract", () => TestFilesImagesAppRulesAndRetentionContract(previewDir)),
             ("WindowsOcrAndImageTextBadge", () => TestWindowsOcrAndImageTextBadge(previewDir)),
+            ("ScreenshotsWatchedFoldersLoginAndWindowTraits", () => TestScreenshotsWatchedFoldersLoginAndWindowTraits(previewDir)),
             ("InstallScriptIsolated", TestInstallScriptIsolated),
         };
 
@@ -1631,7 +1632,12 @@ public static class Program
             fgTracker.RecordObservation("Shell_TrayWnd", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
             fgTracker.RecordObservation("TrayNotifyWnd", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
             fgTracker.RecordObservation("TopLevelWindowForXamlIsland", @"C:\Windows\SystemApps\MicrosoftWindows.Client.Core_cw5n1h2txyewy\SearchHost.exe", pid: 2003, selfPid: 9999);
-            fgTracker.RecordObservation("MyDockBar", @"C:\Program Files\MyDockFinder\Dock_64.exe", pid: 2004, selfPid: 9999);
+            fgTracker.RecordObservation(
+                "GenericDockStrip",
+                @"C:\Program Files\AnyDock\OrbitDock.exe",
+                pid: 2004,
+                selfPid: 9999,
+                traits: new WindowTraits(IsVisible: true, IsCloaked: false, Style: 0x90000000u, ExStyle: 0x00000080u, HasOwner: false, ClassName: "GenericDockStrip"));
             fgTracker.RecordObservation("#32768", @"C:\Windows\explorer.exe", pid: 2002, selfPid: 9999);
             fgTracker.RecordObservation("Window", @"D:\EnCopy\EnCopy Dev.exe", pid: 9999, selfPid: 9999);
             Check(string.Equals(fgTracker.LastExternalApp, storeNotepadPath, StringComparison.OrdinalIgnoreCase),
@@ -1886,6 +1892,456 @@ public static class Program
         }
     }
 
+    private static void TestScreenshotsWatchedFoldersLoginAndWindowTraits(string? previewDir)
+    {
+        Localization.SetLanguageOverride("zh-Hans");
+        var rootTemp = Path.Combine(Path.GetTempPath(), "encopy-shot-" + Guid.NewGuid().ToString("N"));
+        var fakeSysShots = Path.Combine(rootTemp, "RedirectedScreenshots");
+        var fakeCaptures = Path.Combine(rootTemp, "Captures");
+        var watch1 = Path.Combine(rootTemp, "WatchA");
+        var watch2 = Path.Combine(rootTemp, "WatchB");
+        var watch3 = Path.Combine(rootTemp, "WatchC");
+        var watch4 = Path.Combine(rootTemp, "WatchD");
+        foreach (var d in new[] { rootTemp, fakeSysShots, fakeCaptures, watch1, watch2, watch3, watch4 })
+        {
+            Directory.CreateDirectory(d);
+        }
+
+        string tempRunSubKey = @"Software\EnCopyChecksTempRun_" + Guid.NewGuid().ToString("N");
+        var createdHwnds = new List<IntPtr>();
+        try
+        {
+            // 1. 动态读取系统已知文件夹 FOLDERID_Screenshots / FOLDERID_Captures（非空根路径）
+            var resolvedShots = ScreenshotFolders.GetSystemScreenshotsFolder();
+            var resolvedCaptures = ScreenshotFolders.GetSystemCapturesFolder();
+            Check(!string.IsNullOrWhiteSpace(resolvedShots) && Path.IsPathRooted(resolvedShots),
+                $"SHGetKnownFolderPath(FOLDERID_Screenshots) must return rooted path, got '{resolvedShots}'");
+            Check(!string.IsNullOrWhiteSpace(resolvedCaptures) && Path.IsPathRooted(resolvedCaptures),
+                $"SHGetKnownFolderPath(FOLDERID_Captures) must return rooted path, got '{resolvedCaptures}'");
+
+            // 2. 尾部完整性校验：半截 PNG 判为未写完，补齐 IEND 后判为完整；JPEG EOI 同样生效
+            var samplePng = Path.Combine(rootTemp, "whole-source.png");
+            WriteSamplePng(samplePng, 180, 120);
+            var fullPngBytes = File.ReadAllBytes(samplePng);
+            var partialPng = Path.Combine(fakeSysShots, "Screen 01.png");
+            File.WriteAllBytes(partialPng, fullPngBytes[..^6]); // 故意截断末尾 IEND CRC
+            Check(!ScreenshotWatcher.IsWholeFile(partialPng, fullPngBytes.Length - 6, null),
+                "Truncated PNG missing IEND tail must NOT be treated as whole");
+            Check(ScreenshotWatcher.IsWholeFile(samplePng, fullPngBytes.Length, null),
+                "Complete PNG with valid 12-byte IEND trailer must be treated as whole");
+
+            var partialJpg = Path.Combine(rootTemp, "cut.jpg");
+            File.WriteAllBytes(partialJpg, [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x11, 0x22]);
+            Check(!ScreenshotWatcher.IsWholeFile(partialJpg, 8, 8), "Truncated JPEG without 0xFFD9 must return false");
+            var wholeJpg = Path.Combine(rootTemp, "ok.jpg");
+            File.WriteAllBytes(wholeJpg, [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x11, 0x22, 0xFF, 0xD9]);
+            Check(ScreenshotWatcher.IsWholeFile(wholeJpg, 10, null), "Complete JPEG ending with 0xFFD9 must return true");
+
+            // 3. 双通道协同（系统截图文件夹 + Win+Shift+S 剪贴板，ImagesEnabled=false 但 ScreenshotsEnabled=true）+ 跨编码像素级去重 + 原文件绝不删除
+            using var history = new History();
+            var line = new Line(history);
+            var clipBackend = new FakeClipboardBackend { RequireStaOnWriteImage = true };
+            var settings = new AppSettings
+            {
+                ImagesEnabled = false, // 默认普通复制图片关闭，验证接管截图独立生效
+                ScreenshotsEnabled = true,
+                CopyEachScreenshot = true
+            };
+
+            bool onboardingPending = true;
+            using var clipWatcher = new ClipboardWatcher(
+                clipBackend,
+                history,
+                settings,
+                onNew: p => line.AddNew(p),
+                onAgain: (p, ts) => line.Use(p, ts),
+                isOnboardingPending: () => onboardingPending);
+            clipWatcher.Start();
+
+            // 首次引导尚未确认前（即使同时开启了 ImagesEnabled 与 ScreenshotsEnabled），绝不抢先记录或接管截图
+            settings.ImagesEnabled = true;
+            clipBackend.SimulateExternalImage(
+                fullPngBytes,
+                sourceAppId: @"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\ScreenClippingHost.exe");
+            Check(line.LineItems.Count == 0 && (!Directory.Exists(DataFolder.ScreenshotsFolder) || Directory.GetFiles(DataFolder.ScreenshotsFolder, "*.png").Length == 0),
+                "While first-launch onboarding is pending, clipboard screenshots must NOT be ingested even when ImagesEnabled=true");
+            settings.ImagesEnabled = false;
+            onboardingPending = false;
+
+            // 模拟系统截图目录在启动时尚未创建（Windows 首次截图时才自动新建 Pictures\Screenshots）
+            var lazyCreatedShotsDir = Path.Combine(rootTemp, "LazyCreatedScreenshots");
+            using var coordinator = new ScreenshotCoordinator(
+                settings,
+                history,
+                clipBackend,
+                onNewItem: (p, _) => line.AddNew(p),
+                onRepeatedItem: (p, ts) => line.Use(p, ts),
+                onExternalFolderChanged: () => line.PruneMissingFromLine(),
+                systemScreenshotsOverride: lazyCreatedShotsDir,
+                systemCapturesOverride: fakeCaptures);
+            coordinator.RefreshWatchers();
+
+            // 启动后系统首次创建目录并先写入半截文件
+            Directory.CreateDirectory(lazyCreatedShotsDir);
+            partialPng = Path.Combine(lazyCreatedShotsDir, "Screen 01.png");
+            File.WriteAllBytes(partialPng, fullPngBytes[..^6]);
+
+            // 半截文件 partialPng 在 lazyCreatedShotsDir 里不应上绳
+            coordinator.TriggerImmediateScanForTest();
+            Check(line.LineItems.Count == 0, "Half-written screenshot in newly created FOLDERID_Screenshots must wait until whole");
+
+            // 补齐完整字节但模拟截图工具短暂独占锁（FileShare.None）：不得因瞬时读取失败被永久标为已知而丢图
+            File.WriteAllBytes(partialPng, fullPngBytes);
+            using (var exclusiveLock = new FileStream(partialPng, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                coordinator.TriggerImmediateScanForTest();
+                Check(line.LineItems.Count == 0, "Exclusively locked screenshot cannot be copied yet and must remain retryable");
+            }
+
+            // 释放独占锁后，走真实异步 FileSystemWatcher/Timer 线程触发（验证 MTA 不会直接调 STA Clipboard 崩溃）
+            File.SetLastWriteTimeUtc(partialPng, DateTime.UtcNow.AddSeconds(1));
+            var asyncDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (line.LineItems.Count == 0 && DateTime.UtcNow < asyncDeadline)
+            {
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => { }));
+                Thread.Sleep(40);
+            }
+            if (line.LineItems.Count == 0)
+            {
+                coordinator.TriggerImmediateScanForTest();
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                    System.Windows.Threading.DispatcherPriority.Background,
+                    new Action(() => { }));
+            }
+            Check(line.LineItems.Count == 1, $"Whole screenshot after transient lock & lazy dir creation must hang once on rope, got {line.LineItems.Count}");
+            var privateCopyPath = line.LineItems[0].FilePath;
+            Check(DataFolder.Contains(privateCopyPath) && File.Exists(privateCopyPath) && File.Exists(partialPng),
+                "Screenshot must be copied into EnCopy\\Screenshots while keeping original untouched");
+            Check(clipBackend.LastWrittenImagePath == privateCopyPath,
+                "CopyEachScreenshot=true must copy new screenshot to clipboard on STA thread");
+
+            // 验证旧版字节级 PictureHash ("picture:" + rawBytes) 升级兼容：旧记录再次复制不产生重复副本
+            var legacyPngPath = Path.Combine(DataFolder.ScreenshotsFolder, "Legacy 2026-11-26.png");
+            var legacySampleSrc = Path.Combine(rootTemp, "legacy-src.png");
+            WritePatternPng(legacySampleSrc, 96, 72);
+            File.Copy(legacySampleSrc, legacyPngPath, overwrite: true);
+            var legacyBytes = File.ReadAllBytes(legacyPngPath);
+            history.RecordImage(legacyPngPath, ocrWords: "LEGACY_IMG", pngBytesForHash: legacyBytes, usedAt: DateTime.UtcNow.AddHours(-2));
+            using (var rawDb = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={DataFolder.HistoryDatabasePath}"))
+            {
+                rawDb.Open();
+                using var cmd = rawDb.CreateCommand();
+                var oldPrefix = "picture:"u8.ToArray();
+                var oldBuf = new byte[oldPrefix.Length + legacyBytes.Length];
+                Buffer.BlockCopy(oldPrefix, 0, oldBuf, 0, oldPrefix.Length);
+                Buffer.BlockCopy(legacyBytes, 0, oldBuf, oldPrefix.Length, legacyBytes.Length);
+                var oldByteHash = System.Security.Cryptography.SHA256.HashData(oldBuf);
+                cmd.CommandText = "UPDATE item SET hash = @h WHERE path LIKE 'Screenshots/Legacy%'";
+                cmd.Parameters.AddWithValue("@h", oldByteHash);
+                cmd.ExecuteNonQuery();
+            }
+            Check(string.Equals(history.FindPictureHolding(legacyBytes), legacyPngPath, StringComparison.OrdinalIgnoreCase),
+                "Legacy byte-hashed image in History.sqlite must still match FindPictureHolding after upgrade");
+            history.Remove(legacyPngPath);
+            File.Delete(legacyPngPath);
+
+            // 同一张截图同时经由 Win+Shift+S（ScreenClippingHost.exe）写入剪贴板，即使 PNG 块字节不同（插入额外元数据块），像素一致也必须合并为同一件不挂双份
+            var differentlyEncodedSamePixels = InjectPngTextChunk(fullPngBytes, "Software", "SnippingTool");
+            Check(!differentlyEncodedSamePixels.SequenceEqual(fullPngBytes), "Test PNG byte streams must differ while pixels match");
+            clipBackend.SimulateExternalImage(
+                differentlyEncodedSamePixels,
+                sourceAppId: @"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\ScreenClippingHost.exe");
+            Check(line.LineItems.Count == 1 && Directory.GetFiles(DataFolder.ScreenshotsFolder, "*.png").Length == 1,
+                "Dual-channel Win+Shift+S clipboard + folder arrival with different PNG encoding must deduplicate to 1 item");
+
+            // 在 EnCopy 中取下该截图：只删 EnCopy 自己文件夹里的副本，系统截图目录里的原文件必须完好无损
+            line.PickDefault();
+            Check(line.TakeDownPicked(), "TakeDownPicked on private screenshot copy must succeed");
+            Check(!File.Exists(privateCopyPath) && File.Exists(partialPng),
+                "Taking down screenshot in EnCopy must delete only EnCopy's copy and leave original untouched");
+
+            // 4. 最多 3 个自定义监视文件夹；取下来自自定义文件夹的图片绝不删除原文件
+            Check(settings.TryAddWatchedFolder(watch1) &&
+                  settings.TryAddWatchedFolder(watch2) &&
+                  settings.TryAddWatchedFolder(watch3) &&
+                  !settings.TryAddWatchedFolder(watch4) &&
+                  settings.NormalizedWatchedFolders.Count == 3,
+                "Must allow up to 3 custom watched folders and reject the 4th");
+            coordinator.RefreshWatchers();
+
+            var customImg = Path.Combine(watch2, "export-shot.png");
+            WriteSamplePng(customImg, 140, 100);
+            coordinator.TriggerImmediateScanForTest();
+            Check(line.LineItems.Any(n => string.Equals(n.FilePath, customImg, StringComparison.OrdinalIgnoreCase)),
+                "New image in custom watched folder must hang on the line");
+
+            // 若随后系统截图产生了与自定义文件夹图片相同像素的截图，必须写入 EnCopy\Screenshots\ 私有副本而非复用外部路径
+            var customImgBytes = File.ReadAllBytes(customImg);
+            clipBackend.SimulateExternalImage(
+                InjectPngTextChunk(customImgBytes, "Source", "SnipAfterExternal"),
+                sourceAppId: @"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\ScreenClippingHost.exe");
+            var privateTwin = line.LineItems.FirstOrDefault(n => DataFolder.Contains(n.FilePath));
+            Check(privateTwin is not null && File.Exists(privateTwin.FilePath),
+                "System screenshot matching an external watched-folder image's pixels must still create a private copy in EnCopy\\Screenshots");
+            if (privateTwin is not null)
+            {
+                line.PickCard(privateTwin);
+                line.TakeDownPicked();
+            }
+
+            line.PickCard(line.LineItems.First(n => string.Equals(n.FilePath, customImg, StringComparison.OrdinalIgnoreCase)));
+            Check(line.TakeDownPicked() && File.Exists(customImg),
+                "Taking down an image from a custom watched folder must NEVER delete the original file");
+
+            Check(settings.RemoveWatchedFolder(watch2) && settings.NormalizedWatchedFolders.Count == 2,
+                "Removing a custom watched folder must update NormalizedWatchedFolders");
+
+            // 重叠扫描单次认领不变量：同一文件在消费进行中并发触发第二次扫描，绝不重复消费两次
+            var overlapDir = Path.Combine(rootTemp, "OverlapWatch");
+            Directory.CreateDirectory(overlapDir);
+            var overlapMp4 = Path.Combine(overlapDir, "clip.mp4");
+            using var enterConsume = new ManualResetEventSlim(false);
+            using var allowFinish = new ManualResetEventSlim(false);
+            int overlapConsumes = 0;
+            using (var overlapWatcher = new ScreenshotWatcher(
+                overlapDir,
+                acceptRecordings: true,
+                tryConsumeFile: _ =>
+                {
+                    int n = Interlocked.Increment(ref overlapConsumes);
+                    if (n == 1)
+                    {
+                        enterConsume.Set();
+                        allowFinish.Wait(TimeSpan.FromSeconds(3));
+                    }
+                    return true;
+                },
+                adoptExistingAsBaseline: false))
+            {
+                File.WriteAllBytes(overlapMp4, [1, 2, 3, 4, 5, 6, 7, 8]);
+                overlapWatcher.ScanNow(); // 首次登记大小
+                var t1 = Task.Run(() => overlapWatcher.ScanNow()); // 第二次大小稳定判定为 whole，进入消费阻塞
+                Check(enterConsume.Wait(TimeSpan.FromSeconds(2)), "First overlapping scan must enter tryConsumeFile");
+                var t2 = Task.Run(() => overlapWatcher.ScanNow()); // 并发重叠扫描
+                Thread.Sleep(60);
+                allowFinish.Set();
+                Task.WaitAll([t1, t2], TimeSpan.FromSeconds(3));
+            }
+            Check(overlapConsumes == 1, $"Overlapping scans must claim and consume a candidate only once, got {overlapConsumes}");
+
+            // 旧版图片哈希迁移不变量：启动瞬间若某张旧图被独占锁住，不得推进 user_version = 2 永久跳过迁移
+            var migDir = Path.Combine(rootTemp, "LegacyMigTest");
+            Directory.CreateDirectory(migDir);
+            var migDbPath = Path.Combine(migDir, "History.sqlite");
+            var migImgPath = Path.Combine(migDir, "LockedLegacy.png");
+            WritePatternPng(migImgPath, 80, 60);
+            var migImgBytes = File.ReadAllBytes(migImgPath);
+            using (var seedH = new History(migDbPath))
+            {
+                seedH.RecordImage(migImgPath, ocrWords: null, pngBytesForHash: migImgBytes);
+            }
+            using (var rawMig = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={migDbPath}"))
+            {
+                rawMig.Open();
+                using var c = rawMig.CreateCommand();
+                c.CommandText = "UPDATE item SET hash = @h; PRAGMA user_version = 0;";
+                c.Parameters.AddWithValue("@h", History.LegacyBytePictureHash(migImgBytes));
+                c.ExecuteNonQuery();
+            }
+            using (var migLock = new FileStream(migImgPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                using var lockedOpen = new History(migDbPath);
+            }
+            long verAfterLocked;
+            using (var checkMig = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={migDbPath}"))
+            {
+                checkMig.Open();
+                using var c = checkMig.CreateCommand();
+                c.CommandText = "PRAGMA user_version";
+                verAfterLocked = Convert.ToInt64(c.ExecuteScalar() ?? 0L);
+            }
+            Check(verAfterLocked < 2, $"Migration with a locked image must NOT advance user_version to 2, got {verAfterLocked}");
+            using (var unlockedOpen = new History(migDbPath))
+            {
+                var reencodedMig = InjectPngTextChunk(migImgBytes, "Note", "ReencodedAfterUnlock");
+                // 临时切 DataFolder 验证或验证 user_version 已升至 2 且数据库内 hash 已升级为像素级哈希
+                using var verifyMig = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={migDbPath}");
+                verifyMig.Open();
+                using var vc = verifyMig.CreateCommand();
+                vc.CommandText = "SELECT (SELECT user_version FROM pragma_user_version), hash FROM item LIMIT 1";
+                using var vr = vc.ExecuteReader();
+                Check(vr.Read() && vr.GetInt64(0) == 2 && ((byte[])vr[1]).AsSpan().SequenceEqual(History.PictureHash(reencodedMig)),
+                    "Unlocked retry must advance user_version to 2 and upgrade hash to canonical pixel hash");
+            }
+
+            // 首次引导窗口直接关闭（未点击「好」或「暂停记录」）时，不得静默启用截图接管或开机启动项
+            var dismissedSettings = new AppSettings { ScreenshotsEnabled = true, RecordingExplained = false };
+            bool? loginAppliedOnDismiss = null;
+            var obWin = new OnboardingWindow(
+                LineTheme.Paper,
+                onCompleted: (_, login) => loginAppliedOnDismiss = login,
+                onScreenshotsChosen: enabled => dismissedSettings.ScreenshotsEnabled = enabled);
+            obWin.Closed += (_, _) =>
+            {
+                if (!obWin.ConfirmedByButton)
+                {
+                    OnboardingWindow.ApplyDismissedWithoutAnswer(dismissedSettings, login => loginAppliedOnDismiss = login);
+                }
+            };
+            _ = new System.Windows.Interop.WindowInteropHelper(obWin).EnsureHandle();
+            obWin.Close();
+            Check(!obWin.ConfirmedByButton &&
+                  dismissedSettings.RecordingExplained &&
+                  !dismissedSettings.ScreenshotsEnabled &&
+                  loginAppliedOnDismiss == false,
+                "Closing OnboardingWindow without clicking a button must disable screenshot takeover and login item");
+
+            // 5. 「登录时打开」真实 HKCU 隔离测试子键读写验证：日常版 EnCopy 与开发版 EnCopy Dev 互不覆盖
+            LaunchAtLogin.SetEnabledForEdition(tempRunSubKey, "EnCopy", @"C:\Daily\EnCopy.exe", enabled: true);
+            LaunchAtLogin.SetEnabledForEdition(tempRunSubKey, "EnCopy Dev", @"D:\Dev\EnCopy Dev.exe", enabled: true);
+            Check(LaunchAtLogin.IsEnabledForEdition(tempRunSubKey, "EnCopy") &&
+                  LaunchAtLogin.IsEnabledForEdition(tempRunSubKey, "EnCopy Dev"),
+                "Both daily and dev Run registry entries must coexist independently");
+            LaunchAtLogin.SetEnabledForEdition(tempRunSubKey, "EnCopy Dev", @"D:\Dev\EnCopy Dev.exe", enabled: false);
+            Check(LaunchAtLogin.IsEnabledForEdition(tempRunSubKey, "EnCopy") &&
+                  !LaunchAtLogin.IsEnabledForEdition(tempRunSubKey, "EnCopy Dev"),
+                "Disabling dev login item must NOT remove or overwrite daily EnCopy login item");
+
+            // 6. ForegroundAppTracker 通用窗口特征过滤（tool window / 不激活 / 不在任务栏显示），不靠硬编码 Dock_64.exe 进程名
+            const string storeNotepadPath = @"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2609.11.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe";
+            const string unknownDockExe = @"C:\Program Files\AnyVendorDock\OrbitDock.exe";
+
+            var normalAppHwnd = CreateTestTopWindow(
+                style: 0x10CF0000u, // WS_VISIBLE | WS_OVERLAPPEDWINDOW
+                exStyle: 0x00000000u,
+                owner: IntPtr.Zero);
+            createdHwnds.Add(normalAppHwnd);
+
+            // 证明不再按 Dock_64.exe 硬编码名字排除：若某正常任务栏窗口名叫 Dock_64.exe 也会被正常记录
+            var nonHardcodedTracker = new ForegroundAppTracker();
+            nonHardcodedTracker.ObserveWindow(normalAppHwnd, @"C:\Apps\Dock_64.exe", pidOverrideForTest: 4100);
+            Check(string.Equals(nonHardcodedTracker.LastExternalApp, @"C:\Apps\Dock_64.exe", StringComparison.OrdinalIgnoreCase),
+                "ForegroundAppTracker must filter by window traits, not hardcoded Dock_64.exe process name");
+
+            var tracker = new ForegroundAppTracker();
+            tracker.ObserveWindow(normalAppHwnd, storeNotepadPath, pidOverrideForTest: 4200);
+            Check(tracker.LastExternalApp == storeNotepadPath, "Normal taskbar app window must be recorded");
+
+            // 通用 Dock 窗口形态 ①：WS_EX_TOOLWINDOW (0x00000080)
+            var toolDockHwnd = CreateTestTopWindow(0x90000000u, 0x00000080u, IntPtr.Zero); // WS_POPUP | WS_VISIBLE + WS_EX_TOOLWINDOW
+            createdHwnds.Add(toolDockHwnd);
+            tracker.ObserveWindow(toolDockHwnd, unknownDockExe, pidOverrideForTest: 4301);
+
+            // 通用 Dock 窗口形态 ②：WS_EX_NOACTIVATE (0x08000000)
+            var noActivateDockHwnd = CreateTestTopWindow(0x90000000u, 0x08000000u, IntPtr.Zero); // WS_POPUP | WS_VISIBLE + WS_EX_NOACTIVATE
+            createdHwnds.Add(noActivateDockHwnd);
+            tracker.ObserveWindow(noActivateDockHwnd, unknownDockExe, pidOverrideForTest: 4302);
+
+            // 通用 Dock 窗口形态 ③：有隐藏 Owner 且无 WS_EX_APPWINDOW（经典第三方 Dock 隐藏任务栏图标手法）
+            var hiddenOwner = CreateTestTopWindow(0x80000000u, 0x00000000u, IntPtr.Zero); // 不可见 WS_POPUP Owner
+            createdHwnds.Add(hiddenOwner);
+            var ownedDockHwnd = CreateTestTopWindow(0x90000000u, 0x00000008u, hiddenOwner); // 可见置顶 Owned Popup，无 WS_EX_APPWINDOW
+            createdHwnds.Add(ownedDockHwnd);
+            tracker.ObserveWindow(ownedDockHwnd, unknownDockExe, pidOverrideForTest: 4303);
+
+            // 通用 Dock 窗口形态 ④：无边框纯 WS_POPUP 条形窗口且无 WS_EX_APPWINDOW（不在任务栏显示）
+            var popupStripDockHwnd = CreateTestTopWindow(0x90000000u, 0x00000008u, IntPtr.Zero);
+            createdHwnds.Add(popupStripDockHwnd);
+            tracker.ObserveWindow(popupStripDockHwnd, unknownDockExe, pidOverrideForTest: 4304);
+
+            Check(string.Equals(tracker.LastExternalApp, storeNotepadPath, StringComparison.OrdinalIgnoreCase),
+                $"All 4 generic Dock windows must be filtered by window traits and preserve Notepad, got '{tracker.LastExternalApp}'");
+
+            // 7. 设置「截图」页（含「同时监视文件夹」列表）离屏渲染落盘
+            var outDir = previewDir ?? Path.Combine(FindRepoRoot(), "evidence", "T-063");
+            Directory.CreateDirectory(outDir);
+            var settingsWin = new SettingsWindow(
+                settings,
+                line,
+                new SettingsCallbacks(() => { }, a => a(), () => { }, () => { }, () => { }));
+            settingsWin.SelectTab(2);
+            settingsWin.RenderOffscreen(610, 680);
+            SaveVisualPng(settingsWin, 610, 680, Path.Combine(outDir, "00-offscreen-settings-screenshots.png"));
+            Check(VisualContainsText(settingsWin, "WatchA") && VisualContainsText(settingsWin, "WatchC"),
+                "Settings Screenshots tab must render custom watched folders list");
+            settingsWin.Close();
+        }
+        finally
+        {
+            foreach (var h in createdHwnds)
+            {
+                if (h != IntPtr.Zero) DestroyWindow(h);
+            }
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(tempRunSubKey, throwOnMissingSubKey: false);
+            Localization.SetLanguageOverride(null);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(rootTemp, recursive: true);
+        }
+    }
+
+    private static IntPtr CreateTestTopWindow(uint style, uint exStyle, IntPtr owner) =>
+        CreateWindowExW(exStyle, "STATIC", "EnCopyTraitProbe", style, -32000, -32000, 120, 40, owner, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowExW(
+        uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
+        int x, int y, int nWidth, int nHeight,
+        IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(IntPtr hWnd);
+
+    private static byte[] InjectPngTextChunk(byte[] pngBytes, string keyword, string text)
+    {
+        // 在 PNG IHDR (前 33 字节) 之后插入合法的 tEXt 辅助块，使文件字节不同但解码像素完全一致
+        var keyBytes = Encoding.ASCII.GetBytes(keyword);
+        var valBytes = Encoding.ASCII.GetBytes(text);
+        var data = new byte[keyBytes.Length + 1 + valBytes.Length];
+        Buffer.BlockCopy(keyBytes, 0, data, 0, keyBytes.Length);
+        data[keyBytes.Length] = 0;
+        Buffer.BlockCopy(valBytes, 0, data, keyBytes.Length + 1, valBytes.Length);
+
+        var typeBytes = "tEXt"u8.ToArray();
+        uint crc = ComputePngCrc32(typeBytes, data);
+
+        using var ms = new MemoryStream();
+        ms.Write(pngBytes, 0, 33); // 8B signature + 25B IHDR chunk
+        WriteBigEndianUInt32(ms, (uint)data.Length);
+        ms.Write(typeBytes, 0, 4);
+        ms.Write(data, 0, data.Length);
+        WriteBigEndianUInt32(ms, crc);
+        ms.Write(pngBytes, 33, pngBytes.Length - 33);
+        return ms.ToArray();
+    }
+
+    private static void WriteBigEndianUInt32(Stream s, uint val)
+    {
+        s.WriteByte((byte)(val >> 24));
+        s.WriteByte((byte)(val >> 16));
+        s.WriteByte((byte)(val >> 8));
+        s.WriteByte((byte)val);
+    }
+
+    private static uint ComputePngCrc32(byte[] typeBytes, byte[] data)
+    {
+        uint crc = 0xFFFFFFFFu;
+        foreach (byte b in typeBytes) crc = StepCrc32(crc, b);
+        foreach (byte b in data) crc = StepCrc32(crc, b);
+        return crc ^ 0xFFFFFFFFu;
+    }
+
+    private static uint StepCrc32(uint crc, byte b)
+    {
+        crc ^= b;
+        for (int k = 0; k < 8; k++)
+        {
+            crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : (crc >> 1);
+        }
+        return crc;
+    }
+
     private static bool VisualContainsText(DependencyObject root, string substring)
     {
         if (root is TextBlock tb && tb.Text is not null && tb.Text.Contains(substring, StringComparison.Ordinal))
@@ -2092,6 +2548,22 @@ public static class Program
         public event EventHandler? Changed;
         public uint SequenceNumber { get; private set; }
         public bool IsListening { get; private set; }
+        public string? LastWrittenImagePath { get; private set; }
+
+        public void SimulateExternalImage(byte[] pngBytes, string? sourceAppId = null)
+        {
+            uint nextSeq = SequenceNumber + 1;
+            Push(new ClipboardSnapshot(
+                nextSeq,
+                ContainsSelfCopy: false,
+                ContainsFiles: false,
+                IsPrivacyBlocked: false,
+                Text: null,
+                RtfBytes: null,
+                CopiedPaths: null,
+                PngBytes: pngBytes,
+                SourceAppId: sourceAppId));
+        }
 
         public void SetListening(bool enabled)
         {
@@ -2156,9 +2628,16 @@ public static class Program
             return true;
         }
 
+        public bool RequireStaOnWriteImage { get; set; }
+
         public bool TryWriteImage(string imagePath)
         {
+            if (RequireStaOnWriteImage && Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
+            {
+                throw new ThreadStateException("Clipboard image write invoked on non-STA thread!");
+            }
             SequenceNumber++;
+            LastWrittenImagePath = imagePath;
             _current = new ClipboardSnapshot(SequenceNumber, ContainsSelfCopy: true, ContainsFiles: false, IsPrivacyBlocked: false, null, null);
             return File.Exists(imagePath);
         }
