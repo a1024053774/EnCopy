@@ -39,6 +39,7 @@ public static class Program
 
         Directory.CreateDirectory(fullCheckDir);
         string? previewDir = PreviewDirArg(args);
+        string? filterArg = FilterArg(args);
 
         var results = new List<(string Name, Action Run)>
         {
@@ -62,12 +63,18 @@ public static class Program
             ("TopEdgeHoverAndFullScreenAvoidance", TestTopEdgeHoverAndFullScreenAvoidance),
             ("HeldZoomDragAndTakeDownNeighbours", TestHeldZoomDragAndTakeDownNeighbours),
             ("FilesImagesAppRulesAndRetentionContract", () => TestFilesImagesAppRulesAndRetentionContract(previewDir)),
+            ("WindowsOcrAndImageTextBadge", () => TestWindowsOcrAndImageTextBadge(previewDir)),
             ("InstallScriptIsolated", TestInstallScriptIsolated),
         };
 
         int failed = 0;
         foreach (var (name, run) in results)
         {
+            if (!string.IsNullOrWhiteSpace(filterArg) &&
+                !name.Contains(filterArg, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             var caseDir = Path.Combine(fullCheckDir, name);
             Directory.CreateDirectory(caseDir);
             DataFolder.UseTestRoot(caseDir);
@@ -91,6 +98,18 @@ public static class Program
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException($"Assertion failed: {message}");
+    }
+
+    private static string? FilterArg(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--filter", StringComparison.Ordinal))
+            {
+                return args[i + 1];
+            }
+        }
+        return null;
     }
 
     private static void TestEditionIsolation()
@@ -1678,6 +1697,261 @@ public static class Program
         }
     }
 
+    private static void TestWindowsOcrAndImageTextBadge(string? previewDir)
+    {
+        Localization.SetLanguageOverride("zh-Hans");
+        var extDir = Path.Combine(Path.GetTempPath(), "encopy-ocr-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(extDir);
+        try
+        {
+            // 1. 语言选择与缺失 zh-Hans-CN 回退模拟
+            var statusWithZh = OcrLanguageResolver.Resolve(["en-US", "zh-Hans-CN"]);
+            Check(statusWithZh.ActiveLanguageTag == "zh-Hans-CN" && !statusWithZh.IsChinesePackMissing && statusWithZh.HasAnyEngine,
+                $"Expected zh-Hans-CN preferred without warning, got '{statusWithZh.ActiveLanguageTag}' (missing={statusWithZh.IsChinesePackMissing})");
+
+            var statusEnOnly = OcrLanguageResolver.Resolve(["en-US"]);
+            Check(statusEnOnly.ActiveLanguageTag == "en-US" && statusEnOnly.IsChinesePackMissing && statusEnOnly.HasAnyEngine,
+                $"Expected fallback to en-US with IsChinesePackMissing=true, got '{statusEnOnly.ActiveLanguageTag}'");
+
+            var statusNone = OcrLanguageResolver.Resolve([]);
+            Check(statusNone.ActiveLanguageTag is null && statusNone.IsChinesePackMissing && !statusNone.HasAnyEngine,
+                "Expected graceful empty status when zero OCR packs are installed");
+
+            // 2. 真实含中英文文字样本图走 Windows.Media.Ocr 端到端识别、缓存与搜索「图中文字」标记
+            Directory.CreateDirectory(DataFolder.ScreenshotsFolder);
+            var ownImgPath = Path.Combine(DataFolder.ScreenshotsFolder, "Clipboard 2026-11-27 at 04.00.00.png");
+            WriteTextBannerPng(ownImgPath, "晾衣绳识字 ENCOPY2026", "单据号 8848");
+
+            var extImgPath = Path.Combine(extDir, "sunset-poster.png");
+            WriteTextBannerPng(extImgPath, "海边日落 POSTER77", "外部图样本");
+
+            using var history = new History();
+            var line = new Line(history);
+            line.SetVisibleCapacity(4);
+
+            using var searchIndex = new SearchIndex(
+                history,
+                backend: null,
+                onImageIndexed: _ => line.RefreshAfterIndexUpdate());
+
+            history.RecordImage(ownImgPath, ocrWords: null, pngBytesForHash: File.ReadAllBytes(ownImgPath), usedAt: DateTime.UtcNow.AddMinutes(-2));
+            line.AddNew(ownImgPath);
+
+            // 自有截图在 OCR 前不应被其文件名 "Clipboard" 搜中
+            line.Query = "Clipboard";
+            Check(line.ShownItems.Count == 0, "EnCopy own screenshot must NOT match its internal 'Clipboard' filename");
+            line.Query = string.Empty;
+
+            history.RecordImage(extImgPath, ocrWords: null, pngBytesForHash: null, usedAt: DateTime.UtcNow.AddMinutes(-1));
+            line.AddNew(extImgPath);
+
+            searchIndex.Enqueue(ownImgPath);
+            searchIndex.Enqueue(extImgPath);
+            searchIndex.FlushAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+
+            Check(searchIndex.BackendRecognitionCount == 2,
+                $"Expected 2 initial OCR backend calls, got {searchIndex.BackendRecognitionCount}");
+
+            // 重复入队未修改图片应直接命中缓存，不重复调用底层 OCR
+            searchIndex.Enqueue(ownImgPath);
+            searchIndex.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Check(searchIndex.BackendRecognitionCount == 2,
+                $"Expected cached image to skip duplicate OCR, got {searchIndex.BackendRecognitionCount}");
+
+            // 按中文词与英文词均能搜中并标「图中文字」
+            line.Query = "晾衣绳";
+            Check(line.ShownItems.Any(n => string.Equals(n.FilePath, ownImgPath, StringComparison.OrdinalIgnoreCase)) &&
+                  line.IsImageTextMatch(ownImgPath),
+                "Chinese OCR phrase '晾衣绳' must match own image and flag IsImageTextMatch=true");
+
+            line.Query = "encopy2026";
+            Check(line.ShownItems.Any(n => string.Equals(n.FilePath, ownImgPath, StringComparison.OrdinalIgnoreCase)) &&
+                  line.IsImageTextMatch(ownImgPath),
+                $"English OCR token 'encopy2026' must match own image and flag IsImageTextMatch=true (ocr='{history.OcrWordsOf(ownImgPath)}')");
+
+            // 外部资源管理器图片：按文件名搜中时不标「图中文字」，按图中文字搜中时标「图中文字」
+            line.Query = "sunset-poster";
+            Check(line.ShownItems.Any(n => string.Equals(n.FilePath, extImgPath, StringComparison.OrdinalIgnoreCase)) &&
+                  !line.IsImageTextMatch(extImgPath),
+                "External Explorer image matched solely by filename must keep IsImageTextMatch=false");
+
+            line.Query = "POSTER77";
+            Check(line.ShownItems.Any(n => string.Equals(n.FilePath, extImgPath, StringComparison.OrdinalIgnoreCase)) &&
+                  line.IsImageTextMatch(extImgPath),
+                "External Explorer image matched by OCR text must flag IsImageTextMatch=true");
+
+            // 3. 挤入篮子并缩成缩略图后，原图识别词依然保留且篮子行标「图中文字」
+            for (int i = 0; i < 5; i++)
+            {
+                var p = Path.Combine(DataFolder.NotesFolder, $"Note-fill-{i}.txt");
+                Directory.CreateDirectory(DataFolder.NotesFolder);
+                File.WriteAllText(p, $"Filler item {i}");
+                history.Record(p, $"Filler item {i}", DateTime.UtcNow.AddSeconds(i));
+                line.AddNew(p);
+            }
+
+            // 将已掉入篮子的 ownImgPath 按超限缩成缩略图
+            WriteTextBannerPng(ownImgPath, "晾衣绳识字 ENCOPY2026", "单据号 8848", width: 1500, height: 960);
+            line.RunRetention(DateTime.UtcNow, 1024); // 强制超过上限触发缩图
+            Check(history.IsShrunk(ownImgPath), "Expected basket image to be shrunk when exceeding cap");
+
+            // 缩成缩略图后再次入队 OCR 不得覆盖原图识别词
+            searchIndex.Enqueue(ownImgPath);
+            searchIndex.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+
+            line.Query = string.Empty;
+            line.OpenBasket();
+            line.Query = "8848";
+            var hitBasketRow = line.BasketGroups.SelectMany(g => g.Rows)
+                .FirstOrDefault(r => string.Equals(r.Note.FilePath, ownImgPath, StringComparison.OrdinalIgnoreCase));
+            Check(hitBasketRow is not null && hitBasketRow.MatchedImageText,
+                "Shrunk image in basket must still match original OCR digits '8848' with MatchedImageText=true");
+
+            var outDir = previewDir ?? Path.Combine(FindRepoRoot(), "evidence", "T-062");
+            Directory.CreateDirectory(outDir);
+
+            var panel = new LinePanel(
+                line,
+                onPasteNotes: (_, _, _) => true,
+                onCopyNotes: _ => true,
+                onVisibilityChanged: () => { },
+                onRequestChangeShortcut: () => { });
+            panel.RenderOffscreen(1280, 620, darkOverride: false);
+            SaveVisualPng(panel, 1280, 620, Path.Combine(outDir, "00-offscreen-basket-ocr-hit.png"));
+
+            line.CloseBasket();
+            line.Query = "晾衣绳";
+            panel.RenderOffscreen(1280, 290, darkOverride: false);
+            SaveVisualPng(panel, 1280, 290, Path.Combine(outDir, "00-offscreen-rope-ocr-hit.png"));
+            Check(VisualContainsText(panel, "图中文字"), "Rope card must render '图中文字' yellow badge on OCR search hit");
+            panel.Close();
+
+            // 4. 设置页在缺少 zh-Hans-CN 语言包时显示友好安装引导，已安装时不显示
+            var testSettings = new AppSettings { ImagesEnabled = true };
+            var dummyCallbacks = new SettingsCallbacks(() => { }, a => a(), () => { }, () => { }, () => { });
+            var winMissingZh = new SettingsWindow(testSettings, line, dummyCallbacks, ocrStatus: statusEnOnly);
+            winMissingZh.SelectTab(1);
+            winMissingZh.RenderOffscreen(610, 680);
+            SaveVisualPng(winMissingZh, 610, 680, Path.Combine(outDir, "00-offscreen-settings-ocr-missing-zh.png"));
+            Check(VisualContainsText(winMissingZh, "未安装简体中文图片识字语言包"),
+                "Settings Recording tab must display friendly prompt when Chinese OCR pack is missing");
+            winMissingZh.Close();
+
+            var winWithZh = new SettingsWindow(testSettings, line, dummyCallbacks, ocrStatus: statusWithZh);
+            winWithZh.SelectTab(1);
+            winWithZh.RenderOffscreen(610, 680);
+            Check(!VisualContainsText(winWithZh, "未安装简体中文图片识字语言包"),
+                "Settings Recording tab must NOT display missing-pack prompt when zh-Hans-CN is installed");
+            winWithZh.Close();
+
+            // 5. 审查发现回归：暂时性失败不写空缓存、语言包升级后失效重跑、未完成首次识字的原图不提前缩小
+            var retryImgPath = Path.Combine(DataFolder.ScreenshotsFolder, "Clipboard 2026-11-27 at 04.05.00.png");
+            WriteTextBannerPng(retryImgPath, "重试恢复 OK99", "第二行", width: 1400, height: 920);
+            history.RecordImage(retryImgPath, ocrWords: null, pngBytesForHash: File.ReadAllBytes(retryImgPath), usedAt: DateTime.UtcNow.AddMinutes(-10));
+
+            // 未识字（ocr_text IS NULL）的原图在保留任务触发时不应先于识字被缩小
+            line.RunRetention(DateTime.UtcNow, 1024);
+            Check(!history.IsShrunk(retryImgPath), "Unindexed original image (ocr_text IS NULL) must not be shrunk before OCR runs");
+
+            var scriptedBackend = new ScriptedOcrBackend(["en-US"]);
+            scriptedBackend.FailNextCall = true;
+            var cacheFile = Path.Combine(DataFolder.Root, "ScriptedSearchIndex.json");
+            using (var idxEn = new SearchIndex(history, backend: scriptedBackend, cachePath: cacheFile))
+            {
+                idxEn.Enqueue(retryImgPath);
+                idxEn.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) is null, "Transient OCR failure must not write empty ocr_text or cache");
+
+                // 第二次入队恢复成功（回退 en-US）
+                idxEn.Enqueue(retryImgPath);
+                idxEn.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) == "EN_ONLY_WORDS",
+                    $"Expected fallback en-US OCR result after retry, got '{history.OcrWordsOf(retryImgPath)}'");
+            }
+
+            // 用户后续安装 zh-Hans-CN 语言包重启后，即使文件未变也应因语言配置升级重新识字
+            scriptedBackend.SetLanguages(["en-US", "zh-Hans-CN"]);
+            using (var idxZh = new SearchIndex(history, backend: scriptedBackend, cachePath: cacheFile))
+            {
+                idxZh.Enqueue(retryImgPath);
+                idxZh.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                Check(history.OcrWordsOf(retryImgPath) == "ZH_UPGRADED_WORDS",
+                    $"Installing zh-Hans-CN must invalidate en-only cache and re-index original image, got '{history.OcrWordsOf(retryImgPath)}'");
+            }
+        }
+        finally
+        {
+            Localization.SetLanguageOverride(null);
+            Directory.Delete(extDir, recursive: true);
+        }
+    }
+
+    private static bool VisualContainsText(DependencyObject root, string substring)
+    {
+        if (root is TextBlock tb && tb.Text is not null && tb.Text.Contains(substring, StringComparison.Ordinal))
+        {
+            return true;
+        }
+        int children = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < children; i++)
+        {
+            if (VisualContainsText(VisualTreeHelper.GetChild(root, i), substring))
+            {
+                return true;
+            }
+        }
+        if (children == 0)
+        {
+            if (root is ContentControl cc && cc.Content is DependencyObject contentObj && VisualContainsText(contentObj, substring))
+            {
+                return true;
+            }
+            if (root is Decorator dec && dec.Child is DependencyObject decChild && VisualContainsText(decChild, substring))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void WriteTextBannerPng(string path, string line1, string line2, int width = 760, int height = 260)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawRectangle(Brushes.White, new Pen(Brushes.Black, 2), new Rect(0, 0, width, height));
+            var typeface = new Typeface(new FontFamily("Microsoft YaHei UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
+            var ft1 = new FormattedText(
+                line1,
+                System.Globalization.CultureInfo.GetCultureInfo("zh-CN"),
+                FlowDirection.LeftToRight,
+                typeface,
+                44,
+                Brushes.Black,
+                1.0);
+            var ft2 = new FormattedText(
+                line2,
+                System.Globalization.CultureInfo.GetCultureInfo("zh-CN"),
+                FlowDirection.LeftToRight,
+                typeface,
+                38,
+                Brushes.Black,
+                1.0);
+            dc.DrawText(ft1, new Point(36, 48));
+            dc.DrawText(ft2, new Point(36, 136));
+        }
+
+        var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        rtb.Render(dv);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(rtb));
+        using var fs = File.Create(path);
+        enc.Save(fs);
+    }
+
     private static void WritePatternPng(string path, int width, int height)
     {
         var dir = Path.GetDirectoryName(path);
@@ -1934,5 +2208,32 @@ public static class Program
         public bool Register(Shortcut shortcut, Action onPressed) => _succeeds;
         public void Unregister() { }
         public void Dispose() { }
+    }
+
+    private sealed class ScriptedOcrBackend : IOcrBackend
+    {
+        private IReadOnlyList<string> _langs;
+        public bool FailNextCall { get; set; }
+
+        public ScriptedOcrBackend(IReadOnlyList<string> langs) => _langs = langs;
+
+        public void SetLanguages(IReadOnlyList<string> langs) => _langs = langs;
+
+        public IReadOnlyList<string> GetInstalledLanguageTags() => _langs;
+
+        public Task<string?> RecognizeImageAsync(string imagePath, string? preferredLanguageTag, CancellationToken cancellationToken = default)
+        {
+            _ = imagePath;
+            _ = cancellationToken;
+            if (FailNextCall)
+            {
+                FailNextCall = false;
+                return Task.FromResult<string?>(null);
+            }
+            string words = preferredLanguageTag is not null && preferredLanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
+                ? "ZH_UPGRADED_WORDS"
+                : "EN_ONLY_WORDS";
+            return Task.FromResult<string?>(words);
+        }
     }
 }

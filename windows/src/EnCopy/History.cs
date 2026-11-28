@@ -57,6 +57,7 @@ public sealed class History : IDisposable
 
     private readonly string _rootDir;
     private readonly SqliteConnection _db;
+    private readonly object _dbLock = new();
 
     public History(string? databasePath = null)
     {
@@ -77,22 +78,33 @@ public sealed class History : IDisposable
                 used REAL NOT NULL,
                 app TEXT,
                 ttl REAL,
-                shrunk INTEGER NOT NULL DEFAULT 0
+                shrunk INTEGER NOT NULL DEFAULT 0,
+                ocr_text TEXT
             );
             CREATE INDEX IF NOT EXISTS item_hash ON item(hash);
             CREATE VIRTUAL TABLE IF NOT EXISTS item_text USING fts5(text, tokenize='trigram');
             """);
+        EnsureColumnExists("item", "ocr_text", "TEXT");
     }
 
-    public void Dispose() => _db.Dispose();
+    public void Dispose()
+    {
+        lock (_dbLock)
+        {
+            _db.Dispose();
+        }
+    }
 
     public long Count
     {
         get
         {
-            using var cmd = _db.CreateCommand();
-            cmd.CommandText = "SELECT COUNT(*) FROM item";
-            return (long)(cmd.ExecuteScalar() ?? 0L);
+            lock (_dbLock)
+            {
+                using var cmd = _db.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM item";
+                return (long)(cmd.ExecuteScalar() ?? 0L);
+            }
         }
     }
 
@@ -117,78 +129,87 @@ public sealed class History : IDisposable
 
     public string? FindPictureHolding(byte[] pngBytes)
     {
-        var hash = PictureHash(pngBytes);
-        var paths = new List<string>();
-        using (var cmd = _db.CreateCommand())
+        lock (_dbLock)
         {
-            cmd.CommandText = "SELECT path FROM item WHERE hash = @hash AND shrunk = 0";
-            cmd.Parameters.AddWithValue("@hash", hash);
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+            var hash = PictureHash(pngBytes);
+            var paths = new List<string>();
+            using (var cmd = _db.CreateCommand())
             {
-                paths.Add(reader.GetString(0));
+                cmd.CommandText = "SELECT path FROM item WHERE hash = @hash AND shrunk = 0";
+                cmd.Parameters.AddWithValue("@hash", hash);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    paths.Add(reader.GetString(0));
+                }
             }
-        }
 
-        foreach (var rel in paths)
-        {
-            var abs = AbsolutePath(rel);
-            if (File.Exists(abs)) return abs;
-            RemoveByRelativePath(rel);
+            foreach (var rel in paths)
+            {
+                var abs = AbsolutePath(rel);
+                if (File.Exists(abs)) return abs;
+                RemoveByRelativePath(rel);
+            }
+            return null;
         }
-        return null;
     }
 
     public string? FindFileListHolding(IReadOnlyList<string> rawPaths)
     {
-        var hash = FileListHash(rawPaths);
-        var paths = new List<string>();
-        using (var cmd = _db.CreateCommand())
+        lock (_dbLock)
         {
-            cmd.CommandText = "SELECT path FROM item WHERE hash = @hash";
-            cmd.Parameters.AddWithValue("@hash", hash);
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+            var hash = FileListHash(rawPaths);
+            var paths = new List<string>();
+            using (var cmd = _db.CreateCommand())
             {
-                paths.Add(reader.GetString(0));
+                cmd.CommandText = "SELECT path FROM item WHERE hash = @hash";
+                cmd.Parameters.AddWithValue("@hash", hash);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    paths.Add(reader.GetString(0));
+                }
             }
-        }
 
-        foreach (var rel in paths)
-        {
-            var abs = AbsolutePath(rel);
-            if (File.Exists(abs)) return abs;
-            RemoveByRelativePath(rel);
+            foreach (var rel in paths)
+            {
+                var abs = AbsolutePath(rel);
+                if (File.Exists(abs)) return abs;
+                RemoveByRelativePath(rel);
+            }
+            return null;
         }
-        return null;
     }
 
     public string? NoteHolding(string plainText)
     {
-        var hash = TextHash(plainText);
-        var paths = new List<string>();
-        using (var cmd = _db.CreateCommand())
+        lock (_dbLock)
         {
-            cmd.CommandText = "SELECT path FROM item WHERE hash = @hash";
-            cmd.Parameters.AddWithValue("@hash", hash);
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+            var hash = TextHash(plainText);
+            var paths = new List<string>();
+            using (var cmd = _db.CreateCommand())
             {
-                paths.Add(reader.GetString(0));
+                cmd.CommandText = "SELECT path FROM item WHERE hash = @hash";
+                cmd.Parameters.AddWithValue("@hash", hash);
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    paths.Add(reader.GetString(0));
+                }
             }
-        }
 
-        foreach (var rel in paths)
-        {
-            var abs = AbsolutePath(rel);
-            if (!ExistsOnDisk(abs))
+            foreach (var rel in paths)
             {
-                RemoveByRelativePath(rel);
-                continue;
+                var abs = AbsolutePath(rel);
+                if (!ExistsOnDisk(abs))
+                {
+                    RemoveByRelativePath(rel);
+                    continue;
+                }
+                return abs;
             }
-            return abs;
+            return null;
         }
-        return null;
     }
 
     public void Record(
@@ -198,42 +219,61 @@ public sealed class History : IDisposable
         string? appName = null,
         double? ttlSeconds = null)
     {
-        var storagePath = StoredKeyFor(fullPath);
-        if (storagePath is null || !ExistsOnDisk(fullPath)) return;
-
-        var text = plainText ?? Note.ReadPlainText(fullPath) ?? Path.GetFileName(fullPath);
-
-        var modified = File.Exists(fullPath)
-            ? new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        var used = usedAt.HasValue
-            ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-
-        var hash = TextHash(text);
-        var folded = SearchText.Fold(text);
-
-        using var tx = _db.BeginTransaction();
-        using (var upsert = _db.CreateCommand())
+        lock (_dbLock)
         {
-            upsert.Transaction = tx;
-            upsert.CommandText = """
-                INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
-                ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified, used = excluded.used,
-                    app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
-                """;
-            upsert.Parameters.AddWithValue("@path", storagePath);
-            upsert.Parameters.AddWithValue("@hash", hash);
-            upsert.Parameters.AddWithValue("@mod", modified);
-            upsert.Parameters.AddWithValue("@used", used);
-            upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
-            upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
-            upsert.ExecuteNonQuery();
-        }
+            var storagePath = StoredKeyFor(fullPath);
+            if (storagePath is null || !ExistsOnDisk(fullPath)) return;
 
-        long id = GetRowIdInTransaction(tx, storagePath);
-        ReplaceItemTextInTransaction(tx, id, folded);
-        tx.Commit();
+            var text = plainText ?? Note.ReadPlainText(fullPath) ?? Path.GetFileName(fullPath);
+
+            var modified = File.Exists(fullPath)
+                ? new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            var used = usedAt.HasValue
+                ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+
+            var hash = TextHash(text);
+            var folded = SearchText.Fold(text);
+
+            using var tx = _db.BeginTransaction();
+            using (var upsert = _db.CreateCommand())
+            {
+                upsert.Transaction = tx;
+                upsert.CommandText = """
+                    INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
+                    ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified, used = excluded.used,
+                        app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
+                    """;
+                upsert.Parameters.AddWithValue("@path", storagePath);
+                upsert.Parameters.AddWithValue("@hash", hash);
+                upsert.Parameters.AddWithValue("@mod", modified);
+                upsert.Parameters.AddWithValue("@used", used);
+                upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
+                upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
+                upsert.ExecuteNonQuery();
+            }
+
+            long id = GetRowIdInTransaction(tx, storagePath);
+            ReplaceItemTextInTransaction(tx, id, folded);
+            tx.Commit();
+        }
+    }
+
+    /// <summary>
+    /// 外部资源管理器复制的图片保留文件名与父目录名可搜；EnCopy 自己文件夹内的图片/截图仅按图中文字搜（T-062）。
+    /// </summary>
+    public static string ExternalImageNameWords(string fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath) || DataFolder.Contains(fullPath))
+        {
+            return string.Empty;
+        }
+        var fileName = Path.GetFileName(fullPath);
+        var stem = Path.GetFileNameWithoutExtension(fullPath);
+        var parentDir = Path.GetDirectoryName(fullPath);
+        var parentName = string.IsNullOrEmpty(parentDir) ? string.Empty : Path.GetFileName(parentDir);
+        return $"{fileName} {stem} {parentName}".Trim();
     }
 
     public void RecordImage(
@@ -244,64 +284,145 @@ public sealed class History : IDisposable
         string? appName = null,
         double? ttlSeconds = null)
     {
-        var storagePath = StoredKeyFor(fullPath);
-        if (storagePath is null || !ExistsOnDisk(fullPath)) return;
-
-        var modified = File.Exists(fullPath)
-            ? new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        var used = usedAt.HasValue
-            ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        var hash = pngBytesForHash is not null
-            ? PictureHash(pngBytesForHash)
-            : SHA256.HashData(Encoding.UTF8.GetBytes("image:" + storagePath));
-
-        using var tx = _db.BeginTransaction();
-        using (var upsert = _db.CreateCommand())
+        lock (_dbLock)
         {
-            upsert.Transaction = tx;
-            upsert.CommandText = """
-                INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
-                ON CONFLICT(path) DO UPDATE SET modified = excluded.modified, used = excluded.used,
-                    app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
-                """;
-            upsert.Parameters.AddWithValue("@path", storagePath);
-            upsert.Parameters.AddWithValue("@hash", hash);
-            upsert.Parameters.AddWithValue("@mod", modified);
-            upsert.Parameters.AddWithValue("@used", used);
-            upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
-            upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
-            upsert.ExecuteNonQuery();
-        }
+            var storagePath = StoredKeyFor(fullPath);
+            if (storagePath is null || !ExistsOnDisk(fullPath)) return;
 
-        long id = GetRowIdInTransaction(tx, storagePath);
-        bool hasWords;
-        using (var checkCmd = _db.CreateCommand())
-        {
-            checkCmd.Transaction = tx;
-            checkCmd.CommandText = "SELECT COUNT(*) FROM item_text WHERE rowid = @id AND text != ''";
-            checkCmd.Parameters.AddWithValue("@id", id);
-            hasWords = ((long)(checkCmd.ExecuteScalar() ?? 0L)) > 0;
-        }
-        bool shrunk;
-        using (var shrunkCmd = _db.CreateCommand())
-        {
-            shrunkCmd.Transaction = tx;
-            shrunkCmd.CommandText = "SELECT shrunk FROM item WHERE id = @id";
-            shrunkCmd.Parameters.AddWithValue("@id", id);
-            shrunk = Convert.ToInt64(shrunkCmd.ExecuteScalar() ?? 0L) != 0;
-        }
+            var modified = File.Exists(fullPath)
+                ? new DateTimeOffset(File.GetLastWriteTimeUtc(fullPath)).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            var used = usedAt.HasValue
+                ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            var hash = pngBytesForHash is not null
+                ? PictureHash(pngBytesForHash)
+                : SHA256.HashData(Encoding.UTF8.GetBytes("image:" + storagePath));
 
-        // 已识别出的图中文字绝不被空串覆盖，缩成缩略图后的照片也始终保留原图识别词（History.swift:350）
-        if (!(hasWords && (string.IsNullOrEmpty(ocrWords) || shrunk)))
-        {
-            var indexText = string.IsNullOrWhiteSpace(ocrWords)
-                ? Path.GetFileNameWithoutExtension(fullPath)
-                : $"{ocrWords} {Path.GetFileNameWithoutExtension(fullPath)}";
+            using var tx = _db.BeginTransaction();
+            using (var upsert = _db.CreateCommand())
+            {
+                upsert.Transaction = tx;
+                upsert.CommandText = """
+                    INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
+                    ON CONFLICT(path) DO UPDATE SET modified = excluded.modified, used = excluded.used,
+                        app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
+                    """;
+                upsert.Parameters.AddWithValue("@path", storagePath);
+                upsert.Parameters.AddWithValue("@hash", hash);
+                upsert.Parameters.AddWithValue("@mod", modified);
+                upsert.Parameters.AddWithValue("@used", used);
+                upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
+                upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
+                upsert.ExecuteNonQuery();
+            }
+
+            long id = GetRowIdInTransaction(tx, storagePath);
+            bool shrunk;
+            string? existingOcr = null;
+            using (var metaCmd = _db.CreateCommand())
+            {
+                metaCmd.Transaction = tx;
+                metaCmd.CommandText = "SELECT shrunk, ocr_text FROM item WHERE id = @id";
+                metaCmd.Parameters.AddWithValue("@id", id);
+                using var reader = metaCmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    shrunk = reader.GetInt64(0) != 0;
+                    existingOcr = reader.IsDBNull(1) ? null : reader.GetString(1);
+                }
+                else
+                {
+                    shrunk = false;
+                }
+            }
+
+            // 已识别出的图中文字绝不被空串或缩图重录覆盖（History.swift:350 / T-062）
+            string? effectiveOcr = existingOcr;
+            if (ocrWords is not null)
+            {
+                bool protectExisting = !string.IsNullOrWhiteSpace(existingOcr) && (string.IsNullOrWhiteSpace(ocrWords) || shrunk);
+                if (!protectExisting)
+                {
+                    effectiveOcr = ocrWords;
+                    using var setOcr = _db.CreateCommand();
+                    setOcr.Transaction = tx;
+                    setOcr.CommandText = "UPDATE item SET ocr_text = @ocr WHERE id = @id";
+                    setOcr.Parameters.AddWithValue("@ocr", effectiveOcr);
+                    setOcr.Parameters.AddWithValue("@id", id);
+                    setOcr.ExecuteNonQuery();
+                }
+            }
+
+            var extWords = ExternalImageNameWords(fullPath);
+            var indexText = ComposeImageIndexText(effectiveOcr, extWords);
             ReplaceItemTextInTransaction(tx, id, SearchText.Fold(indexText));
+            tx.Commit();
         }
-        tx.Commit();
+    }
+
+    public bool UpdateImageOcr(string fullPath, string ocrWords)
+    {
+        lock (_dbLock)
+        {
+            var storagePath = StoredKeyFor(fullPath);
+            if (storagePath is null) return false;
+
+            using var tx = _db.BeginTransaction();
+            long id = 0;
+            bool shrunk = false;
+            string? existingOcr = null;
+            using (var cmd = _db.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT id, shrunk, ocr_text FROM item WHERE path = @path";
+                cmd.Parameters.AddWithValue("@path", storagePath);
+                using var reader = cmd.ExecuteReader();
+                if (reader.Read())
+                {
+                    id = reader.GetInt64(0);
+                    shrunk = reader.GetInt64(1) != 0;
+                    existingOcr = reader.IsDBNull(2) ? null : reader.GetString(2);
+                }
+            }
+
+            if (id == 0)
+            {
+                tx.Rollback();
+                return false;
+            }
+
+            if (shrunk && !string.IsNullOrWhiteSpace(existingOcr))
+            {
+                tx.Rollback();
+                return false;
+            }
+
+            using (var upd = _db.CreateCommand())
+            {
+                upd.Transaction = tx;
+                upd.CommandText = "UPDATE item SET ocr_text = @ocr WHERE id = @id";
+                upd.Parameters.AddWithValue("@ocr", ocrWords);
+                upd.Parameters.AddWithValue("@id", id);
+                upd.ExecuteNonQuery();
+            }
+
+            var extWords = ExternalImageNameWords(fullPath);
+            var indexText = ComposeImageIndexText(ocrWords, extWords);
+            ReplaceItemTextInTransaction(tx, id, SearchText.Fold(indexText));
+            tx.Commit();
+            return true;
+        }
+    }
+
+    private static string ComposeImageIndexText(string? ocrWords, string externalNameWords)
+    {
+        bool hasOcr = !string.IsNullOrWhiteSpace(ocrWords);
+        bool hasExt = !string.IsNullOrWhiteSpace(externalNameWords);
+        if (hasOcr && hasExt) return $"{ocrWords}\n{externalNameWords}";
+        if (hasOcr) return ocrWords!;
+        if (hasExt) return externalNameWords;
+        return string.Empty;
     }
 
     public void RecordFileList(
@@ -310,93 +431,111 @@ public sealed class History : IDisposable
         double? ttlSeconds = null,
         DateTime? usedAt = null)
     {
-        if (!FileList.IsManifestPath(manifestPath) || !File.Exists(manifestPath)) return;
-        var storagePath = StoredKeyFor(manifestPath);
-        if (storagePath is null) return;
-
-        var files = FileList.ReadPaths(manifestPath);
-        var hash = FileListHash(files);
-        var modified = new DateTimeOffset(File.GetLastWriteTimeUtc(manifestPath)).ToUnixTimeMilliseconds() / 1000.0;
-        var used = usedAt.HasValue
-            ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-
-        using var tx = _db.BeginTransaction();
-        using (var upsert = _db.CreateCommand())
+        lock (_dbLock)
         {
-            upsert.Transaction = tx;
-            upsert.CommandText = """
-                INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
-                ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified, used = excluded.used,
-                    app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
-                """;
-            upsert.Parameters.AddWithValue("@path", storagePath);
-            upsert.Parameters.AddWithValue("@hash", hash);
-            upsert.Parameters.AddWithValue("@mod", modified);
-            upsert.Parameters.AddWithValue("@used", used);
-            upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
-            upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
-            upsert.ExecuteNonQuery();
-        }
+            if (!FileList.IsManifestPath(manifestPath) || !File.Exists(manifestPath)) return;
+            var storagePath = StoredKeyFor(manifestPath);
+            if (storagePath is null) return;
 
-        long id = GetRowIdInTransaction(tx, storagePath);
-        ReplaceItemTextInTransaction(tx, id, SearchText.Fold(FileList.Words(files)));
-        tx.Commit();
+            var files = FileList.ReadPaths(manifestPath);
+            var hash = FileListHash(files);
+            var modified = new DateTimeOffset(File.GetLastWriteTimeUtc(manifestPath)).ToUnixTimeMilliseconds() / 1000.0;
+            var used = usedAt.HasValue
+                ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+
+            using var tx = _db.BeginTransaction();
+            using (var upsert = _db.CreateCommand())
+            {
+                upsert.Transaction = tx;
+                upsert.CommandText = """
+                    INSERT INTO item (path, hash, modified, used, app, ttl) VALUES (@path, @hash, @mod, @used, @app, @ttl)
+                    ON CONFLICT(path) DO UPDATE SET hash = excluded.hash, modified = excluded.modified, used = excluded.used,
+                        app = COALESCE(excluded.app, item.app), ttl = COALESCE(excluded.ttl, item.ttl)
+                    """;
+                upsert.Parameters.AddWithValue("@path", storagePath);
+                upsert.Parameters.AddWithValue("@hash", hash);
+                upsert.Parameters.AddWithValue("@mod", modified);
+                upsert.Parameters.AddWithValue("@used", used);
+                upsert.Parameters.AddWithValue("@app", (object?)appName ?? DBNull.Value);
+                upsert.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
+                upsert.ExecuteNonQuery();
+            }
+
+            long id = GetRowIdInTransaction(tx, storagePath);
+            ReplaceItemTextInTransaction(tx, id, SearchText.Fold(FileList.Words(files)));
+            tx.Commit();
+        }
     }
 
     public bool Contains(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return false;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM item WHERE path = @path";
-        cmd.Parameters.AddWithValue("@path", key);
-        return ((long)(cmd.ExecuteScalar() ?? 0L)) > 0;
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return false;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM item WHERE path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            return ((long)(cmd.ExecuteScalar() ?? 0L)) > 0;
+        }
     }
 
     public string? AppOf(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return null;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT app FROM item WHERE path = @path AND app IS NOT NULL";
-        cmd.Parameters.AddWithValue("@path", key);
-        var raw = cmd.ExecuteScalar();
-        return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT app FROM item WHERE path = @path AND app IS NOT NULL";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        }
     }
 
     public void SetApp(string fullPath, string? appName)
     {
         if (string.IsNullOrWhiteSpace(appName)) return;
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "UPDATE item SET app = @app WHERE path = @path";
-        cmd.Parameters.AddWithValue("@app", appName);
-        cmd.Parameters.AddWithValue("@path", key);
-        cmd.ExecuteNonQuery();
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "UPDATE item SET app = @app WHERE path = @path";
+            cmd.Parameters.AddWithValue("@app", appName);
+            cmd.Parameters.AddWithValue("@path", key);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public double? GetTtl(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return null;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT ttl FROM item WHERE path = @path AND ttl IS NOT NULL";
-        cmd.Parameters.AddWithValue("@path", key);
-        var raw = cmd.ExecuteScalar();
-        return raw is null or DBNull ? null : Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT ttl FROM item WHERE path = @path AND ttl IS NOT NULL";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            return raw is null or DBNull ? null : Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+        }
     }
 
     public void SetTtl(string fullPath, double? ttlSeconds)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "UPDATE item SET ttl = @ttl WHERE path = @path";
-        cmd.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
-        cmd.Parameters.AddWithValue("@path", key);
-        cmd.ExecuteNonQuery();
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "UPDATE item SET ttl = @ttl WHERE path = @path";
+            cmd.Parameters.AddWithValue("@ttl", ttlSeconds.HasValue ? ttlSeconds.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@path", key);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     /// <summary>
@@ -404,25 +543,31 @@ public sealed class History : IDisposable
     /// </summary>
     public void RenewTtl(string fullPath, double? ttlSeconds)
     {
-        if (ttlSeconds is null || GetTtl(fullPath) is not null)
+        lock (_dbLock)
         {
-            SetTtl(fullPath, ttlSeconds);
+            if (ttlSeconds is null || GetTtl(fullPath) is not null)
+            {
+                SetTtl(fullPath, ttlSeconds);
+            }
         }
     }
 
     public IReadOnlyList<string> ExpiredPaths(DateTime nowUtc)
     {
-        double nowSec = new DateTimeOffset(nowUtc.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
-        var list = new List<string>();
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= @now";
-        cmd.Parameters.AddWithValue("@now", nowSec);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        lock (_dbLock)
         {
-            list.Add(AbsolutePath(reader.GetString(0)));
+            double nowSec = new DateTimeOffset(nowUtc.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
+            var list = new List<string>();
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT path FROM item WHERE ttl IS NOT NULL AND used + ttl <= @now";
+            cmd.Parameters.AddWithValue("@now", nowSec);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                list.Add(AbsolutePath(reader.GetString(0)));
+            }
+            return list;
         }
-        return list;
     }
 
     public IReadOnlyList<KeptEntry> KeptEntries() => QueryEntriesWithMeta("WHERE ttl IS NULL");
@@ -431,55 +576,110 @@ public sealed class History : IDisposable
 
     public string? WordsOf(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return null;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT item_text.text FROM item_text JOIN item ON item.id = item_text.rowid WHERE item.path = @path";
-        cmd.Parameters.AddWithValue("@path", key);
-        var raw = cmd.ExecuteScalar();
-        return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT item_text.text FROM item_text JOIN item ON item.id = item_text.rowid WHERE item.path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        }
+    }
+
+    public string? OcrWordsOf(string fullPath)
+    {
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return null;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT ocr_text FROM item WHERE path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            var raw = cmd.ExecuteScalar();
+            return raw is null or DBNull ? null : Convert.ToString(raw, CultureInfo.InvariantCulture);
+        }
+    }
+
+    /// <summary>
+    /// 判断搜索词是否凭借「图中文字」命中图片：
+    /// 自有图片仅按 OCR 建索引，任意命中词即标「图中文字」；外部图片若存在至少一个搜索词未出现在其文件名但命中 OCR 文字，同样标「图中文字」。
+    /// </summary>
+    public bool HasImageTextHit(string fullPath, IReadOnlyList<string> foldedQueryWords)
+    {
+        if (foldedQueryWords.Count == 0 || !SearchIndex.IsRecognizableImagePath(fullPath))
+        {
+            return false;
+        }
+        var ocr = OcrWordsOf(fullPath);
+        if (string.IsNullOrWhiteSpace(ocr)) return false;
+
+        var foldedOcr = SearchText.Fold(ocr);
+        if (string.IsNullOrWhiteSpace(foldedOcr)) return false;
+
+        var foldedMeta = SearchText.Fold(ExternalImageNameWords(fullPath));
+        foreach (var word in foldedQueryWords)
+        {
+            if (word.Length == 0) continue;
+            if (foldedOcr.Contains(word, StringComparison.Ordinal) &&
+                (string.IsNullOrEmpty(foldedMeta) || !foldedMeta.Contains(word, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void MarkShrunk(string fullPath) => SetShrunk(fullPath, true);
 
     public void SetShrunk(string fullPath, bool shrunk)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "UPDATE item SET shrunk = @shrunk WHERE path = @path";
-        cmd.Parameters.AddWithValue("@shrunk", shrunk ? 1 : 0);
-        cmd.Parameters.AddWithValue("@path", key);
-        cmd.ExecuteNonQuery();
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "UPDATE item SET shrunk = @shrunk WHERE path = @path";
+            cmd.Parameters.AddWithValue("@shrunk", shrunk ? 1 : 0);
+            cmd.Parameters.AddWithValue("@path", key);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public bool IsShrunk(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return false;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT shrunk FROM item WHERE path = @path";
-        cmd.Parameters.AddWithValue("@path", key);
-        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) != 0;
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return false;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT shrunk FROM item WHERE path = @path";
+            cmd.Parameters.AddWithValue("@path", key);
+            return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) != 0;
+        }
     }
 
     private IReadOnlyList<KeptEntry> QueryEntriesWithMeta(string whereClause)
     {
-        var list = new List<KeptEntry>();
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = $"SELECT path, used, shrunk, app, ttl FROM item {whereClause} ORDER BY used DESC, id DESC";
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        lock (_dbLock)
         {
-            var rel = reader.GetString(0);
-            var abs = AbsolutePath(rel);
-            double used = reader.GetDouble(1);
-            bool shrunk = reader.GetInt64(2) != 0;
-            var app = reader.IsDBNull(3) ? null : reader.GetString(3);
-            double? ttl = reader.IsDBNull(4) ? null : reader.GetDouble(4);
-            list.Add(new KeptEntry(abs, rel, used, app, shrunk, ttl));
+            var list = new List<KeptEntry>();
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = $"SELECT path, used, shrunk, app, ttl FROM item {whereClause} ORDER BY used DESC, id DESC";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                var rel = reader.GetString(0);
+                var abs = AbsolutePath(rel);
+                double used = reader.GetDouble(1);
+                bool shrunk = reader.GetInt64(2) != 0;
+                var app = reader.IsDBNull(3) ? null : reader.GetString(3);
+                double? ttl = reader.IsDBNull(4) ? null : reader.GetDouble(4);
+                list.Add(new KeptEntry(abs, rel, used, app, shrunk, ttl));
+            }
+            return list;
         }
-        return list;
     }
 
     private long GetRowIdInTransaction(SqliteTransaction tx, string storagePath)
@@ -514,129 +714,141 @@ public sealed class History : IDisposable
 
     public void Use(string fullPath, DateTime? usedAt = null)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return;
-        var used = usedAt.HasValue
-            ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
-            : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "UPDATE item SET used = @used WHERE path = @path";
-        cmd.Parameters.AddWithValue("@used", used);
-        cmd.Parameters.AddWithValue("@path", key);
-        cmd.ExecuteNonQuery();
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return;
+            var used = usedAt.HasValue
+                ? new DateTimeOffset(usedAt.Value.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "UPDATE item SET used = @used WHERE path = @path";
+            cmd.Parameters.AddWithValue("@used", used);
+            cmd.Parameters.AddWithValue("@path", key);
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public void Remove(string fullPath)
     {
-        var key = StoredKeyFor(fullPath);
-        if (key is null) return;
-        RemoveByRelativePath(key);
+        lock (_dbLock)
+        {
+            var key = StoredKeyFor(fullPath);
+            if (key is null) return;
+            RemoveByRelativePath(key);
+        }
     }
 
     public IReadOnlyList<StoredEntry> RecentEntries(int limit = 200)
     {
-        var list = new List<StoredEntry>();
-        using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT path, used, app FROM item ORDER BY used DESC, id DESC LIMIT @limit";
-        cmd.Parameters.AddWithValue("@limit", limit);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        lock (_dbLock)
         {
-            var rel = reader.GetString(0);
-            var abs = AbsolutePath(rel);
-            if (ExistsOnDisk(abs))
+            var list = new List<StoredEntry>();
+            using var cmd = _db.CreateCommand();
+            cmd.CommandText = "SELECT path, used, app FROM item ORDER BY used DESC, id DESC LIMIT @limit";
+            cmd.Parameters.AddWithValue("@limit", limit);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
             {
-                var app = reader.IsDBNull(2) ? null : reader.GetString(2);
-                list.Add(new StoredEntry(abs, rel, reader.GetDouble(1), app));
+                var rel = reader.GetString(0);
+                var abs = AbsolutePath(rel);
+                if (ExistsOnDisk(abs))
+                {
+                    var app = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    list.Add(new StoredEntry(abs, rel, reader.GetDouble(1), app));
+                }
             }
+            return list;
         }
-        return list;
     }
 
     public IReadOnlyList<StoredEntry> AllEntries() => RecentEntries(limit: int.MaxValue);
 
     public Found Search(IReadOnlyList<string> words, IReadOnlyList<string> onLinePaths, int limit)
     {
-        var found = new Found();
-        var longWords = words.Where(w => w.EnumerateRunes().Count() >= 3).ToList();
-        var shortWords = words.Where(w => w.EnumerateRunes().Count() < 3 && w.Length > 0).ToList();
-        if (longWords.Count == 0 && shortWords.Count == 0)
+        lock (_dbLock)
         {
-            return found;
-        }
-
-        var conditions = new List<string>();
-        var parameters = new List<string>();
-        if (longWords.Count > 0)
-        {
-            var matchQuery = string.Join(" ", longWords.Select(w => $"\"{w.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
-            conditions.Add("item_text MATCH @p0");
-            parameters.Add(matchQuery);
-        }
-        foreach (var sw in shortWords)
-        {
-            string pName = $"@p{parameters.Count}";
-            conditions.Add($"instr(item_text.text, {pName}) > 0");
-            parameters.Add(sw);
-        }
-
-        var sql = $"""
-            SELECT item.path, item.used, item.app
-            FROM item_text
-            JOIN item ON item.id = item_text.rowid
-            WHERE {string.Join(" AND ", conditions)}
-            ORDER BY item.used DESC, item.id DESC
-            """;
-
-        var onLineSet = new HashSet<string>(onLinePaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
-        var stale = new List<string>();
-
-        using (var cmd = _db.CreateCommand())
-        {
-            cmd.CommandText = sql;
-            for (int i = 0; i < parameters.Count; i++)
+            var found = new Found();
+            var longWords = words.Where(w => w.EnumerateRunes().Count() >= 3).ToList();
+            var shortWords = words.Where(w => w.EnumerateRunes().Count() < 3 && w.Length > 0).ToList();
+            if (longWords.Count == 0 && shortWords.Count == 0)
             {
-                cmd.Parameters.AddWithValue($"@p{i}", parameters[i]);
+                return found;
             }
 
-            using var reader = cmd.ExecuteReader();
-            while (reader.Read())
+            var conditions = new List<string>();
+            var parameters = new List<string>();
+            if (longWords.Count > 0)
             {
-                var rel = reader.GetString(0);
-                var usedUnix = reader.GetDouble(1);
-                var app = reader.IsDBNull(2) ? null : reader.GetString(2);
-                var abs = AbsolutePath(rel);
-                var full = Path.GetFullPath(abs);
-                if (onLineSet.Contains(full))
+                var matchQuery = string.Join(" ", longWords.Select(w => $"\"{w.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
+                conditions.Add("item_text MATCH @p0");
+                parameters.Add(matchQuery);
+            }
+            foreach (var sw in shortWords)
+            {
+                string pName = $"@p{parameters.Count}";
+                conditions.Add($"instr(item_text.text, {pName}) > 0");
+                parameters.Add(sw);
+            }
+
+            var sql = $"""
+                SELECT item.path, item.used, item.app
+                FROM item_text
+                JOIN item ON item.id = item_text.rowid
+                WHERE {string.Join(" AND ", conditions)}
+                ORDER BY item.used DESC, item.id DESC
+                """;
+
+            var onLineSet = new HashSet<string>(onLinePaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+            var stale = new List<string>();
+
+            using (var cmd = _db.CreateCommand())
+            {
+                cmd.CommandText = sql;
+                for (int i = 0; i < parameters.Count; i++)
                 {
-                    found.OnLine.Add(full);
+                    cmd.Parameters.AddWithValue($"@p{i}", parameters[i]);
                 }
-                else if (found.Basket.Count < limit)
+
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read())
                 {
-                    if (ExistsOnDisk(abs))
+                    var rel = reader.GetString(0);
+                    var usedUnix = reader.GetDouble(1);
+                    var app = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    var abs = AbsolutePath(rel);
+                    var full = Path.GetFullPath(abs);
+                    if (onLineSet.Contains(full))
                     {
-                        found.BasketTotal++;
-                        found.Basket.Add(abs);
-                        found.Entries.Add(new StoredEntry(abs, rel, usedUnix, app));
+                        found.OnLine.Add(full);
+                    }
+                    else if (found.Basket.Count < limit)
+                    {
+                        if (ExistsOnDisk(abs))
+                        {
+                            found.BasketTotal++;
+                            found.Basket.Add(abs);
+                            found.Entries.Add(new StoredEntry(abs, rel, usedUnix, app));
+                        }
+                        else
+                        {
+                            stale.Add(rel);
+                        }
                     }
                     else
                     {
-                        stale.Add(rel);
+                        found.BasketTotal++;
                     }
                 }
-                else
-                {
-                    found.BasketTotal++;
-                }
             }
-        }
 
-        foreach (var rel in stale)
-        {
-            RemoveByRelativePath(rel);
-        }
+            foreach (var rel in stale)
+            {
+                RemoveByRelativePath(rel);
+            }
 
-        return found;
+            return found;
+        }
     }
 
     public string? RelativePath(string fullPath)
@@ -691,5 +903,27 @@ public sealed class History : IDisposable
         using var cmd = _db.CreateCommand();
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
+    }
+
+    private void EnsureColumnExists(string table, string column, string columnType)
+    {
+        bool found = false;
+        using (var cmd = _db.CreateCommand())
+        {
+            cmd.CommandText = $"PRAGMA table_info({table})";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found)
+        {
+            Execute($"ALTER TABLE {table} ADD COLUMN {column} {columnType}");
+        }
     }
 }

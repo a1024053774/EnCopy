@@ -268,6 +268,7 @@ public static class PaperCardView
                     isHeld,
                     isDark,
                     line.ShowsSourceApp,
+                    line.IsImageTextMatch(note.FilePath),
                     stickerNumber,
                     extraSway,
                     hopOffset,
@@ -495,6 +496,11 @@ public static class PaperCardView
             rightPanel.Children.Add(stackBtn);
         }
 
+        if (row.MatchedImageText)
+        {
+            rightPanel.Children.Add(BuildImageTextBadge(margin: new Thickness(0, 0, 8, 0)));
+        }
+
         if (note.IsMovedAway)
         {
             rightPanel.Children.Add(new Border
@@ -678,6 +684,7 @@ public static class PaperCardView
         bool isHeld,
         bool isDark,
         bool showSourceApp,
+        bool isImageTextMatch,
         int? stickerNumber,
         double extraSway,
         double hopOffset,
@@ -707,7 +714,7 @@ public static class PaperCardView
             }
         };
 
-        var cardSurface = BuildPaperCardBody(note, theme, isSelected, isDark, showSourceApp);
+        var cardSurface = BuildPaperCardBody(note, theme, isSelected, isDark, showSourceApp, isImageTextMatch);
         cardSurface.Margin = new Thickness(8, 16, 8, 4);
         cardSurface.Cursor = note.IsMovedAway ? Cursors.Arrow : Cursors.Hand;
         cardSurface.Opacity = isHeld ? 0.28 : (note.IsMovedAway ? 0.56 : 1.0);
@@ -917,7 +924,7 @@ public static class PaperCardView
         return (host, rotateTx, hopTx, pegScaleTx);
     }
 
-    private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark, bool showSourceApp = true)
+    private static Grid BuildPaperCardBody(Note note, LineTheme theme, bool isSelected, bool isDark, bool showSourceApp = true, bool isImageTextMatch = false)
     {
         double w = ScreenPlacement.CardWidth;
         double h = ScreenPlacement.CardHeight;
@@ -977,7 +984,7 @@ public static class PaperCardView
                     break;
 
                 case PaperKind.Polaroid:
-                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp));
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp, isImageTextMatch));
                     break;
 
                 case PaperKind.Folder:
@@ -1003,7 +1010,7 @@ public static class PaperCardView
                     root.Children.Add(BuildTagContent(note, theme, showSourceApp));
                     break;
                 case PaperKind.Polaroid:
-                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp));
+                    root.Children.Add(BuildPolaroidContent(note, theme, w, h, showSourceApp, isImageTextMatch));
                     break;
                 case PaperKind.Folder:
                     root.Children.Add(BuildManilaContent(note, theme, showSourceApp));
@@ -1366,7 +1373,26 @@ public static class PaperCardView
         return grid;
     }
 
-    private static UIElement BuildPolaroidContent(Note note, LineTheme theme, double w, double h, bool showSourceApp)
+    private static Border BuildImageTextBadge(Thickness margin, double fontSize = 10.0) => new()
+    {
+        CornerRadius = new CornerRadius(8),
+        Background = ThemePalette.Brush(Color.FromRgb(0xFF, 0xDF, 0x5E)),
+        BorderBrush = ThemePalette.Brush(Color.FromArgb(0x88, 0xB8, 0x86, 0x0B)),
+        BorderThickness = new Thickness(0.8),
+        Padding = new Thickness(5.5, 1.5, 5.5, 1.5),
+        Margin = margin,
+        VerticalAlignment = VerticalAlignment.Center,
+        IsHitTestVisible = false,
+        Child = new TextBlock
+        {
+            Text = Localization.L("Text in image"),
+            FontSize = fontSize,
+            FontWeight = FontWeights.Bold,
+            Foreground = ThemePalette.Brush(Color.FromRgb(0x3A, 0x2A, 0x00))
+        }
+    };
+
+    private static UIElement BuildPolaroidContent(Note note, LineTheme theme, double w, double h, bool showSourceApp, bool isImageTextMatch = false)
     {
         var soft = ThemePalette.Brush(ThemePalette.CardSoft(theme, PaperKind.Polaroid));
         var outer = new Border
@@ -1384,6 +1410,7 @@ public static class PaperCardView
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        var wellGrid = new Grid();
         var well = new Border
         {
             Background = ThemePalette.Brush(note.Kind == ItemKind.Video || theme == LineTheme.Neon
@@ -1441,8 +1468,17 @@ public static class PaperCardView
             well.Child = badgeStack;
         }
 
-        Grid.SetRow(well, 0);
-        grid.Children.Add(well);
+        wellGrid.Children.Add(well);
+        if (isImageTextMatch)
+        {
+            var ocrBadge = BuildImageTextBadge(margin: new Thickness(0, 4, 4, 0), fontSize: 8.5);
+            ocrBadge.HorizontalAlignment = HorizontalAlignment.Right;
+            ocrBadge.VerticalAlignment = VerticalAlignment.Top;
+            wellGrid.Children.Add(ocrBadge);
+        }
+
+        Grid.SetRow(wellGrid, 0);
+        grid.Children.Add(wellGrid);
 
         var caption = BuildCardCaptionBar(note, soft, showSourceApp, centered: true, topMargin: 4);
         Grid.SetRow(caption, 1);

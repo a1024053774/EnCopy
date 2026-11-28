@@ -10,7 +10,7 @@ using System.Text.Json;
 
 namespace EnCopy;
 
-public sealed record BasketRow(Note Note, DateTime UsedLocal);
+public sealed record BasketRow(Note Note, DateTime UsedLocal, bool MatchedImageText = false);
 
 public sealed record BasketGroup(string Title, IReadOnlyList<BasketRow> Rows);
 
@@ -57,6 +57,7 @@ public sealed class Line : INotifyPropertyChanged
     private bool _showsSourceApp = true;
     private LineTheme _theme = LineTheme.Paper;
     private readonly HashSet<string> _heldPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _matchedImageTextPaths = new(StringComparer.OrdinalIgnoreCase);
 
     public LineTheme Theme
     {
@@ -74,6 +75,15 @@ public sealed class Line : INotifyPropertyChanged
     public string? BasketSubPickedFile => _basketSubPickedFile;
 
     public IReadOnlySet<string> HeldPaths => _heldPaths;
+
+    public bool IsImageTextMatch(string filePath) =>
+        !string.IsNullOrWhiteSpace(filePath) && _matchedImageTextPaths.Contains(Path.GetFullPath(filePath));
+
+    public void RefreshAfterIndexUpdate()
+    {
+        RefreshCurrentView();
+        OnPropertyChanged(nameof(ShownItems));
+    }
 
     public void SetHeld(string filePath, bool held)
     {
@@ -145,7 +155,10 @@ public sealed class Line : INotifyPropertyChanged
                     WasPinned: false,
                     OldScreenIndex: preIndices.GetValueOrDefault(full, 0),
                     IsPinChange: false,
-                    InSystemRecycleBin: true));
+                    InSystemRecycleBin: true,
+                    OcrWords: History.OcrWordsOf(item.FilePath),
+                    WasShrunk: History.IsShrunk(item.FilePath),
+                    OriginalTtl: History.GetTtl(item.FilePath)));
             }
 
             if (_heldPaths.Remove(full)) heldChanged = true;
@@ -761,7 +774,10 @@ public sealed class Line : INotifyPropertyChanged
                     WasPinned: wasPinned,
                     OldScreenIndex: wasOnLine ? preIndex : 0,
                     IsPinChange: false,
-                    InSystemRecycleBin: inSystemRecycleBin));
+                    InSystemRecycleBin: inSystemRecycleBin,
+                    OcrWords: History.OcrWordsOf(note.FilePath),
+                    WasShrunk: History.IsShrunk(note.FilePath),
+                    OriginalTtl: History.GetTtl(note.FilePath)));
             }
         }
         catch (IOException)
@@ -923,7 +939,28 @@ public sealed class Line : INotifyPropertyChanged
                 continue;
             }
 
-            History.Record(entry.OriginalPath, entry.PlainText, entry.OriginalUsedUtc, entry.AppName);
+            if (Clearing.IsTextFile(entry.OriginalPath))
+            {
+                History.Record(entry.OriginalPath, entry.PlainText, entry.OriginalUsedUtc, entry.AppName, entry.OriginalTtl);
+            }
+            else if (FileList.IsManifestPath(entry.OriginalPath))
+            {
+                History.RecordFileList(entry.OriginalPath, entry.AppName, entry.OriginalTtl, entry.OriginalUsedUtc);
+            }
+            else
+            {
+                byte[]? pngBytes = null;
+                if (string.Equals(Path.GetExtension(entry.OriginalPath), ".png", StringComparison.OrdinalIgnoreCase) &&
+                    !entry.WasShrunk && File.Exists(entry.OriginalPath))
+                {
+                    try { pngBytes = File.ReadAllBytes(entry.OriginalPath); } catch (IOException) { }
+                }
+                History.RecordImage(entry.OriginalPath, entry.OcrWords, pngBytes, entry.OriginalUsedUtc, entry.AppName, entry.OriginalTtl);
+                if (entry.WasShrunk)
+                {
+                    History.SetShrunk(entry.OriginalPath, true);
+                }
+            }
             var rel = History.StoredKeyFor(entry.OriginalPath);
             if (rel is null) continue;
             var loaded = Note.Load(entry.OriginalPath, rel, entry.OriginalUsedUtc.ToLocalTime(), entry.WasPinned, entry.AppName);
@@ -1425,7 +1462,8 @@ public sealed class Line : INotifyPropertyChanged
                 _ => KindFilter.Text
             };
             _basketKindCounts[filterBucket] = _basketKindCounts[filterBucket] + 1;
-            rows.Add(new BasketRow(note, usedDt));
+            bool matchedImgText = words.Count > 0 && note.Kind == ItemKind.Image && History.HasImageTextHit(note.FilePath, words);
+            rows.Add(new BasketRow(note, usedDt, matchedImgText));
         }
 
         BasketMatchCount = rows.Count;
@@ -1481,6 +1519,7 @@ public sealed class Line : INotifyPropertyChanged
             return;
         }
 
+        _matchedImageTextPaths.Clear();
         var words = SearchText.Words(_query);
         IReadOnlyList<Note> visible;
         if (words.Count == 0)
@@ -1510,6 +1549,13 @@ public sealed class Line : INotifyPropertyChanged
             var combined = new List<Note>(matchedOnLine.Count + matchedBasket.Count);
             combined.AddRange(matchedOnLine);
             combined.AddRange(matchedBasket);
+            foreach (var item in combined)
+            {
+                if (item.Kind == ItemKind.Image && History.HasImageTextHit(item.FilePath, words))
+                {
+                    _matchedImageTextPaths.Add(Path.GetFullPath(item.FilePath));
+                }
+            }
             visible = combined;
             MatchCount = combined.Count;
         }
@@ -1784,7 +1830,10 @@ public sealed class Line : INotifyPropertyChanged
         int OldScreenIndex,
         bool IsPinChange,
         IReadOnlyList<string>? DisplacedLoosePaths = null,
-        bool InSystemRecycleBin = false);
+        bool InSystemRecycleBin = false,
+        string? OcrWords = null,
+        bool WasShrunk = false,
+        double? OriginalTtl = null);
 }
 
 /// <summary>

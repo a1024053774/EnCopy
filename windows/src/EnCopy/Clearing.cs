@@ -80,7 +80,7 @@ public sealed class Clearing
 
                 metaByFull.TryGetValue(full, out var info);
                 bool isNoteText = IsTextFile(full);
-                var words = isNoteText ? null : history.WordsOf(full);
+                var words = isNoteText ? null : (history.OcrWordsOf(full) ?? history.WordsOf(full));
 
                 File.Move(full, target, overwrite: true);
                 history.Remove(full);
@@ -297,7 +297,8 @@ public static class Retention
         var expired = new List<string>();
         var shrunk = new List<string>();
         var missing = new List<string>();
-        var keptOriginals = new List<(string Path, double UsedUnix, long Size)>();
+        var keptOriginals = new List<(string Path, double UsedUnix, long Size, bool CanShrink)>();
+        bool hasOcrEngine = OcrLanguageResolver.DetectSystemStatus().HasAnyEngine;
 
         foreach (var item in history.KeptEntries())
         {
@@ -336,13 +337,15 @@ public static class Retention
                     missing.Add(full);
                     continue;
                 }
-                if (ageSeconds > OriginalImageDays * 86400.0)
+                // 尚未完成首次原图 OCR（ocr_text IS NULL）且系统有可用识字引擎时暂缓缩小，保证先存原图文字再缩图
+                bool canShrink = !hasOcrEngine || history.OcrWordsOf(full) is not null;
+                if (ageSeconds > OriginalImageDays * 86400.0 && canShrink)
                 {
                     shrunk.Add(full);
                 }
                 else
                 {
-                    keptOriginals.Add((full, item.UsedUnix, SafeFileLength(full)));
+                    keptOriginals.Add((full, item.UsedUnix, SafeFileLength(full), canShrink));
                 }
             }
             else if (!File.Exists(full) && !Directory.Exists(full))
@@ -359,6 +362,7 @@ public static class Retention
         foreach (var oldest in keptOriginals.OrderBy(o => o.UsedUnix))
         {
             if (totalBytes <= capBytes) break;
+            if (!oldest.CanShrink) continue;
             shrunk.Add(oldest.Path);
             totalBytes -= oldest.Size;
         }

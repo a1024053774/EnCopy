@@ -17,6 +17,7 @@ public partial class App : Application
     private SettingsStore? _settingsStore;
     private AppSettings _settings = new();
     private History? _history;
+    private SearchIndex? _searchIndex;
     private Line? _line;
     private Win32ClipboardBackend? _clipboardBackend;
     private ClipboardWatcher? _clipboardWatcher;
@@ -75,6 +76,13 @@ public partial class App : Application
         _line.SetVisibleCapacity(ScreenPlacement.ComputeVisibleCapacity(initialStrip.Width));
 
         _line.ClearExpired();
+
+        _searchIndex = new SearchIndex(
+            _history,
+            onImageIndexed: _ => Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() => _line?.RefreshAfterIndexUpdate())));
+        _searchIndex.ScanUnindexedImages();
         RunRetentionIfDue();
 
         _heldManager = new HeldWindowManager();
@@ -201,6 +209,7 @@ public partial class App : Application
     private void HandleNewCopiedItem(string path)
     {
         if (_line is null) return;
+        _searchIndex?.Enqueue(path);
         _line.AddNew(path);
         if (_panel is { IsSummoned: true })
         {
@@ -226,6 +235,7 @@ public partial class App : Application
     private void HandleRepeatedCopiedItem(string path, DateTime stampUtc)
     {
         if (_line is null) return;
+        _searchIndex?.Enqueue(path);
         _line.Use(path, stampUtc);
         if (_panel is not { IsSummoned: true })
         {
@@ -386,7 +396,8 @@ public partial class App : Application
                 OpenCleanup: OpenCleanupWindow,
                 OpenScreenshotsFolder: () => OpenFolderInExplorer(DataFolder.ScreenshotsFolder),
                 OpenDataFolder: () => OpenFolderInExplorer(DataFolder.Root)),
-            frontApp: frontApp);
+            frontApp: frontApp,
+            ocrStatus: _searchIndex?.LanguageStatus);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -475,6 +486,7 @@ public partial class App : Application
         _hotKey?.Dispose();
         _clipboardWatcher?.Dispose();
         _clipboardBackend?.Dispose();
+        _searchIndex?.Dispose();
         _trayIcon?.Dispose();
         _history?.Dispose();
         if (_instanceMutex is not null)

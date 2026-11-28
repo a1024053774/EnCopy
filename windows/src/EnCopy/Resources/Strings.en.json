@@ -157,5 +157,8 @@
   "EnCopy keeps what you copy": "EnCopy keeps what you copy",
   "Copied text, links, and Explorer file paths hang on the line and stay in your local folder:": "Copied text, links, and Explorer file paths hang on the line and stay in your local folder:",
   "Verification codes clear after 10 minutes; password managers are skipped by default.": "Verification codes clear after 10 minutes; password managers are skipped by default.",
-  "OK": "OK"
+  "OK": "OK",
+  "Text in image": "Text in image",
+  "Chinese text recognition pack is not installed": "Chinese text recognition pack is not installed",
+  "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too.": "Install Simplified Chinese (Optical character recognition) in Windows Settings → Time & language → Language & region so Chinese words in images can be found too."
 }
